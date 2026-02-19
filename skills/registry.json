@@ -1,0 +1,86 @@
+[
+  {
+    "name": "pdf",
+    "description": "Read, create, merge, split, watermark, encrypt, and OCR PDF files",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "skills/pdf"
+  },
+  {
+    "name": "docx",
+    "description": "Create, read, edit, and format Word documents with tables, headings, and images",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "skills/docx"
+  },
+  {
+    "name": "xlsx",
+    "description": "Create, read, edit, and format Excel spreadsheets with formulas, charts, and data cleaning",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "skills/xlsx"
+  },
+  {
+    "name": "pptx",
+    "description": "Create, read, edit, and format PowerPoint presentations and slide decks",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "skills/pptx"
+  },
+  {
+    "name": "skill-creator",
+    "description": "Create and update reusable skills that extend the agent with specialized knowledge and workflows",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "skills/skill-creator"
+  },
+  {
+    "name": "competitor-analysis",
+    "description": "Research and compare competitor products, features, and positioning",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "skills/competitor-analysis"
+  },
+  {
+    "name": "paid-ads",
+    "description": "Create, optimize, and scale paid advertising campaigns across Google, Meta, LinkedIn, and more",
+    "author": "Corey Haines",
+    "version": "1.0.0",
+    "path": "skills/paid-ads"
+  },
+  {
+    "name": "email-sequence",
+    "description": "Design email sequences, drip campaigns, and automated lifecycle email programs",
+    "author": "Corey Haines",
+    "version": "1.0.0",
+    "path": "skills/email-sequence"
+  },
+  {
+    "name": "copywriting",
+    "description": "Write and improve marketing copy for homepages, landing pages, pricing pages, and more",
+    "author": "Corey Haines",
+    "version": "1.0.0",
+    "path": "skills/copywriting"
+  },
+  {
+    "name": "social-content",
+    "description": "Create and optimize social media content for LinkedIn, Twitter/X, Instagram, TikTok, and more",
+    "author": "Corey Haines",
+    "version": "1.0.0",
+    "path": "skills/social-content"
+  },
+  {
+    "name": "product-marketing-context",
+    "description": "Create foundational product positioning and messaging context that other marketing skills reference",
+    "author": "Corey Haines",
+    "version": "1.0.0",
+    "path": "skills/product-marketing-context"
+  },
+  {
+    "name": "apollo-io-search",
+    "description": "Search Apollo.io database for prospects, organizations, contacts, and sequences using their REST API",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "skills/apollo-io-search"
+  }
+]

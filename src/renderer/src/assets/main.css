@@ -1,0 +1,374 @@
+/* Outliner styles */
+.outliner-list {
+  list-style: none;
+  padding-left: 1.5rem;
+  margin: 0;
+}
+
+.outliner-ordered-list {
+  list-style: none;
+  padding-left: 1.5rem;
+  margin: 0;
+  counter-reset: outliner-counter;
+}
+
+.outliner-item {
+  position: relative;
+  padding: 2px 0;
+}
+
+.ProseMirror .outliner-item > p {
+  margin: 0;
+}
+
+/* Bullet marker for bullet lists */
+.outliner-list > .outliner-item::before {
+  content: '\2022';
+  position: absolute;
+  left: -1rem;
+  top: 2px;
+  line-height: inherit;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+/* Number marker for ordered lists */
+.outliner-ordered-list > .outliner-item {
+  counter-increment: outliner-counter;
+}
+
+.outliner-ordered-list > .outliner-item::before {
+  content: counter(outliner-counter) '.';
+  position: absolute;
+  left: -1.5rem;
+  top: 2px;
+  line-height: inherit;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 0.2s;
+  font-variant-numeric: tabular-nums;
+}
+
+.outliner-item:hover::before {
+  color: var(--foreground);
+}
+
+/* Collapsed state overrides both bullet and number markers */
+.outliner-list > .outliner-item[data-collapsed='true']::before,
+.outliner-ordered-list > .outliner-item[data-collapsed='true']::before {
+  content: '\25B8';
+  color: var(--foreground);
+}
+
+.outliner-item[data-collapsed='true'] > .outliner-list,
+.outliner-item[data-collapsed='true'] > .outliner-ordered-list {
+  display: none;
+}
+
+/* Editor base styles */
+.ProseMirror {
+  outline: none;
+  padding: 0.25rem 4rem 3rem;
+  min-height: 100%;
+  max-width: 56rem;
+  margin-left: auto;
+  margin-right: auto;
+  font-size: var(--editor-font-size, 0.875rem);
+  font-family: var(--editor-body-font, 'Inter', sans-serif);
+  line-height: 1.7;
+  color: var(--foreground);
+}
+
+.ProseMirror p {
+  margin: 0.75em 0;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4 {
+  font-family: var(--editor-heading-font, 'Inter', sans-serif);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.ProseMirror h1 {
+  font-size: 2.25em;
+  margin-top: 2em;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h2 {
+  font-size: 1.75em;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+
+.ProseMirror h3 {
+  font-size: 1.375em;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h4 {
+  font-size: 1.125em;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror code {
+  background: var(--muted);
+  color: var(--foreground);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: var(--code-font-size, 0.875em);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.ProseMirror pre {
+  background: var(--muted);
+  color: var(--foreground);
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 1.5em 0;
+  border: 1px solid var(--border);
+}
+
+.ProseMirror pre code {
+  background: none;
+  padding: 0;
+  font-size: var(--code-font-size, 0.875em);
+  color: inherit;
+}
+
+.ProseMirror blockquote {
+  border-left: 3px solid var(--primary);
+  padding-left: 1.25rem;
+  color: var(--muted-foreground);
+  font-style: italic;
+  margin: 1.5em 0;
+}
+
+/* Tables */
+.ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 2em 0;
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  min-width: 100px;
+  vertical-align: top;
+  position: relative;
+}
+
+.ProseMirror th {
+  background: var(--muted);
+  font-weight: 600;
+  text-align: left;
+}
+
+.ProseMirror td > p,
+.ProseMirror th > p {
+  margin: 0;
+}
+
+.ProseMirror .selectedCell {
+  background: var(--accent);
+}
+
+/* Table column resize handle */
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background: var(--primary);
+  pointer-events: none;
+}
+
+.ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
+
+/* Table wrapper for overflow */
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
+  margin: 2em 0;
+}
+
+.ProseMirror .tableWrapper table {
+  margin: 0;
+}
+
+/* Improved selected cell highlighting */
+.ProseMirror .selectedCell::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--primary);
+  opacity: 0.1;
+  pointer-events: none;
+}
+
+/* Table cell dropdown menu trigger */
+.table-cell-menu-trigger {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.table-cell-menu-trigger:has([data-state='open']) {
+  opacity: 1;
+}
+
+.ProseMirror th:hover > .table-cell-menu-trigger,
+.ProseMirror td:hover > .table-cell-menu-trigger,
+.ProseMirror th:focus-within > .table-cell-menu-trigger,
+.ProseMirror td:focus-within > .table-cell-menu-trigger {
+  opacity: 1;
+}
+
+.table-cell-menu-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    background 150ms ease;
+}
+
+.table-cell-menu-button:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+/* Images */
+.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 1.5em 0;
+  cursor: default;
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.1);
+}
+
+.ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Placeholder */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--muted-foreground);
+  opacity: 0.5;
+  pointer-events: none;
+  height: 0;
+}
+
+/* Chat input: reset global ProseMirror styles */
+.chat-input .ProseMirror {
+  padding: 0.5rem 0;
+  min-height: auto;
+  max-width: none;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.chat-input .ProseMirror p {
+  margin: 0;
+}
+
+/* Search and replace highlights */
+.ProseMirror .search-match {
+  background: oklch(0.88 0.15 85);
+  border-radius: 2px;
+}
+
+.ProseMirror .search-match-current {
+  background: oklch(0.75 0.17 55);
+  outline: 2px solid oklch(0.75 0.17 55);
+  border-radius: 2px;
+}
+
+.dark .ProseMirror .search-match {
+  background: oklch(0.55 0.12 85);
+}
+
+.dark .ProseMirror .search-match-current {
+  background: oklch(0.6 0.15 55);
+  outline: 2px solid oklch(0.6 0.15 55);
+}
+
+/* Change highlight — green left border that fades out */
+@keyframes change-highlight-fade {
+  0% {
+    border-left-color: oklch(0.7 0.18 145);
+    background-color: oklch(0.7 0.18 145 / 0.08);
+  }
+  70% {
+    border-left-color: oklch(0.7 0.18 145);
+    background-color: oklch(0.7 0.18 145 / 0.08);
+  }
+  100% {
+    border-left-color: transparent;
+    background-color: transparent;
+  }
+}
+
+.ProseMirror .change-highlight {
+  border-left: 3px solid oklch(0.7 0.18 145);
+  background-color: oklch(0.7 0.18 145 / 0.08);
+  animation: change-highlight-fade 2s ease-out forwards;
+  border-radius: 2px;
+  margin-left: -3px;
+  transition: none;
+}
+
+.dark .ProseMirror .change-highlight {
+  border-left-color: oklch(0.65 0.16 150);
+  background-color: oklch(0.65 0.16 150 / 0.1);
+  animation-name: change-highlight-fade-dark;
+}
+
+@keyframes change-highlight-fade-dark {
+  0% {
+    border-left-color: oklch(0.65 0.16 150);
+    background-color: oklch(0.65 0.16 150 / 0.1);
+  }
+  70% {
+    border-left-color: oklch(0.65 0.16 150);
+    background-color: oklch(0.65 0.16 150 / 0.1);
+  }
+  100% {
+    border-left-color: transparent;
+    background-color: transparent;
+  }
+}

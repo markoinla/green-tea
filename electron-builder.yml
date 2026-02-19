@@ -1,0 +1,62 @@
+appId: la.marko.greentea
+productName: Green Tea
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!.wrangler'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!**/node_modules/**/*.d.ts'
+  - '!**/node_modules/**/*.d.mts'
+  - '!**/node_modules/**/*.d.cts'
+  - '!**/node_modules/**/*.map'
+  - '!**/node_modules/**/*.md'
+  - '!**/node_modules/**/LICENSE*'
+  - '!**/node_modules/**/.github'
+  - '!**/node_modules/**/docs'
+  - '!**/node_modules/**/test'
+  - '!**/node_modules/**/tests'
+  - '!**/node_modules/**/@types'
+extraResources:
+  - from: resources/default-skills
+    to: default-skills
+  - from: resources/python
+    to: python
+asarUnpack:
+  - resources/**
+win:
+  executableName: greentea
+nsis:
+  artifactName: ${name}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+mac:
+  artifactName: Green-Tea-${version}-${arch}-${os}.${ext}
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    - NSCameraUsageDescription: Application requests access to the device's camera.
+    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
+    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
+    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+  notarize: true
+dmg:
+  artifactName: greentea.${ext}
+linux:
+  target:
+    - AppImage
+    - snap
+    - deb
+  maintainer: Marko Stankovic
+  category: Utility
+appImage:
+  artifactName: ${name}-${version}.${ext}
+npmRebuild: false
+publish:
+  provider: github
+  owner: markoinla
+  repo: green-tea

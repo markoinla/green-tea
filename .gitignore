@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist/**
+out/
+
+# Environment
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Caches
+.eslintcache
+.cache/
+*.tsbuildinfo
+
+# Wrangler
+.wrangler/
+
+# Electron
+release/
+*.dmg
+*.exe
+*.AppImage
+*.zip
+
+# Code signing
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Lock files (keep package-lock.json only)
+bun.lock
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
+# Database (local dev)
+*.sqlite
+*.sqlite3
+*.db
+
+# Internal docs
+docs/plans/
+PLAN.md
+
+# Bundled portable Python (downloaded at build time)
+resources/python/
+
+# Codex local state
+.codex/

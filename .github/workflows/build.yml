@@ -1,0 +1,150 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        type: choice
+        options:
+          - all
+          - mac
+          - windows
+        default: all
+      publish:
+        description: 'Publish to GitHub Releases'
+        type: boolean
+        default: true
+
+jobs:
+  build-mac:
+    if: inputs.platform == 'all' || inputs.platform == 'mac'
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Cache Electron and electron-builder
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-mac-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-mac-
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build app
+        run: npm run build
+
+      - name: Build macOS installer
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --mac --arm64 --publish never
+
+      - name: Upload to GitHub Release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          gh release create "$TAG" --title "v${VERSION}" --notes "Green Tea v${VERSION}" -R markoinla/green-tea 2>/dev/null || true
+          gh release upload "$TAG" dist/greentea.dmg dist/*.zip dist/*.zip.blockmap dist/latest-mac.yml --clobber -R markoinla/green-tea
+
+      - name: Upload to legacy releases repo (transitional)
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          gh release create "$TAG" --title "v${VERSION}" --notes "Green Tea v${VERSION}" -R markoinla/green-tea-releases 2>/dev/null || true
+          gh release upload "$TAG" dist/greentea.dmg dist/*.zip dist/*.zip.blockmap dist/latest-mac.yml --clobber -R markoinla/green-tea-releases
+
+      - name: Upload artifact
+        if: ${{ !inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: greentea-mac
+          path: dist/*.dmg
+
+  build-windows:
+    if: inputs.platform == 'all' || inputs.platform == 'windows'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Cache Electron and electron-builder
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-win-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-win-
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build app
+        run: npm run build
+
+      - name: Build Windows installer
+        run: npx electron-builder --win --publish never
+
+      - name: Upload to GitHub Release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          gh release create "$TAG" --title "v${VERSION}" --notes "Green Tea v${VERSION}" -R markoinla/green-tea 2>/dev/null || true
+          gh release upload "$TAG" dist/greentea-setup.exe dist/latest.yml --clobber -R markoinla/green-tea
+
+      - name: Upload to legacy releases repo (transitional)
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          gh release create "$TAG" --title "v${VERSION}" --notes "Green Tea v${VERSION}" -R markoinla/green-tea-releases 2>/dev/null || true
+          gh release upload "$TAG" dist/greentea-setup.exe dist/latest.yml --clobber -R markoinla/green-tea-releases
+
+      - name: Upload artifact
+        if: ${{ !inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: greentea-windows
+          path: dist/*.exe
