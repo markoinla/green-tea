@@ -1,6 +1,6 @@
 {
   "name": "greentea",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Green Tea - knowledge work, caffeinated.",
   "main": "./out/main/index.js",
   "author": "Marko Stankovic <m@marko.la>",
