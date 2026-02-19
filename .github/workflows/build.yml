@@ -46,6 +46,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download bundled Python
+        run: npm run download-python
+
       - name: Build app
         run: npm run build
 
@@ -113,6 +116,9 @@ jobs:
         run: npm ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download bundled Python
+        run: npm run download-python
 
       - name: Build app
         run: npm run build
