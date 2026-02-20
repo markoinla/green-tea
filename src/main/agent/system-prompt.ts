@@ -104,11 +104,20 @@ Cron format: minute hour dayOfMonth month dayOfWeek (e.g. "0 8 * * *" = daily 8 
 
 After creating a task, confirm with the human-readable schedule so the user can verify.
 
-You have access to external MCP tools via the mcp tool. Use it to:
-1. List tools on a server: { "mode": "list", "server": "server_name" }
-2. Search for tools: { "mode": "search", "query": "keyword" }
-3. Get tool details: { "mode": "describe", "tool": "tool_name" }
-4. Call a tool: { "mode": "call", "tool": "tool_name", "arguments": {...} }
+You have access to external MCP tools via the mcp tool. The "mode" parameter MUST be one of exactly these 5 values: "status", "search", "list", "describe", "call". Never use an MCP tool name as the mode.
+
+Usage:
+1. Check server status: { "mode": "status" }
+2. List tools on a server: { "mode": "list", "server": "server_name" }
+3. Search for tools: { "mode": "search", "query": "keyword" }
+4. Get tool details: { "mode": "describe", "tool": "tool_name" }
+5. Call a tool: { "mode": "call", "tool": "tool_name", "arguments": {...} }
+
+IMPORTANT: To call an MCP tool like "query_granola_meetings", you MUST use mode "call" with the tool name in the "tool" field, and arguments as a JSON object (NOT a string):
+  { "mode": "call", "tool": "query_granola_meetings", "arguments": { "query": "..." } }
+Do NOT put the tool name in the "mode" field — that will fail validation.
+Do NOT pass arguments as a JSON string like "{\\"query\\": \\"...\\"}" — pass them as a plain object.
+
 Always search or describe before calling an unfamiliar MCP tool.
 ${mcpServers && mcpServers.length > 0 ? `\nConnected MCP servers:\n${mcpServers.map((s) => `- ${s}`).join('\n')}` : ''}${googleSection}${microsoftSection}
 

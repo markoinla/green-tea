@@ -20,7 +20,10 @@ export function createMcpProxyTool(): ToolDefinition {
       server: Type.Optional(Type.String({ description: 'Server name (for list mode)' })),
       tool: Type.Optional(Type.String({ description: 'Tool name (for describe/call mode)' })),
       arguments: Type.Optional(
-        Type.Unknown({ description: 'Tool arguments as JSON object (for call mode)' })
+        Type.Unknown({
+          description:
+            'Tool arguments as a JSON object (for call mode). Pass as an object like {"query": "..."}, NOT as a JSON string.'
+        })
       )
     }),
     async execute(_toolCallId, params) {
@@ -162,6 +165,19 @@ export function createMcpProxyTool(): ToolDefinition {
                 details: undefined
               }
             }
+            // Parse arguments — LLMs sometimes send a JSON string instead of an object
+            let args: Record<string, unknown> = {}
+            if (p.arguments) {
+              if (typeof p.arguments === 'string') {
+                try {
+                  args = JSON.parse(p.arguments)
+                } catch {
+                  args = { query: p.arguments }
+                }
+              } else {
+                args = p.arguments as Record<string, unknown>
+              }
+            }
             const serverName = manager.findToolServer(p.tool!)
             if (!serverName) {
               // Try loading all tools first
@@ -179,18 +195,10 @@ export function createMcpProxyTool(): ToolDefinition {
                   details: undefined
                 }
               }
-              const result = await manager.callTool(
-                retryServer,
-                p.tool!,
-                (p.arguments as Record<string, unknown>) || {}
-              )
+              const result = await manager.callTool(retryServer, p.tool!, args)
               return { ...result, details: undefined }
             }
-            const result = await manager.callTool(
-              serverName,
-              p.tool!,
-              (p.arguments as Record<string, unknown>) || {}
-            )
+            const result = await manager.callTool(serverName, p.tool!, args)
             return { ...result, details: undefined }
           }
 
