@@ -46,6 +46,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Cache bundled Python
+        uses: actions/cache@v4
+        with:
+          path: resources/python
+          key: python-mac-${{ hashFiles('scripts/download-python.mjs') }}
+
       - name: Download bundled Python
         run: npm run download-python
 
@@ -116,6 +122,12 @@ jobs:
         run: npm ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache bundled Python
+        uses: actions/cache@v4
+        with:
+          path: resources/python
+          key: python-win-${{ hashFiles('scripts/download-python.mjs') }}
 
       - name: Download bundled Python
         run: npm run download-python
