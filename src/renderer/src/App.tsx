@@ -1,24 +1,14 @@
-import {
-  useState,
-  useCallback,
-  useEffect,
-  useRef,
-  useMemo,
-  Component,
-  type ReactNode,
-  type ErrorInfo
-} from 'react'
-import type { JSONContent } from '@tiptap/react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Toaster } from 'sonner'
 import { AppLayout } from './components/layout/AppLayout'
-import { OutlinerEditor } from './components/editor/OutlinerEditor'
-import { FileConflictDialog } from './components/editor/FileConflictDialog'
-import { useDocument } from './hooks/useDocument'
-import { useAutosave } from './hooks/useAutosave'
+import { TabbedEditorHost } from './components/editor/TabbedEditorHost'
+import { useOpenTabs } from './hooks/useOpenTabs'
+import { flushAll } from './hooks/useAutosave'
 import { useWorkspaces } from './hooks/useWorkspaces'
 import { useTaskNotifications } from './hooks/useTaskNotifications'
 import { usePythonCheck } from './hooks/usePythonCheck'
 import { getFontStack } from './components/settings/constants'
+import type { DocumentVersion } from '../../main/database/types'
 
 const THEME_CSS_KEYS = [
   'background',
@@ -121,90 +111,30 @@ function applyThemeOverrides(theme: ThemeData | null, mode: 'light' | 'dark'): v
   }
 }
 
-class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  state = { error: null as Error | null }
-
-  static getDerivedStateFromError(error: Error) {
-    return { error }
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, info)
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="p-4 bg-red-900 text-white m-4 rounded overflow-auto max-h-[50vh]">
-          <h2 className="font-bold mb-2">Editor crashed:</h2>
-          <pre className="text-xs whitespace-pre-wrap">{this.state.error.message}</pre>
-          <pre className="text-xs whitespace-pre-wrap mt-2 opacity-70">
-            {this.state.error.stack}
-          </pre>
-        </div>
-      )
-    }
-    return this.props.children
-  }
-}
-
-function DocumentEditor({
-  documentId,
-  onQuoteSelection
-}: {
-  documentId: string
-  onQuoteSelection?: (text: string) => void
-}) {
-  const { document, loading, externalContentVersion, externalContent, conflict, resolveConflict } =
-    useDocument(documentId)
-  const save = useAutosave(documentId)
-
-  const initialContent = useMemo(() => {
-    if (!document?.content) return undefined
-    try {
-      return JSON.parse(document.content) as JSONContent
-    } catch {
-      return undefined
-    }
-  }, [document?.content])
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center flex-1">
-        <p className="text-muted-foreground text-sm">Loading...</p>
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <OutlinerEditor
-        key={documentId}
-        content={initialContent}
-        onUpdate={save}
-        onQuoteSelection={onQuoteSelection}
-        externalContent={externalContent}
-        externalContentVersion={externalContentVersion}
-      />
-      <FileConflictDialog
-        open={!!conflict}
-        onReload={() => resolveConflict('reload')}
-        onKeepMine={() => resolveConflict('keepMine')}
-      />
-    </>
-  )
-}
-
 export default function App() {
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
   const [selectionContext, setSelectionContext] = useState<string | null>(null)
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false)
+  const [previewVersion, setPreviewVersion] = useState<DocumentVersion | null>(null)
   const autoOpenedWorkspaceRef = useRef<string | null>(null)
+  const pendingOpenRef = useRef<{ docId: string; workspaceId: string | null } | null>(null)
   const { workspaces } = useWorkspaces()
+  const tabs = useOpenTabs(selectedWorkspaceId)
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+  // Live workspace id so async callbacks (documents.list, hydration) can detect a
+  // workspace switch that happened while they were in flight and bail out, rather
+  // than acting on the new workspace's tabs with the old workspace's data.
+  const selectedWorkspaceIdRef = useRef(selectedWorkspaceId)
+  selectedWorkspaceIdRef.current = selectedWorkspaceId
   useTaskNotifications()
   usePythonCheck()
 
   const clearSelection = useCallback(() => setSelectionContext(null), [])
+
+  // Preview is only active when it belongs to the currently active tab.
+  const activePreview =
+    previewVersion && previewVersion.document_id === tabs.activeDocId ? previewVersion : null
 
   // Restore last workspace or fall back to first
   useEffect(() => {
@@ -216,19 +146,106 @@ export default function App() {
     }
   }, [workspaces, selectedWorkspaceId])
 
-  // Auto-open first document when entering a workspace.
-  // Do not re-open after the user manually closes the document.
+  // Auto-open the first document when entering a workspace — but only AFTER tab
+  // state has hydrated and resolved to empty (finding #9). Never re-open after the
+  // user manually closes everything in this workspace.
   useEffect(() => {
-    if (!selectedWorkspaceId || selectedDocId) return
+    if (!selectedWorkspaceId || !tabs.hydrated) return
+    if (tabs.openDocIds.length > 0) {
+      autoOpenedWorkspaceRef.current = selectedWorkspaceId
+      return
+    }
     if (autoOpenedWorkspaceRef.current === selectedWorkspaceId) return
-
+    if (pendingOpenRef.current?.workspaceId === selectedWorkspaceId) return
     autoOpenedWorkspaceRef.current = selectedWorkspaceId
-    window.api.documents.list(selectedWorkspaceId).then((docs) => {
-      if (docs.length > 0) {
-        setSelectedDocId(docs[0].id)
+    const wsId = selectedWorkspaceId
+    window.api.documents.list(wsId).then((docs) => {
+      // Bail if the workspace switched while the list was in flight.
+      if (selectedWorkspaceIdRef.current !== wsId) return
+      if (docs.length > 0) tabsRef.current.openTab(docs[0].id)
+    })
+  }, [selectedWorkspaceId, tabs.hydrated, tabs.openDocIds.length])
+
+  // A queued open (e.g. the command palette switching workspaces) waits for the
+  // target workspace to hydrate before opening, so the hydrate doesn't clobber it
+  // (finding #14). Only open if still in the workspace where it was queued.
+  useEffect(() => {
+    const pending = pendingOpenRef.current
+    if (tabs.hydrated && pending && pending.workspaceId === selectedWorkspaceId) {
+      pendingOpenRef.current = null
+      tabsRef.current.openTab(pending.docId)
+    }
+  }, [tabs.hydrated, selectedWorkspaceId])
+
+  // Close tabs whose docs no longer exist (delete / move-out-of-workspace). The
+  // bare `documents:changed` event carries no payload, so reconcile by re-listing
+  // (finding #3). Skip when the list reads empty — a transient/suspicious read must
+  // not nuke open tabs (finding #12).
+  useEffect(() => {
+    if (!selectedWorkspaceId) return
+    return window.api.onDocumentsChanged(() => {
+      const wsId = selectedWorkspaceId
+      window.api.documents.list(wsId).then((docs) => {
+        // Bail if the workspace switched while the list was in flight, else we'd
+        // reconcile the new workspace's tabs against the old workspace's doc set.
+        if (selectedWorkspaceIdRef.current !== wsId) return
+        if (docs.length === 0) return
+        tabsRef.current.reconcileDeletions(new Set(docs.map((d) => d.id)))
+      })
+    })
+  }, [selectedWorkspaceId])
+
+  // Tab navigation accelerators ride the application menu (finding #1).
+  useEffect(() => {
+    return window.api.menu.onTabCommand((cmd) => {
+      const t = tabsRef.current
+      switch (cmd.type) {
+        case 'close':
+          if (t.openDocIds.length === 0) {
+            window.close() // zero tabs → real window-close
+          } else if (t.activeDocId) {
+            t.closeTab(t.activeDocId)
+          }
+          break
+        case 'next':
+          t.cycle(1)
+          break
+        case 'prev':
+          t.cycle(-1)
+          break
+        case 'goto':
+          // Cmd/Ctrl-9 (index 8) → last tab; Cmd/Ctrl-1…8 → that visual index.
+          t.activateByIndex(cmd.index === 8 ? t.openDocIds.length - 1 : cmd.index)
+          break
       }
     })
-  }, [selectedWorkspaceId, selectedDocId])
+  }, [])
+
+  // Quit flush. The main process intercepts `before-quit`, asks us to flush, and
+  // waits for `flushDone` — that handshake is the GUARANTEE that pending autosaves
+  // and tab state are written before exit (findings #5, #11, #17).
+  useEffect(() => {
+    return window.api.app.onFlushBeforeQuit(async () => {
+      try {
+        await flushAll()
+        await tabsRef.current.flushNow()
+      } finally {
+        window.api.app.flushDone()
+      }
+    })
+  }, [])
+
+  // Best-effort flush on plain window unload / reload (e.g. closing the window on
+  // macOS without quitting). beforeunload can't await, so this stays best-effort;
+  // the before-quit handshake above is the real guarantee.
+  useEffect(() => {
+    const handler = (): void => {
+      void flushAll()
+      void tabsRef.current.flushNow()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [])
 
   const [appTheme, setAppTheme] = useState<'light' | 'dark'>('light')
 
@@ -261,26 +278,65 @@ export default function App() {
     })
   }, [appTheme])
 
-  const handleSelectWorkspace = (id: string) => {
+  const handleSelectWorkspace = useCallback((id: string) => {
     setSelectedWorkspaceId(id)
-    setSelectedDocId(null) // Reset doc selection on workspace switch
     window.api.settings.set('lastOpenedWorkspaceId', id)
-  }
+  }, [])
+
+  // Sidebar / palette open. Cmd/Ctrl-click → new tab. If the target workspace is
+  // still hydrating (cross-workspace palette open), queue the open.
+  const handleSelectDoc = useCallback((id: string, opts?: { newTab?: boolean }) => {
+    const t = tabsRef.current
+    if (!t.hydrated) {
+      // Tag with the workspace it was requested in so a later hydration of a
+      // DIFFERENT workspace doesn't open it into the wrong strip.
+      pendingOpenRef.current = { docId: id, workspaceId: selectedWorkspaceIdRef.current }
+      return
+    }
+    t.openTab(id, { newTab: opts?.newTab })
+  }, [])
+
+  const handleVersionHistoryOpenChange = useCallback((open: boolean) => {
+    setVersionHistoryOpen(open)
+    if (!open) setPreviewVersion(null)
+  }, [])
+
+  const handleRestorePreview = useCallback(async () => {
+    if (!activePreview) return
+    await window.api.documentVersions.restore(activePreview.id)
+    setPreviewVersion(null)
+  }, [activePreview])
 
   return (
     <>
       <AppLayout
-        selectedDocId={selectedDocId}
-        onSelectDoc={setSelectedDocId}
         selectedWorkspaceId={selectedWorkspaceId}
         onSelectWorkspace={handleSelectWorkspace}
+        onSelectDoc={handleSelectDoc}
+        openDocIds={tabs.openDocIds}
+        activeDocId={tabs.activeDocId}
+        onActivateTab={tabs.activateTab}
+        onCloseTab={tabs.closeTab}
+        onCloseOthers={tabs.closeOthers}
+        onCloseToRight={tabs.closeToRight}
+        onCloseAll={tabs.closeAll}
+        onReorderTab={tabs.reorderTab}
+        versionHistoryOpen={versionHistoryOpen}
+        onVersionHistoryOpenChange={handleVersionHistoryOpenChange}
+        onPreviewVersion={setPreviewVersion}
+        activePreviewId={activePreview?.id ?? null}
         selectionContext={selectionContext}
         onClearSelection={clearSelection}
       >
-        {selectedDocId ? (
-          <ErrorBoundary key={selectedDocId}>
-            <DocumentEditor documentId={selectedDocId} onQuoteSelection={setSelectionContext} />
-          </ErrorBoundary>
+        {tabs.openDocIds.length > 0 ? (
+          <TabbedEditorHost
+            openDocIds={tabs.openDocIds}
+            activeDocId={tabs.activeDocId}
+            onQuoteSelection={setSelectionContext}
+            previewVersion={activePreview}
+            onExitPreview={() => setPreviewVersion(null)}
+            onRestorePreview={handleRestorePreview}
+          />
         ) : (
           <div className="flex flex-col items-center justify-center flex-1 gap-3">
             <div className="h-10 w-10 rounded-full bg-accent flex items-center justify-center">

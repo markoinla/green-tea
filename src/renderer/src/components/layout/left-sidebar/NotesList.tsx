@@ -24,7 +24,7 @@ interface NotesListProps {
   selectedDocId: string | null
   dragOverFolderId: string | null
   dragOverRoot: boolean
-  onSelectDoc: (id: string) => void
+  onSelectDoc: (id: string, opts?: { newTab?: boolean }) => void
   onNewDocument: () => void
   onNewFolder: () => void
   onRenameDoc: (id: string, newTitle: string) => void
@@ -131,7 +131,7 @@ export function NotesList({
                         id={doc.id}
                         title={doc.title}
                         isSelected={selectedDocId === doc.id}
-                        onSelect={() => onSelectDoc(doc.id)}
+                        onSelect={(e) => onSelectDoc(doc.id, { newTab: e.metaKey || e.ctrlKey })}
                         onRename={(newTitle) => onRenameDoc(doc.id, newTitle)}
                         onDuplicate={() => onDuplicateDoc(doc.id)}
                         onDelete={() => onDeleteDoc(doc.id)}

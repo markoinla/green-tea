@@ -19,7 +19,7 @@ interface DocumentMenuItemProps {
   id: string
   title: string
   isSelected: boolean
-  onSelect: () => void
+  onSelect: (e: React.MouseEvent) => void
   onRename: (newTitle: string) => void
   onDuplicate: () => void
   onDelete: () => void

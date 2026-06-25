@@ -1,5 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import type { JSONContent } from '@tiptap/react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   SidebarProvider,
   SidebarInset,
@@ -8,12 +7,10 @@ import {
 } from '@renderer/components/ui/sidebar'
 import { LeftSidebar } from './LeftSidebar'
 import { RightSidebar } from './RightSidebar'
+import { TabStrip, VersionHistoryButton } from './TabStrip'
 import { cn } from '@renderer/lib/utils'
-import { useDocument } from '@renderer/hooks/useDocument'
 import { UpdateBanner } from './UpdateBanner'
-import { VersionHistoryPanel, formatRelativeTime, sourceLabel } from '../VersionHistoryPanel'
-import { OutlinerEditor } from '../editor/OutlinerEditor'
-import { X, History, ArrowLeft, RotateCcw } from 'lucide-react'
+import { VersionHistoryPanel } from '../VersionHistoryPanel'
 import type { DocumentVersion } from '../../../../main/database/types'
 
 const MIN_SIDEBAR_WIDTH = 200
@@ -21,20 +18,42 @@ const MAX_SIDEBAR_WIDTH = 480
 const HOVER_LEAVE_DELAY = 300
 
 interface AppLayoutProps {
-  selectedDocId: string | null
   selectedWorkspaceId: string | null
-  onSelectDoc: (id: string | null) => void
   onSelectWorkspace: (id: string) => void
+  onSelectDoc: (id: string, opts?: { newTab?: boolean }) => void
+  openDocIds: string[]
+  activeDocId: string | null
+  onActivateTab: (id: string) => void
+  onCloseTab: (id: string) => void
+  onCloseOthers: (id: string) => void
+  onCloseToRight: (id: string) => void
+  onCloseAll: () => void
+  onReorderTab: (from: number, to: number) => void
+  versionHistoryOpen: boolean
+  onVersionHistoryOpenChange: (open: boolean) => void
+  onPreviewVersion: (version: DocumentVersion | null) => void
+  activePreviewId: string | null
   selectionContext?: string | null
   onClearSelection?: () => void
   children: React.ReactNode
 }
 
 export function AppLayout({
-  selectedDocId,
   selectedWorkspaceId,
-  onSelectDoc,
   onSelectWorkspace,
+  onSelectDoc,
+  openDocIds,
+  activeDocId,
+  onActivateTab,
+  onCloseTab,
+  onCloseOthers,
+  onCloseToRight,
+  onCloseAll,
+  onReorderTab,
+  versionHistoryOpen,
+  onVersionHistoryOpenChange,
+  onPreviewVersion,
+  activePreviewId,
   selectionContext,
   onClearSelection,
   children
@@ -44,11 +63,6 @@ export function AppLayout({
   const [windowWidth, setWindowWidth] = useState(window.innerWidth)
   const resizingRef = useRef<'left' | 'right' | null>(null)
   const [isResizing, setIsResizing] = useState(false)
-  const [isEditingTitle, setIsEditingTitle] = useState(false)
-  const [editTitle, setEditTitle] = useState('')
-  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false)
-  const [previewVersion, setPreviewVersion] = useState<DocumentVersion | null>(null)
-  const titleInputRef = useRef<HTMLInputElement>(null)
 
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [leftHoverExpanded, setLeftHoverExpanded] = useState(false)
@@ -89,9 +103,7 @@ export function AppLayout({
     }
   }, [])
 
-  const { document: currentDoc } = useDocument(selectedDocId)
-
-  const hasDoc = selectedDocId !== null
+  const hasDoc = activeDocId !== null
   const chatWidth = hasDoc ? rightWidth : windowWidth - leftWidth
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -135,63 +147,6 @@ export function AppLayout({
     document.body.style.userSelect = 'none'
   }, [])
 
-  const handleTitleDoubleClick = useCallback(() => {
-    if (!currentDoc) return
-    setEditTitle(currentDoc.title)
-    setIsEditingTitle(true)
-  }, [currentDoc])
-
-  useEffect(() => {
-    if (isEditingTitle && titleInputRef.current) {
-      titleInputRef.current.focus()
-      titleInputRef.current.select()
-    }
-  }, [isEditingTitle])
-
-  const handleTitleSubmit = useCallback(() => {
-    if (!selectedDocId) return
-    const trimmed = editTitle.trim()
-    if (trimmed && currentDoc && trimmed !== currentDoc.title) {
-      window.api.documents.update(selectedDocId, { title: trimmed })
-    }
-    setIsEditingTitle(false)
-  }, [selectedDocId, editTitle, currentDoc])
-
-  const handleTitleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        handleTitleSubmit()
-      } else if (e.key === 'Escape') {
-        setIsEditingTitle(false)
-      }
-    },
-    [handleTitleSubmit]
-  )
-
-  // Preview is only active when it belongs to the currently open document
-  const activePreview =
-    previewVersion && previewVersion.document_id === selectedDocId ? previewVersion : null
-
-  const previewContent = useMemo<JSONContent | undefined>(() => {
-    if (!activePreview?.content) return undefined
-    try {
-      return JSON.parse(activePreview.content) as JSONContent
-    } catch {
-      return undefined
-    }
-  }, [activePreview])
-
-  const handleVersionHistoryOpenChange = useCallback((open: boolean) => {
-    setVersionHistoryOpen(open)
-    if (!open) setPreviewVersion(null)
-  }, [])
-
-  const handlePreviewRestore = useCallback(async () => {
-    if (!activePreview) return
-    await window.api.documentVersions.restore(activePreview.id)
-    setPreviewVersion(null)
-  }, [activePreview])
-
   return (
     <div className="flex flex-col h-screen">
       <UpdateBanner />
@@ -201,7 +156,7 @@ export function AppLayout({
         onOpenChange={handleSidebarOpenChange}
       >
         <LeftSidebar
-          selectedDocId={selectedDocId}
+          selectedDocId={activeDocId}
           onSelectDoc={onSelectDoc}
           selectedWorkspaceId={selectedWorkspaceId}
           onSelectWorkspace={onSelectWorkspace}
@@ -217,98 +172,39 @@ export function AppLayout({
           )}
         >
           <header
-            className="flex h-10 shrink-0 items-center px-3 relative border-b dark:border-white/5 border-black/5 bg-sidebar"
+            className="flex h-10 shrink-0 items-center pl-3 pr-2 relative border-b dark:border-white/5 border-black/5 bg-sidebar"
             style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
           >
             <div
-              className="flex items-center"
+              className="flex items-center shrink-0 mr-1"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
               <SidebarTrigger className="-ml-1 text-muted-foreground/70 hover:text-foreground transition-colors" />
             </div>
-            {currentDoc && (
+            <TabStrip
+              workspaceId={selectedWorkspaceId}
+              openDocIds={openDocIds}
+              activeDocId={activeDocId}
+              onActivate={onActivateTab}
+              onClose={onCloseTab}
+              onCloseOthers={onCloseOthers}
+              onCloseToRight={onCloseToRight}
+              onCloseAll={onCloseAll}
+              onReorder={onReorderTab}
+            />
+            {hasDoc && (
               <div
-                className="absolute left-1/2 -translate-x-1/2 flex items-center max-w-[50%]"
+                className="flex items-center shrink-0 ml-1"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
-                {isEditingTitle ? (
-                  <input
-                    ref={titleInputRef}
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    onBlur={handleTitleSubmit}
-                    onKeyDown={handleTitleKeyDown}
-                    className="text-sm font-medium text-foreground bg-transparent px-2 py-0.5 rounded outline-none min-w-[120px] max-w-full text-center hover:bg-muted/50 transition-colors focus:bg-muted/50"
-                  />
-                ) : (
-                  <span
-                    className="text-sm font-medium text-foreground/90 truncate cursor-default hover:bg-muted/50 px-2 py-0.5 rounded transition-colors"
-                    onDoubleClick={handleTitleDoubleClick}
-                  >
-                    {currentDoc.title}
-                  </span>
-                )}
-              </div>
-            )}
-            {currentDoc && (
-              <div
-                className="ml-auto flex items-center gap-0.5"
-                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              >
-                <button
-                  onClick={() => setVersionHistoryOpen(true)}
-                  className="text-muted-foreground hover:text-foreground rounded-sm p-1 transition-colors hover:bg-muted"
-                  title="Version history"
-                >
-                  <History className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => onSelectDoc(null)}
-                  className="text-muted-foreground hover:text-foreground rounded-sm p-1 transition-colors hover:bg-muted"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <VersionHistoryButton onClick={() => onVersionHistoryOpenChange(true)} />
               </div>
             )}
           </header>
-          <main className="flex flex-col flex-1 min-h-0 overflow-hidden">
-            {activePreview ? (
-              <>
-                <div className="flex items-center gap-2 px-4 py-2 border-b dark:border-white/5 border-black/5 bg-muted/50 shrink-0">
-                  <button
-                    onClick={() => setPreviewVersion(null)}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-                  >
-                    <ArrowLeft className="h-3 w-3" />
-                    Back to editing
-                  </button>
-                  <div className="flex-1" />
-                  <span className="text-xs text-muted-foreground">
-                    {sourceLabel(activePreview.source)} version{' \u00B7 '}
-                    {formatRelativeTime(activePreview.created_at)}
-                  </span>
-                  <button
-                    onClick={handlePreviewRestore}
-                    className="text-xs px-2.5 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center gap-1.5"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    Restore
-                  </button>
-                </div>
-                <OutlinerEditor
-                  key={`preview-${activePreview.id}`}
-                  content={previewContent}
-                  editable={false}
-                />
-              </>
-            ) : (
-              children
-            )}
-          </main>
+          <main className="flex flex-col flex-1 min-h-0 overflow-hidden">{children}</main>
         </SidebarInset>
         <RightSidebar
-          documentId={selectedDocId}
+          documentId={activeDocId}
           workspaceId={selectedWorkspaceId}
           width={chatWidth}
           resizing={isResizing}
@@ -324,11 +220,11 @@ export function AppLayout({
         {isResizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
       </SidebarProvider>
       <VersionHistoryPanel
-        documentId={selectedDocId}
+        documentId={activeDocId}
         open={versionHistoryOpen}
-        onOpenChange={handleVersionHistoryOpenChange}
-        onPreviewVersion={setPreviewVersion}
-        activePreviewId={activePreview?.id ?? null}
+        onOpenChange={onVersionHistoryOpenChange}
+        onPreviewVersion={onPreviewVersion}
+        activePreviewId={activePreviewId}
       />
     </div>
   )

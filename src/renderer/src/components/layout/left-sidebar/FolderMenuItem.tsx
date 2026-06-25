@@ -18,7 +18,7 @@ interface FolderMenuItemProps {
   documents: Document[]
   selectedDocId: string | null
   isDragOver: boolean
-  onSelectDoc: (id: string) => void
+  onSelectDoc: (id: string, opts?: { newTab?: boolean }) => void
   onRenameDoc: (id: string, newTitle: string) => void
   onDeleteDoc: (id: string) => void
   onDuplicateDoc: (id: string) => void
@@ -125,7 +125,7 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
               id={doc.id}
               title={doc.title}
               isSelected={selectedDocId === doc.id}
-              onSelect={() => onSelectDoc(doc.id)}
+              onSelect={(e) => onSelectDoc(doc.id, { newTab: e.metaKey || e.ctrlKey })}
               onRename={(newTitle) => onRenameDoc(doc.id, newTitle)}
               onDuplicate={() => onDuplicateDoc(doc.id)}
               onDelete={() => onDeleteDoc(doc.id)}

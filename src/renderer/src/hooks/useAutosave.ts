@@ -24,6 +24,12 @@ export function hasUnsavedEdits(id: string): boolean {
   return pending.has(id)
 }
 
+/** True while id has an unresolved (open or deferred) conflict. Eviction and the
+ *  unmount flush MUST consult this so they never overwrite the external change. */
+export function hasConflict(id: string): boolean {
+  return conflicted.has(id)
+}
+
 /** Mark/unmark that an unresolved conflict dialog is open for id (guards the unmount flush). */
 export function setConflictOpen(id: string, open: boolean): void {
   if (open) conflicted.add(id)
@@ -39,15 +45,39 @@ export function cancelPending(id: string): void {
   }
 }
 
-function doFlush(id: string): void {
+function doFlush(id: string): Promise<void> {
   const p = pending.get(id)
-  if (!p) return
+  if (!p) return Promise.resolve()
   clearTimeout(p.timer)
   pending.delete(id)
   const content = JSON.stringify(p.content)
-  window.api.documents.update(id, { content }).catch((err) => {
-    console.error('[autosave] failed to save document', id, err)
-  })
+  return window.api.documents.update(id, { content }).then(
+    () => {},
+    (err) => {
+      console.error('[autosave] failed to save document', id, err)
+    }
+  )
+}
+
+/**
+ * Flush id's queued autosave and await the in-flight write — UNLESS id has an
+ * open/deferred conflict, in which case the queued edit is discarded (the
+ * discard-local path) rather than silently overwriting the external change.
+ * Used by closeTab (so close-then-reopen can't load stale content) and the
+ * workspace-switch / quit sequences.
+ */
+export function flush(id: string): Promise<void> {
+  if (conflicted.has(id)) {
+    cancelPending(id)
+    return Promise.resolve()
+  }
+  return doFlush(id)
+}
+
+/** Flush every pending autosave (conflict-respecting) and await them all. */
+export function flushAll(): Promise<void> {
+  const ids = [...pending.keys()]
+  return Promise.all(ids.map((id) => flush(id))).then(() => {})
 }
 
 export function useAutosave(documentId: string) {

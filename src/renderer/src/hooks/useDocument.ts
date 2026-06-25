@@ -28,7 +28,7 @@ function parseContent(doc: Document | null | undefined): JSONContent | null {
   }
 }
 
-export function useDocument(id: string | null): UseDocumentResult {
+export function useDocument(id: string | null, isActive = true): UseDocumentResult {
   const [document, setDocument] = useState<Document | null>(null)
   const [loading, setLoading] = useState(id !== null)
   const [externalContentVersion, setExternalContentVersion] = useState(0)
@@ -36,6 +36,13 @@ export function useDocument(id: string | null): UseDocumentResult {
   const [conflict, setConflict] = useState<Conflict | null>(null)
   const conflictRef = useRef<Conflict | null>(null)
   conflictRef.current = conflict
+  // When an external change collides with unsaved edits on an INACTIVE (hidden)
+  // tab we still protect the disk synchronously, but stash the dialog here and
+  // surface it only on activation — a hidden tab must never mount a focus-trapping
+  // dialog (finding #2).
+  const deferredConflictRef = useRef<Conflict | null>(null)
+  const isActiveRef = useRef(isActive)
+  isActiveRef.current = isActive
 
   useEffect(() => {
     if (!id) {
@@ -69,7 +76,13 @@ export function useDocument(id: string | null): UseDocumentResult {
         const parsed = parseContent(doc)
         if (dirty) {
           // Keep the user's live buffer; offer the disk version via the dialog.
-          setConflict({ externalContent: parsed })
+          // Active tab → open the dialog now; inactive tab → defer until activation
+          // (the conflicted flag, already set above, protects the disk meanwhile).
+          if (isActiveRef.current) {
+            setConflict({ externalContent: parsed })
+          } else {
+            deferredConflictRef.current = { externalContent: parsed }
+          }
           return
         }
         setDocument(doc ?? null)
@@ -92,8 +105,18 @@ export function useDocument(id: string | null): UseDocumentResult {
       // Leaving this note: clear any open-conflict bookkeeping for it.
       setConflictOpen(id, false)
       setConflict(null)
+      deferredConflictRef.current = null
     }
   }, [id])
+
+  // When this tab becomes active, surface any conflict that arrived while it was
+  // hidden (finding #2).
+  useEffect(() => {
+    if (isActive && deferredConflictRef.current) {
+      setConflict(deferredConflictRef.current)
+      deferredConflictRef.current = null
+    }
+  }, [isActive])
 
   const resolveConflict = useCallback(
     (choice: 'reload' | 'keepMine') => {

@@ -76,8 +76,7 @@ const greenteaApi = {
       ipcRenderer.invoke('agent:abort', conversationId),
     resetSession: (conversationId?: string): Promise<void> =>
       ipcRenderer.invoke('agent:reset-session', conversationId),
-    approveEdit: (logId: string): Promise<void> =>
-      ipcRenderer.invoke('agent:approve-edit', logId),
+    approveEdit: (logId: string): Promise<void> => ipcRenderer.invoke('agent:approve-edit', logId),
     rejectEdit: (logId: string): Promise<void> => ipcRenderer.invoke('agent:reject-edit', logId),
     generateTitle: (data: { conversationId: string; userMessage: string }): Promise<void> =>
       ipcRenderer.invoke('agent:generate-title', data),
@@ -157,6 +156,30 @@ const greenteaApi = {
     ipcRenderer.on('settings:changed', sub)
     return () => {
       ipcRenderer.removeListener('settings:changed', sub)
+    }
+  },
+  tabs: {
+    get: (
+      workspaceId: string
+    ): Promise<{ openDocIds: string[]; activeDocId: string | null } | null> =>
+      ipcRenderer.invoke('tabs:get', workspaceId),
+    set: (
+      workspaceId: string,
+      state: { openDocIds: string[]; activeDocId: string | null }
+    ): Promise<void> => ipcRenderer.invoke('tabs:set', workspaceId, state)
+  },
+  menu: {
+    onTabCommand: (
+      callback: (cmd: { type: 'close' | 'next' | 'prev' } | { type: 'goto'; index: number }) => void
+    ): (() => void) => {
+      const sub = (
+        _event: unknown,
+        cmd: { type: 'close' | 'next' | 'prev' } | { type: 'goto'; index: number }
+      ): void => callback(cmd)
+      ipcRenderer.on('menu:tab-command', sub)
+      return () => {
+        ipcRenderer.removeListener('menu:tab-command', sub)
+      }
     }
   },
   agentLogs: {
@@ -380,8 +403,7 @@ const greenteaApi = {
   },
   theme: {
     get: (): Promise<unknown> => ipcRenderer.invoke('theme:get'),
-    save: (data: Record<string, unknown>): Promise<void> =>
-      ipcRenderer.invoke('theme:save', data)
+    save: (data: Record<string, unknown>): Promise<void> => ipcRenderer.invoke('theme:save', data)
   },
   onThemeChanged: (callback: (data: unknown) => void): (() => void) => {
     const sub = (_event: unknown, data: unknown): void => callback(data)
@@ -404,7 +426,15 @@ const greenteaApi = {
       return () => {
         ipcRenderer.removeListener('app:update-status', sub)
       }
-    }
+    },
+    onFlushBeforeQuit: (callback: () => void): (() => void) => {
+      const sub = (): void => callback()
+      ipcRenderer.on('app:flush-before-quit', sub)
+      return () => {
+        ipcRenderer.removeListener('app:flush-before-quit', sub)
+      }
+    },
+    flushDone: (): void => ipcRenderer.send('app:flush-done')
   }
 }
 

@@ -163,6 +163,18 @@ interface GreenteaApi {
     testApiKey(provider: string, apiKey: string): Promise<{ success: boolean; error?: string }>
   }
   onSettingsChanged(callback: () => void): () => void
+  tabs: {
+    get(workspaceId: string): Promise<{ openDocIds: string[]; activeDocId: string | null } | null>
+    set(
+      workspaceId: string,
+      state: { openDocIds: string[]; activeDocId: string | null }
+    ): Promise<void>
+  }
+  menu: {
+    onTabCommand(
+      callback: (cmd: { type: 'close' | 'next' | 'prev' } | { type: 'goto'; index: number }) => void
+    ): () => void
+  }
   agentLogs: {
     list(filter?: { document_id?: string; status?: string }): Promise<AgentLog[]>
   }
@@ -310,6 +322,8 @@ interface GreenteaApi {
     quitAndInstall(): Promise<void>
     checkPython(): Promise<{ installed: boolean; version?: string; bundled: boolean }>
     onUpdateStatus(callback: (status: UpdateStatus) => void): () => void
+    onFlushBeforeQuit(callback: () => void): () => void
+    flushDone(): void
   }
 }
 

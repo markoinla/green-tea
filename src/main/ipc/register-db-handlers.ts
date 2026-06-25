@@ -291,6 +291,27 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     return settings.getAllSettings(db)
   })
 
+  // Open-tab state — stored as a settings row (key `openTabs:${workspaceId}`) but
+  // on a DEDICATED channel that does NOT broadcast `settings:changed`. Routing it
+  // through `db:settings:set` would re-trigger a full theme reload on every
+  // debounced, per-keystroke tab write.
+  ipcMain.handle('tabs:get', (_event, workspaceId: string) => {
+    const raw = settings.getSetting(db, `openTabs:${workspaceId}`)
+    if (!raw) return null
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle(
+    'tabs:set',
+    (_event, workspaceId: string, state: { openDocIds: string[]; activeDocId: string | null }) => {
+      settings.setSetting(db, `openTabs:${workspaceId}`, JSON.stringify(state))
+    }
+  )
+
   ipcMain.handle(
     'db:settings:test-api-key',
     async (

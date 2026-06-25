@@ -2,11 +2,12 @@ import 'dotenv/config'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import { execSync } from 'child_process'
-import { app, shell, BrowserWindow, protocol, screen } from 'electron'
+import { app, shell, BrowserWindow, protocol, screen, ipcMain } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { getDatabase } from './database/connection'
 import { registerIpcHandlers } from './ipc/handlers'
+import { setupApplicationMenu } from './menu'
 import { initAutoUpdater } from './auto-updater'
 import { seedDefaultSkills } from './skills/manager'
 import { ensureUserDirs } from './agent/paths'
@@ -179,8 +180,28 @@ app.whenReady().then(() => {
 
   // Create window and register IPC handlers with window reference
   const mainWindow = createWindow()
+  setupApplicationMenu(mainWindow)
   registerIpcHandlers(db, mainWindow)
   initAutoUpdater(mainWindow)
+
+  // Quit-flush handshake: on an explicit quit (Cmd-Q), give the renderer a bounded
+  // chance to flush pending autosaves + tab state before we exit. This is the
+  // guarantee that the renderer `beforeunload` (best-effort, can't await) is not.
+  // Window-close on macOS leaves the window destroyed here, so we just quit.
+  let flushedBeforeQuit = false
+  app.on('before-quit', (event) => {
+    if (flushedBeforeQuit) return
+    if (mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
+    event.preventDefault()
+    flushedBeforeQuit = true
+    const finish = (): void => app.quit()
+    const timer = setTimeout(finish, 1500)
+    ipcMain.once('app:flush-done', () => {
+      clearTimeout(timer)
+      finish()
+    })
+    mainWindow.webContents.send('app:flush-before-quit')
+  })
 
   // Start the task scheduler
   startScheduler(db, mainWindow)

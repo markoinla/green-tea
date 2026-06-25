@@ -13,7 +13,7 @@ import { SidebarFooterSection } from './left-sidebar/SidebarFooterSection'
 
 interface LeftSidebarProps {
   selectedDocId: string | null
-  onSelectDoc: (id: string | null) => void
+  onSelectDoc: (id: string, opts?: { newTab?: boolean }) => void
   selectedWorkspaceId: string | null
   onSelectWorkspace: (id: string) => void
   width?: number
@@ -70,7 +70,7 @@ export function LeftSidebar({
   const handleNewDocument = useCallback(async () => {
     if (!selectedWorkspaceId) return
     const doc = await createDocument({ title: 'Untitled' })
-    onSelectDoc(doc.id)
+    onSelectDoc(doc.id, { newTab: true })
   }, [selectedWorkspaceId, createDocument, onSelectDoc])
 
   const handleNewFolder = useCallback(async () => {
@@ -81,19 +81,18 @@ export function LeftSidebar({
     async (folderId: string) => {
       if (!selectedWorkspaceId) return
       const doc = await createDocument({ title: 'Untitled', folder_id: folderId })
-      onSelectDoc(doc.id)
+      onSelectDoc(doc.id, { newTab: true })
     },
     [selectedWorkspaceId, createDocument, onSelectDoc]
   )
 
   const handleDeleteDoc = useCallback(
     async (id: string) => {
+      // The open tab (if any) closes via the reconcileDeletions path in App once
+      // `documents:changed` fires — no need to clear selection here.
       await deleteDocument(id)
-      if (selectedDocId === id) {
-        onSelectDoc(null)
-      }
     },
-    [deleteDocument, selectedDocId, onSelectDoc]
+    [deleteDocument]
   )
 
   const handleRenameDoc = useCallback(
@@ -118,7 +117,7 @@ export function LeftSidebar({
       if (original.content) {
         await updateDocument(doc.id, { content: original.content })
       }
-      onSelectDoc(doc.id)
+      onSelectDoc(doc.id, { newTab: true })
     },
     [selectedWorkspaceId, createDocument, updateDocument, onSelectDoc]
   )
