@@ -7,6 +7,7 @@ import { flushAll } from './hooks/useAutosave'
 import { useWorkspaces } from './hooks/useWorkspaces'
 import { useTaskNotifications } from './hooks/useTaskNotifications'
 import { usePythonCheck } from './hooks/usePythonCheck'
+import { MetadataFilterProvider } from './contexts/MetadataFilterContext'
 import { getFontStack } from './components/settings/constants'
 import type { DocumentVersion } from '../../main/database/types'
 
@@ -308,7 +309,7 @@ export default function App() {
   }, [activePreview])
 
   return (
-    <>
+    <MetadataFilterProvider>
       <AppLayout
         selectedWorkspaceId={selectedWorkspaceId}
         onSelectWorkspace={handleSelectWorkspace}
@@ -347,6 +348,6 @@ export default function App() {
         )}
       </AppLayout>
       <Toaster theme={appTheme} position="bottom-right" richColors closeButton />
-    </>
+    </MetadataFilterProvider>
   )
 }

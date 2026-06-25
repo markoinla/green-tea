@@ -1,5 +1,12 @@
 import { ipcMain } from 'electron'
-import { promptAgent, abortAgent, resetSession, approveEdit, rejectEdit } from '../agent/session'
+import {
+  promptAgent,
+  abortAgent,
+  resetSession,
+  approveEdit,
+  rejectEdit,
+  approveMetadataEdit
+} from '../agent/session'
 import { generateConversationTitle } from '../agent/title-generator'
 import * as conversations from '../database/repositories/conversations'
 import type { IpcHandlerContext } from './context'
@@ -71,6 +78,21 @@ export function registerAgentHandlers({ db, mainWindow }: IpcHandlerContext): vo
   })
 
   ipcMain.handle('agent:reject-edit', (_event, logId: string) => {
+    rejectEdit(db, logId)
+  })
+
+  ipcMain.handle('agent:approve-metadata', (_event, logId: string) => {
+    const { documentIds, rejectedKeys } = approveMetadataEdit(db, logId)
+    if (mainWindow) {
+      for (const id of documentIds) {
+        mainWindow.webContents.send('documents:content-changed', { id })
+      }
+      mainWindow.webContents.send('documents:changed')
+    }
+    return { documentIds, rejectedKeys }
+  })
+
+  ipcMain.handle('agent:reject-metadata', (_event, logId: string) => {
     rejectEdit(db, logId)
   })
 }

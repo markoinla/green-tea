@@ -25,6 +25,7 @@
     "build:win": "npm run download-python && npm run build && electron-builder --win",
     "build:mac": "npm run download-python && source .env && electron-vite build && electron-builder --mac --arm64 --publish always && gh release edit v$(node -p \"require('./package.json').version\") --draft=false -R markoinla/green-tea",
     "build:linux": "npm run download-python && electron-vite build && electron-builder --linux",
+    "rebuild:electron": "electron-rebuild -f -o better-sqlite3",
     "pretest": "npm rebuild better-sqlite3",
     "test": "vitest run",
     "test:watch": "vitest",

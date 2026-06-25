@@ -23,7 +23,7 @@ import {
   isSandboxInitialized
 } from './sandbox'
 import { updateAgentLogStatus } from '../database/repositories/agent-logs'
-import { getDocument, updateDocument } from '../vault/documents-service'
+import { getDocument, updateDocument, updateFrontmatter } from '../vault/documents-service'
 import { createVersion } from '../database/repositories/document-versions'
 import { getWorkspace } from '../database/repositories/workspaces'
 import { markdownToTiptap } from '../markdown/tiptap-markdown'
@@ -255,6 +255,48 @@ export function applyEdit(db: Database.Database, logId: string): void {
   })
 
   updateAgentLogStatus(db, logId, 'applied')
+}
+
+/**
+ * Apply a batched metadata proposal (Phase 5, C3). Unlike applyEdit (which
+ * reconstructs the markdown body), this iterates the `metadata_payload` array of
+ * `{ document_id, changedKeys }` and routes EACH through updateFrontmatter — the
+ * single reserved-key chokepoint (M2) that merges only the changed keys and never
+ * rewrites the body. Returns the list of affected document ids (for broadcast) and
+ * the union of any reserved keys the chokepoint rejected (surfaced to the model).
+ */
+export function applyMetadataEdit(
+  db: Database.Database,
+  logId: string
+): { documentIds: string[]; rejectedKeys: string[] } {
+  const log = db.prepare('SELECT * FROM agent_logs WHERE id = ?').get(logId) as
+    | { id: string; action_type: string; metadata_payload: string | null }
+    | undefined
+
+  if (!log) {
+    throw new Error(`Agent log not found: ${logId}`)
+  }
+  if (!log.metadata_payload) {
+    throw new Error('No metadata payload found in this log entry')
+  }
+
+  let edits: { document_id: string; changedKeys: Record<string, unknown> }[]
+  try {
+    edits = JSON.parse(log.metadata_payload)
+  } catch {
+    throw new Error('Corrupt metadata payload')
+  }
+
+  const documentIds: string[] = []
+  const rejectedKeys = new Set<string>()
+  for (const edit of edits) {
+    const result = updateFrontmatter(db, edit.document_id, edit.changedKeys)
+    documentIds.push(edit.document_id)
+    for (const k of result.rejectedKeys) rejectedKeys.add(k)
+  }
+
+  updateAgentLogStatus(db, logId, 'applied')
+  return { documentIds, rejectedKeys: [...rejectedKeys] }
 }
 
 // ---- Agent Session Management ----
@@ -548,4 +590,16 @@ export function approveEdit(db: Database.Database, logId: string): string {
 
 export function rejectEdit(db: Database.Database, logId: string): void {
   updateAgentLogStatus(db, logId, 'rejected')
+}
+
+/**
+ * Approve a batched metadata proposal: apply it and return the affected document
+ * ids (so the IPC layer can broadcast a content/metadata refresh for each) plus
+ * any reserved keys the chokepoint rejected.
+ */
+export function approveMetadataEdit(
+  db: Database.Database,
+  logId: string
+): { documentIds: string[]; rejectedKeys: string[] } {
+  return applyMetadataEdit(db, logId)
 }

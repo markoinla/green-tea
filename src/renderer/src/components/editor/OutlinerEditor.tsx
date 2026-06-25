@@ -25,6 +25,8 @@ import { TableCellDropdownMenu } from './TableCellDropdownMenu'
 import { TableContextMenu } from './TableContextMenu'
 import { SearchBar } from './SearchBar'
 import { renderSlashSuggestion } from './SlashCommandList'
+import { PropertiesBlock } from './properties/PropertiesBlock'
+import type { Document } from '../../../../main/database/types'
 
 const lowlight = createLowlight()
 
@@ -38,6 +40,8 @@ interface OutlinerEditorProps {
   externalContent?: JSONContent | null
   /** Incremented each time external content arrives. */
   externalContentVersion?: number
+  /** The backing document; when present, the inline Properties editor is shown. */
+  document?: Document | null
 }
 
 export function OutlinerEditor({
@@ -47,7 +51,8 @@ export function OutlinerEditor({
   editable = true,
   onQuoteSelection,
   externalContent,
-  externalContentVersion = 0
+  externalContentVersion = 0,
+  document = null
 }: OutlinerEditorProps) {
   const prevExternalVersionRef = useRef(externalContentVersion)
 
@@ -174,6 +179,7 @@ export function OutlinerEditor({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <SearchBar editor={editor} />
+      {document && editable && <PropertiesBlock document={document} />}
       <div className="flex-1 min-h-0 overflow-auto">
         <TableContextMenu editor={editor}>
           <EditorContent editor={editor} />

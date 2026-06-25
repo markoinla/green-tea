@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Search } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Search, X } from 'lucide-react'
 import { Sidebar, SidebarHeader } from '@renderer/components/ui/sidebar'
+import { useMetadataFilter } from '@renderer/contexts/MetadataFilterContext'
 import { useDocuments } from '@renderer/hooks/useDocuments'
+import type { Document } from '../../../../main/database/types'
 import { useFolders } from '@renderer/hooks/useFolders'
 import { useWorkspaceFiles } from '@renderer/hooks/useWorkspaceFiles'
 import { useSidebarDragAndDrop } from '@renderer/hooks/useSidebarDragAndDrop'
@@ -43,6 +45,41 @@ export function LeftSidebar({
     removeFile
   } = useWorkspaceFiles(selectedWorkspaceId)
   const [commandOpen, setCommandOpen] = useState(false)
+
+  // Active metadata filter (Phase 4). When set, the note list is restricted to
+  // the matching documents via db:metadata:listByProperty; clearing restores the
+  // full list. The filter is dropped automatically on a workspace switch.
+  const { filter, clearFilter } = useMetadataFilter()
+  const filterActive = filter !== null && filter.workspaceId === selectedWorkspaceId
+  const [filteredIds, setFilteredIds] = useState<Set<string> | null>(null)
+
+  useEffect(() => {
+    if (!filterActive || !filter) {
+      setFilteredIds(null)
+      return
+    }
+    let cancelled = false
+    window.api.metadata
+      .listByProperty(filter.workspaceId, filter.key, filter.value)
+      .then((docs) => {
+        if (!cancelled) setFilteredIds(new Set((docs as Document[]).map((d) => d.id)))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [filterActive, filter, documents])
+
+  // Drop a stale filter when the workspace switches (its key/value belong to the
+  // workspace it was set in).
+  useEffect(() => {
+    if (filter && filter.workspaceId !== selectedWorkspaceId) clearFilter()
+  }, [filter, selectedWorkspaceId, clearFilter])
+
+  const visibleDocuments = useMemo(
+    () =>
+      filterActive && filteredIds ? documents.filter((d) => filteredIds.has(d.id)) : documents,
+    [filterActive, filteredIds, documents]
+  )
 
   const {
     dragOverFolderId,
@@ -178,10 +215,26 @@ export function LeftSidebar({
           onSelectDoc={onSelectDoc}
           onSelectWorkspace={onSelectWorkspace}
         />
+        {filterActive && filter && (
+          <div className="flex items-center gap-1.5 rounded-md bg-sidebar-accent/60 px-2 py-1 text-xs group-data-[collapsible=icon]:hidden">
+            <span className="text-muted-foreground shrink-0">Filter:</span>
+            <span className="truncate font-medium" title={`${filter.key}: ${filter.value}`}>
+              {filter.key}: {filter.value}
+            </span>
+            <button
+              type="button"
+              aria-label="Clear filter"
+              className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={clearFilter}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </SidebarHeader>
 
       <NotesList
-        documents={documents}
+        documents={visibleDocuments}
         folders={folders}
         loading={loading}
         selectedDocId={selectedDocId}

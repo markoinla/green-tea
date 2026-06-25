@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import { createAgentLog } from '../../database/repositories/agent-logs'
-import { applyEdit } from '../session'
+import { applyEdit, applyMetadataEdit } from '../session'
 // Documents/folders are file-backed: route agent writes through the vault
 // service so they hit the .md file on disk (the source of truth), not just the
 // derived SQLite index (which gets rebuilt from disk and would discard them).
@@ -14,8 +14,16 @@ import { getFolder } from '../../database/repositories/folders'
 import { updateWorkspace, getWorkspace } from '../../database/repositories/workspaces'
 import { createMarkdownDiff } from '../../markdown/diff'
 import { markdownToTiptap, tiptapToMarkdown, type TTDoc } from '../../markdown/tiptap-markdown'
+import { RESERVED_KEYS } from '../../vault/metadata'
 import type { AgentLog } from '../../database/types'
 import type { ToolResult } from './notes-read'
+
+/** One note's worth of metadata changes in a batched proposal. */
+export interface MetadataEdit {
+  document_id: string
+  /** Property changes to merge; a `null` value clears (deletes) the key. */
+  changedKeys: Record<string, unknown>
+}
 
 // NOTE: the block<->TipTap conversion helpers that previously lived here are
 // gone — agent edits now flow through the markdown converter + vault service.
@@ -198,6 +206,97 @@ export function notesProposeEdit(
 
   return {
     content: `Edit proposed successfully. Log ID: ${log.id}. The user will be asked to approve or reject the changes.`,
+    log
+  }
+}
+
+/**
+ * Propose a (possibly batched) metadata change across one or more notes (Phase 5,
+ * C3). This is the metadata-aware sibling of `notesProposeEdit`: instead of a
+ * markdown find-and-replace it merges frontmatter properties via the
+ * `updateFrontmatter` chokepoint (which rejects RESERVED_KEYS). The proposal is
+ * stored as one `agent_logs` row with `action_type='propose_metadata'` whose
+ * `metadata_payload` holds the JSON array of `{ document_id, changedKeys }`,
+ * applied by iterating on approve.
+ *
+ * Reserved keys (`id`/`title`/`created`/`updated`) are stripped up-front and
+ * surfaced back to the model so it knows they were ignored. Returns an error when
+ * no applicable change remains.
+ */
+export function notesProposeMetadata(
+  db: Database.Database,
+  params: { edits: MetadataEdit[] },
+  autoApprove?: boolean,
+  workspaceId?: string
+): ToolResult & { log?: AgentLog } {
+  if (!params.edits || !Array.isArray(params.edits) || params.edits.length === 0) {
+    return { content: '', error: 'edits must be a non-empty array' }
+  }
+
+  const rejectedKeys = new Set<string>()
+  const cleaned: MetadataEdit[] = []
+
+  for (const edit of params.edits) {
+    if (!edit || !edit.document_id) {
+      return { content: '', error: 'each edit requires a document_id' }
+    }
+    if (!edit.changedKeys || typeof edit.changedKeys !== 'object') {
+      return { content: '', error: `changedKeys must be an object (document ${edit.document_id})` }
+    }
+
+    const doc = getDocument(db, edit.document_id)
+    if (!doc) {
+      return { content: '', error: `Document not found: ${edit.document_id}` }
+    }
+    if (workspaceId && doc.workspace_id !== workspaceId) {
+      return { content: '', error: `Document not in current workspace: ${edit.document_id}` }
+    }
+
+    // Strip reserved keys here too so the model learns immediately; the
+    // updateFrontmatter chokepoint enforces it again at apply time (M2).
+    const changedKeys: Record<string, unknown> = {}
+    for (const key of Object.keys(edit.changedKeys)) {
+      if (RESERVED_KEYS.has(key)) {
+        rejectedKeys.add(key)
+        continue
+      }
+      changedKeys[key] = edit.changedKeys[key]
+    }
+    if (Object.keys(changedKeys).length > 0) {
+      cleaned.push({ document_id: edit.document_id, changedKeys })
+    }
+  }
+
+  if (cleaned.length === 0) {
+    const detail =
+      rejectedKeys.size > 0
+        ? ` Only reserved keys were provided (${[...rejectedKeys].join(', ')}), which cannot be set.`
+        : ''
+    return { content: '', error: `No applicable metadata changes to propose.${detail}` }
+  }
+
+  const log = createAgentLog(db, {
+    document_id: cleaned[0].document_id,
+    agent_name: 'notes-assistant',
+    action_type: 'propose_metadata',
+    metadata_payload: JSON.stringify(cleaned)
+  })
+
+  const rejectedNote =
+    rejectedKeys.size > 0 ? ` Reserved keys were ignored: ${[...rejectedKeys].join(', ')}.` : ''
+
+  if (autoApprove) {
+    const applied = applyMetadataEdit(db, log.id)
+    const extra =
+      applied.rejectedKeys.length > 0 ? ` Rejected keys: ${applied.rejectedKeys.join(', ')}.` : ''
+    return {
+      content: `Metadata applied to ${cleaned.length} note(s). Log ID: ${log.id}.${rejectedNote}${extra}`,
+      log
+    }
+  }
+
+  return {
+    content: `Metadata change proposed for ${cleaned.length} note(s). Log ID: ${log.id}. The user will be asked to approve or reject.${rejectedNote}`,
     log
   }
 }

@@ -12,6 +12,8 @@ export function dbMessageToChatMessage(m: ConversationMessage): Message {
     patchLogId: m.patch_log_id ?? undefined,
     patchDiff: m.patch_diff ?? undefined,
     patchDocumentId: m.patch_document_id ?? undefined,
+    metadataLogId: m.metadata_log_id ?? undefined,
+    metadataPayload: m.metadata_payload ? JSON.parse(m.metadata_payload) : undefined,
     toolName: m.tool_name ?? undefined,
     toolArgs: m.tool_args ? JSON.parse(m.tool_args) : undefined,
     toolCallId: m.tool_call_id ?? undefined,

@@ -7,6 +7,7 @@ import {
   type SubagentEvent
 } from '@renderer/components/chat/SubagentActivityGroup'
 import { PatchApproval } from '@renderer/components/diff/PatchApproval'
+import { MetadataApproval } from '@renderer/components/diff/MetadataApproval'
 import type { DisplayItem } from '@renderer/hooks/chat-types'
 
 const EMPTY_STATE_FLAVOR = [
@@ -145,6 +146,8 @@ interface ChatMessageListProps {
   showToolResults: boolean
   onApprovePatch: (logId: string) => void
   onRejectPatch: (logId: string) => void
+  onApproveMetadata: (logId: string) => void
+  onRejectMetadata: (logId: string) => void
   messagesEndRef: RefObject<HTMLDivElement | null>
 }
 
@@ -160,6 +163,8 @@ export function ChatMessageList({
   showToolResults,
   onApprovePatch,
   onRejectPatch,
+  onApproveMetadata,
+  onRejectMetadata,
   messagesEndRef
 }: ChatMessageListProps) {
   if (displayItems.length === 0 && !isStreaming) {
@@ -234,6 +239,15 @@ export function ChatMessageList({
                 diff={msg.patchDiff}
                 onApprove={onApprovePatch}
                 onReject={onRejectPatch}
+              />
+            )}
+            {msg.metadataLogId && msg.metadataPayload && (
+              <MetadataApproval
+                logId={msg.metadataLogId}
+                payload={msg.metadataPayload}
+                resolveDocName={resolveDocName}
+                onApprove={onApproveMetadata}
+                onReject={onRejectMetadata}
               />
             )}
           </div>

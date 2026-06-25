@@ -11,6 +11,8 @@ import type {
   Conversation,
   ConversationMessage
 } from '../main/database/types'
+import type { PropertyType } from '../main/vault/metadata'
+import type { PropertyTypeEntry } from '../main/vault/documents-service'
 
 interface SkillInfo {
   name: string
@@ -93,7 +95,18 @@ interface GreenteaApi {
       id: string,
       data: { title?: string; workspace_id?: string; content?: string; folder_id?: string | null }
     ): Promise<Document>
+    updateFrontmatter(
+      id: string,
+      changedKeys: Record<string, unknown>
+    ): Promise<{ document: Document; rejectedKeys: string[] }>
     delete(id: string): Promise<void>
+  }
+  metadata: {
+    getTypes(workspaceId: string): Promise<PropertyTypeEntry[]>
+    setType(workspaceId: string, key: string, type: PropertyType): Promise<void>
+    tagSuggest(workspaceId: string, prefix?: string): Promise<string[]>
+    nameSuggest(workspaceId: string, prefix?: string): Promise<string[]>
+    listByProperty(workspaceId: string, key: string, valueFold: string): Promise<Document[]>
   }
   folders: {
     list(workspaceId?: string): Promise<Folder[]>
@@ -136,6 +149,8 @@ interface GreenteaApi {
     resetSession(conversationId?: string): Promise<void>
     approveEdit(logId: string): Promise<void>
     rejectEdit(logId: string): Promise<void>
+    approveMetadata(logId: string): Promise<{ documentIds: string[]; rejectedKeys: string[] }>
+    rejectMetadata(logId: string): Promise<void>
     generateTitle(data: { conversationId: string; userMessage: string }): Promise<void>
     onEvent(callback: (data: unknown) => void): () => void
     onSubagentEvent(callback: (data: unknown) => void): () => void
@@ -269,6 +284,8 @@ interface GreenteaApi {
       patch_log_id?: string
       patch_diff?: string
       patch_document_id?: string
+      metadata_log_id?: string
+      metadata_payload?: string
       images?: string
       files?: string
     }): Promise<ConversationMessage>

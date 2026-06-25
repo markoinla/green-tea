@@ -163,6 +163,27 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     }
   )
 
+  // Tag autocomplete for the Properties chip input — the workspace-global tag set
+  // (deterministic display per fold group, §4.2).
+  ipcMain.handle('db:metadata:tagSuggest', (_event, workspaceId: string, prefix?: string) => {
+    return documents.tagSuggest(db, workspaceId, prefix ?? '')
+  })
+
+  // Existing property names for "+ Add property" name autocomplete.
+  ipcMain.handle('db:metadata:nameSuggest', (_event, workspaceId: string, prefix?: string) => {
+    return documents.propertyNameSuggest(db, workspaceId, prefix ?? '')
+  })
+
+  // Human retrieval (Phase 4): notes in the workspace whose property `key` equals
+  // `valueFold` (case-insensitive, NFC-folded). Returns the same Document[] shape
+  // the left-sidebar list already renders — no new view system.
+  ipcMain.handle(
+    'db:metadata:listByProperty',
+    (_event, workspaceId: string, key: string, valueFold: string) => {
+      return documents.listByProperty(db, workspaceId, key, valueFold)
+    }
+  )
+
   // Document Versions
   ipcMain.handle('db:document-versions:list', (_event, documentId: string) => {
     return documentVersions.listVersions(db, documentId)

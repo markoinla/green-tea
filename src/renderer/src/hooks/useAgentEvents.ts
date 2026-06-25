@@ -50,7 +50,13 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
         args?: Record<string, unknown>
         result?: {
           content?: unknown
-          details?: { id?: string; output_patch?: string; document_id?: string }
+          details?: {
+            id?: string
+            output_patch?: string
+            document_id?: string
+            action_type?: string
+            metadata_payload?: string
+          }
         }
         isError?: boolean
         tokens?: { input: number; output: number; total: number }
@@ -206,6 +212,40 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
                 patch_diff: details.output_patch,
                 patch_document_id: details.document_id
               })
+            }
+          }
+
+          // Metadata approval UI (Phase 5) — a NON-diff approval card.
+          if (event.toolName === 'notes_set_metadata' && !event.isError && event.result?.details) {
+            const details = event.result.details
+            if (details.id && details.metadata_payload) {
+              let payload: { document_id: string; changedKeys: Record<string, unknown> }[] = []
+              try {
+                payload = JSON.parse(details.metadata_payload)
+              } catch {
+                payload = []
+              }
+              if (payload.length > 0) {
+                dispatchTo(convId, {
+                  type: 'add_message',
+                  message: {
+                    id: crypto.randomUUID(),
+                    role: 'assistant',
+                    content: 'I have proposed a metadata change for your review:',
+                    timestamp: Date.now(),
+                    metadataLogId: details.id,
+                    metadataPayload: payload
+                  }
+                })
+
+                window.api.conversations.addMessage({
+                  conversation_id: convId,
+                  role: 'assistant',
+                  content: 'I have proposed a metadata change for your review:',
+                  metadata_log_id: details.id,
+                  metadata_payload: details.metadata_payload
+                })
+              }
             }
           }
           break

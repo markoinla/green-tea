@@ -279,6 +279,61 @@ export function RightSidebar({
     [activeConversationId, dispatchTo]
   )
 
+  const handleApproveMetadata = useCallback(
+    async (logId: string) => {
+      if (!activeConversationId) return
+      try {
+        const { rejectedKeys } = await window.api.agent.approveMetadata(logId)
+        dispatchTo(activeConversationId, { type: 'remove_metadata', logId })
+        const note =
+          rejectedKeys.length > 0 ? ` (ignored reserved keys: ${rejectedKeys.join(', ')})` : ''
+        dispatchTo(activeConversationId, {
+          type: 'add_message',
+          message: {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: `Metadata applied successfully.${note}`,
+            timestamp: Date.now()
+          }
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        dispatchTo(activeConversationId, {
+          type: 'add_message',
+          message: {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: `Failed to apply metadata: ${message}`,
+            timestamp: Date.now()
+          }
+        })
+      }
+    },
+    [activeConversationId, dispatchTo]
+  )
+
+  const handleRejectMetadata = useCallback(
+    async (logId: string) => {
+      if (!activeConversationId) return
+      try {
+        await window.api.agent.rejectMetadata(logId)
+        dispatchTo(activeConversationId, { type: 'remove_metadata', logId })
+        dispatchTo(activeConversationId, {
+          type: 'add_message',
+          message: {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: 'Metadata change rejected.',
+            timestamp: Date.now()
+          }
+        })
+      } catch (err) {
+        console.error('Failed to reject metadata:', err)
+      }
+    },
+    [activeConversationId, dispatchTo]
+  )
+
   const handleDeleteConversation = useCallback(
     async (id: string) => {
       await deleteConversation(id)
@@ -359,6 +414,8 @@ export function RightSidebar({
               showToolResults={settings.showToolResults}
               onApprovePatch={handleApproveEdit}
               onRejectPatch={handleRejectEdit}
+              onApproveMetadata={handleApproveMetadata}
+              onRejectMetadata={handleRejectMetadata}
               messagesEndRef={messagesEndRef}
             />
           </ScrollArea>

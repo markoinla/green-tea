@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
-import { listDocuments, getDocument } from '../../vault/documents-service'
+import { listDocuments, getDocument, listByProperty } from '../../vault/documents-service'
 import { listFolders } from '../../database/repositories/folders'
+import { fold } from '../../vault/metadata'
 import { tiptapToMarkdown, type TTDoc } from '../../markdown/tiptap-markdown'
 
 export interface ToolResult {
@@ -14,15 +15,113 @@ function docToMarkdown(content: string | null): string {
   return tiptapToMarkdown(JSON.parse(content) as TTDoc).trim()
 }
 
+/**
+ * The indexed properties for a set of documents, grouped by document then key.
+ * Sources `document_properties` (the EAV substrate) so the agent sees exactly the
+ * queryable values, including one entry per `list`/`tags` element. Single-valued
+ * keys collapse to a scalar; multi-valued keys (and `tags`) stay arrays.
+ */
+function propertiesForDocs(
+  db: Database.Database,
+  docIds: string[]
+): Map<string, Record<string, string | string[]>> {
+  const out = new Map<string, Record<string, string | string[]>>()
+  if (docIds.length === 0) return out
+  const placeholders = docIds.map(() => '?').join(', ')
+  const rows = db
+    .prepare(
+      `SELECT document_id, key, value FROM document_properties
+       WHERE document_id IN (${placeholders})`
+    )
+    .all(...docIds) as { document_id: string; key: string; value: string }[]
+  for (const r of rows) {
+    let props = out.get(r.document_id)
+    if (!props) {
+      props = {}
+      out.set(r.document_id, props)
+    }
+    const existing = props[r.key]
+    if (existing === undefined) {
+      // `tags` is always an array (frontmatter tags only — see notes_query).
+      props[r.key] = r.key === 'tags' ? [r.value] : r.value
+    } else if (Array.isArray(existing)) {
+      existing.push(r.value)
+    } else {
+      props[r.key] = [existing, r.value]
+    }
+  }
+  return out
+}
+
 export function notesListDocuments(db: Database.Database, workspaceId?: string): ToolResult {
   const docs = listDocuments(db, workspaceId)
-  const summary = docs.map((d) => ({
+  const props = propertiesForDocs(
+    db,
+    docs.map((d) => d.id)
+  )
+  const summary = docs.map((d) => {
+    const p = props.get(d.id) ?? {}
+    const { tags, ...properties } = p
+    return {
+      id: d.id,
+      title: d.title,
+      folder_id: d.folder_id ?? null,
+      updated_at: d.updated_at,
+      // Frontmatter tags only (v1 does not index inline #tags in note bodies).
+      tags: Array.isArray(tags) ? tags : tags !== undefined ? [tags] : [],
+      properties
+    }
+  })
+  return { content: JSON.stringify(summary, null, 2) }
+}
+
+/**
+ * Filter notes by an indexed property or tag over `document_properties`. The
+ * predicate is EQUALITY on `value_fold` (case-insensitive, NFC-folded), composed
+ * with workspace scoping — the same predicate the human click-to-filter uses.
+ *
+ * Contract:
+ * - `key`: any property name (e.g. `status`, `priority`), or `tags`.
+ * - `value`: the value to match. For `date`/`number` properties the match is on
+ *   the coerced TEXT (e.g. `priority` value `2` matches `"2"`). Case-insensitive.
+ * - Tag queries are FRONTMATTER TAGS ONLY: inline `#tags` in note bodies are not
+ *   indexed in v1, so a tag result is not a complete view of every note using it.
+ */
+export function notesQuery(
+  db: Database.Database,
+  params: { key: string; value: string },
+  workspaceId?: string
+): ToolResult {
+  if (!params.key || params.key.trim().length === 0) {
+    return { content: '', error: 'key is required' }
+  }
+  if (params.value === undefined || params.value === null) {
+    return { content: '', error: 'value is required' }
+  }
+  if (!workspaceId) {
+    return { content: '', error: 'No workspace context available' }
+  }
+
+  const key = params.key.trim()
+  const docs = listByProperty(db, workspaceId, key, fold(String(params.value)))
+  const results = docs.map((d) => ({
     id: d.id,
     title: d.title,
     folder_id: d.folder_id ?? null,
     updated_at: d.updated_at
   }))
-  return { content: JSON.stringify(summary, null, 2) }
+  const note =
+    key === 'tags' ? ' (frontmatter tags only — inline #tags in note bodies are not indexed)' : ''
+  if (results.length === 0) {
+    return { content: `No notes match ${key} = "${params.value}"${note}.` }
+  }
+  return {
+    content: `${results.length} note(s) match ${key} = "${params.value}"${note}:\n${JSON.stringify(
+      results,
+      null,
+      2
+    )}`
+  }
 }
 
 export function notesGetMarkdown(

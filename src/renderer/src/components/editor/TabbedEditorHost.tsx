@@ -76,6 +76,7 @@ function DocumentEditor({
         onQuoteSelection={onQuoteSelection}
         externalContent={externalContent}
         externalContentVersion={externalContentVersion}
+        document={document}
       />
       {/* Only the active tab may mount the focus-trapping conflict dialog. */}
       <FileConflictDialog

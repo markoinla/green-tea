@@ -8,15 +8,18 @@ import {
   notesListFolders,
   notesGetMarkdown,
   notesSearch,
-  notesGetOutline
+  notesGetOutline,
+  notesQuery
 } from './notes-read'
 import {
   notesCreateDocument,
   notesCreateFolder,
   notesMoveToFolder,
   notesProposeEdit,
+  notesProposeMetadata,
   notesUpdateWorkspaceDescription,
-  notesUpdateWorkspaceMemory
+  notesUpdateWorkspaceMemory,
+  type MetadataEdit
 } from './notes-write'
 import { addWorkspaceFile, listWorkspaceFiles } from '../../database/repositories/workspace-files'
 import { getSetting } from '../../database/repositories/settings'
@@ -116,6 +119,33 @@ export function createNotesTools(
     }
   }
 
+  const notesQueryTool: ToolDefinition = {
+    name: 'notes_query',
+    label: 'Query Notes by Metadata',
+    description:
+      'Find notes by a frontmatter property or tag. The predicate is case-insensitive EQUALITY on the indexed value. Use key="tags" to find notes with a tag, or any property name (e.g. "status", "priority") for typed properties. For number/date properties match the value as text (e.g. priority value 2 matches "2"). NOTE: tag queries are FRONTMATTER TAGS ONLY — inline #tags written in note bodies are not indexed in v1, so a tag result is not a complete list of every note using that tag. Use notes_list to see each note\'s tags and properties.',
+    parameters: Type.Object({
+      key: Type.String({
+        description: 'The property name to filter on, or "tags" for frontmatter tags'
+      }),
+      value: Type.String({ description: 'The value to match (case-insensitive equality)' })
+    }),
+    async execute(_toolCallId, params) {
+      const p = params as { key: string; value: string }
+      const result = notesQuery(db, p, workspaceId)
+      if (result.error) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+          details: undefined
+        }
+      }
+      return {
+        content: [{ type: 'text' as const, text: result.content }],
+        details: undefined
+      }
+    }
+  }
+
   const notesGetOutlineTool: ToolDefinition = {
     name: 'notes_get_outline',
     label: 'Get Outline',
@@ -197,6 +227,48 @@ export function createNotesTools(
       if (shouldAutoApprove) {
         if (!window.isDestroyed()) {
           window.webContents.send('documents:content-changed', { id: p.document_id })
+        }
+        return {
+          content: [{ type: 'text' as const, text: result.content }],
+          details: undefined
+        }
+      }
+      return {
+        content: [{ type: 'text' as const, text: result.content }],
+        details: result.log
+      }
+    }
+  }
+
+  const notesSetMetadataTool: ToolDefinition = {
+    name: 'notes_set_metadata',
+    label: 'Set Note Metadata',
+    description:
+      'Propose frontmatter property changes across one or more notes in a single batched proposal (e.g. "tag these 30 notes" or "set status=done"). Provide an array of edits, each with a document_id and a changedKeys object of property -> value. To add a tag set tags to the full array of tags (read the note first with notes_list to see existing tags). To clear a property set its value to null. Reserved keys (id, title, created, updated) cannot be set and are ignored. The user approves or rejects the whole batch.',
+    parameters: Type.Object({
+      edits: Type.Array(
+        Type.Object({
+          document_id: Type.String({ description: 'The note ID to update' }),
+          changedKeys: Type.Record(Type.String(), Type.Unknown(), {
+            description: 'Property name -> new value. Use null to clear a property.'
+          })
+        }),
+        { description: 'One entry per note to update' }
+      )
+    }),
+    async execute(_toolCallId, params) {
+      const p = params as { edits: MetadataEdit[] }
+      const shouldAutoApprove = autoApprove ?? getSetting(db, 'autoApproveEdits') !== 'false'
+      const result = notesProposeMetadata(db, p, shouldAutoApprove, workspaceId)
+      if (result.error) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+          details: undefined
+        }
+      }
+      if (shouldAutoApprove) {
+        if (!window.isDestroyed()) {
+          window.webContents.send('documents:changed')
         }
         return {
           content: [{ type: 'text' as const, text: result.content }],
@@ -416,10 +488,12 @@ export function createNotesTools(
     notesGetMarkdownTool,
     notesGetOutlineTool,
     notesSearchTool,
+    notesQueryTool,
     notesCreateTool,
     notesCreateFolderTool,
     notesMoveToFolderTool,
     notesProposeEditTool,
+    notesSetMetadataTool,
     notesUpdateWorkspaceDescTool,
     notesUpdateWorkspaceMemoryTool,
     workspaceAddFileTool,

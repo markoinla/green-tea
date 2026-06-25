@@ -257,4 +257,73 @@ export function runMigrations(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id);
     CREATE INDEX IF NOT EXISTS idx_document_versions_doc_time ON document_versions(document_id, created_at DESC);
   `)
+
+  // Migration: note metadata (frontmatter properties). The .md frontmatter stays
+  // the source of truth; these columns/tables are a derived, queryable index.
+  // documents.frontmatter caches the parsed frontmatter JSON (fidelity cache +
+  // change-detection fingerprint).
+  const hasFrontmatterCol = db
+    .prepare(
+      "SELECT COUNT(*) as cnt FROM pragma_table_info('documents') WHERE name = 'frontmatter'"
+    )
+    .get() as { cnt: number }
+
+  if (hasFrontmatterCol.cnt === 0) {
+    db.exec('ALTER TABLE documents ADD COLUMN frontmatter TEXT')
+  }
+
+  // EAV query substrate. No PRIMARY KEY / UNIQUE: list elements may legitimately
+  // repeat. Integrity is guaranteed by the invariant that every write re-derives
+  // a note's rows in a single transaction (delete-by-document_id then reinsert).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS document_properties (
+      document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      value_fold TEXT NOT NULL,
+      value_type TEXT NOT NULL,
+      conforms INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_docprops_key_fold ON document_properties(key, value_fold);
+    CREATE INDEX IF NOT EXISTS idx_docprops_doc ON document_properties(document_id);
+  `)
+
+  // Per-workspace property type registry (auto-seeded; user override authoritative).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS property_types (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      type TEXT NOT NULL,
+      user_set INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (workspace_id, key)
+    )
+  `)
+
+  // Migration: add metadata_payload to agent_logs (Phase 5, C3 batching). A
+  // metadata proposal can target many notes at once, which the one-row-per-edit
+  // old_text/new_text columns can't express. This column holds a JSON array of
+  // { document_id, changedKeys } applied by iterating updateFrontmatter; the row's
+  // action_type is 'propose_metadata' so the apply path can branch on it.
+  const hasMetadataPayloadCol = db
+    .prepare(
+      "SELECT COUNT(*) as cnt FROM pragma_table_info('agent_logs') WHERE name = 'metadata_payload'"
+    )
+    .get() as { cnt: number }
+
+  if (hasMetadataPayloadCol.cnt === 0) {
+    db.exec('ALTER TABLE agent_logs ADD COLUMN metadata_payload TEXT')
+  }
+
+  // Migration: add metadata_* columns to conversation_messages so a metadata
+  // approval card can be persisted/rehydrated like the patch_* columns are.
+  const hasConvMetadataCol = db
+    .prepare(
+      "SELECT COUNT(*) as cnt FROM pragma_table_info('conversation_messages') WHERE name = 'metadata_log_id'"
+    )
+    .get() as { cnt: number }
+
+  if (hasConvMetadataCol.cnt === 0) {
+    db.exec('ALTER TABLE conversation_messages ADD COLUMN metadata_log_id TEXT')
+    db.exec('ALTER TABLE conversation_messages ADD COLUMN metadata_payload TEXT')
+  }
 }

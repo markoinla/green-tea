@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from 'fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type Database from 'better-sqlite3'
@@ -8,6 +8,7 @@ import { setSetting } from '../database/repositories/settings'
 import { createWorkspace } from '../database/repositories/workspaces'
 import { getWorkspaceVaultDir } from './paths'
 import { markdownToTiptap } from '../markdown/tiptap-markdown'
+import { parseFrontmatter, stringifyFrontmatter } from '../markdown/frontmatter'
 import {
   listDocuments,
   getDocument,
@@ -141,6 +142,131 @@ describe('deleteDocument', () => {
     deleteDocument(db, doc.id)
     expect(existsSync(join(vault, 'Trash.md'))).toBe(false)
     expect(getDocument(db, doc.id)).toBeUndefined()
+  })
+})
+
+describe('frontmatter preservation (C1: writes must not clobber user properties)', () => {
+  // Seed arbitrary user properties into a note's frontmatter on disk, the way an
+  // external editor (Obsidian) or a power user would. Returns the file path.
+  // Inject arbitrary user props into the EXISTING frontmatter, preserving the
+  // body bytes the service already wrote (so a same-content round-trip stays
+  // byte-stable apart from our managed keys).
+  const seedUserProps = (
+    relPath: string,
+    props: Record<string, unknown>
+  ): { file: string; before: string } => {
+    const vault = getWorkspaceVaultDir(db, workspaceId)
+    const file = join(vault, relPath)
+    const raw = readFileSync(file, 'utf-8')
+    const { data, body } = parseFrontmatter(raw)
+    const merged = { ...data, ...props }
+    const next = stringifyFrontmatter(merged, body)
+    writeFileSync(file, next, 'utf-8')
+    // re-read through the service so the index timestamp/content mirror is fresh
+    getDocument(db, idForFile)
+    return { file, before: next }
+  }
+
+  let idForFile = ''
+
+  const fmOf = (file: string): Record<string, unknown> =>
+    parseFrontmatter(readFileSync(file, 'utf-8')).data
+
+  it('(a) body autosave preserves arbitrary user properties on disk', () => {
+    const doc = createDocument(db, {
+      title: 'Autosave',
+      workspace_id: workspaceId,
+      content: content('original body')
+    })
+    idForFile = doc.id
+    const { file } = seedUserProps('Autosave.md', {
+      tags: ['alpha', 'beta'],
+      status: 'draft',
+      priority: 3,
+      pinned: true
+    })
+
+    // content-only update (the autosave path)
+    updateDocument(db, doc.id, { content: content('edited body') })
+
+    const fm = fmOf(file)
+    expect(fm.tags).toEqual(['alpha', 'beta'])
+    expect(fm.status).toBe('draft')
+    expect(fm.priority).toBe(3)
+    expect(fm.pinned).toBe(true)
+    expect(readFileSync(file, 'utf-8')).toContain('edited body')
+  })
+
+  it('(b) a simulated agent body patch preserves user properties', () => {
+    const doc = createDocument(db, {
+      title: 'Patched',
+      workspace_id: workspaceId,
+      content: content('the quick brown fox')
+    })
+    idForFile = doc.id
+    const { file } = seedUserProps('Patched.md', { author: 'jane', reviewed: false })
+
+    // An agent body patch applies through updateDocument with new content
+    // (session.applyEdit -> updateDocument(db, id, { title, content })).
+    updateDocument(db, doc.id, {
+      title: 'Patched',
+      content: content('the quick red fox')
+    })
+
+    const fm = fmOf(file)
+    expect(fm.author).toBe('jane')
+    expect(fm.reviewed).toBe(false)
+    expect(readFileSync(file, 'utf-8')).toContain('the quick red fox')
+  })
+
+  it('(c) folder move (folder_id change) preserves user properties', () => {
+    const doc = createDocument(db, {
+      title: 'Movable',
+      workspace_id: workspaceId,
+      content: content('body')
+    })
+    idForFile = doc.id
+    seedUserProps('Movable.md', { tags: ['keep', 'me'], rating: 5 })
+
+    const folder = createFolder(db, { name: 'Archive', workspace_id: workspaceId })
+    updateDocument(db, doc.id, { folder_id: folder.id })
+
+    const vault = getWorkspaceVaultDir(db, workspaceId)
+    const moved = join(vault, 'Archive', 'Movable.md')
+    expect(existsSync(moved)).toBe(true)
+    const fm = fmOf(moved)
+    expect(fm.tags).toEqual(['keep', 'me'])
+    expect(fm.rating).toBe(5)
+  })
+
+  it('(d) round-trip of a note with arbitrary keys is byte-stable except updated', () => {
+    const doc = createDocument(db, {
+      title: 'Roundtrip',
+      workspace_id: workspaceId,
+      content: content('stable content')
+    })
+    idForFile = doc.id
+    const { file } = seedUserProps('Roundtrip.md', {
+      tags: ['x', 'y', 'z'],
+      status: 'published',
+      nested: { a: 1, b: 'two' },
+      count: 42
+    })
+    const before = readFileSync(file, 'utf-8')
+
+    // A no-op-ish content save: same body, only `updated` should differ.
+    updateDocument(db, doc.id, { content: content('stable content') })
+    const after = readFileSync(file, 'utf-8')
+
+    const normalize = (s: string): string => s.replace(/^updated: .*$/m, 'updated: <ts>')
+    expect(normalize(after)).toBe(normalize(before))
+
+    // And confirm all user keys are intact and equal.
+    const fmBefore = parseFrontmatter(before).data
+    const fmAfter = parseFrontmatter(after).data
+    delete fmBefore.updated
+    delete fmAfter.updated
+    expect(fmAfter).toEqual(fmBefore)
   })
 })
 

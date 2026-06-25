@@ -1,3 +1,9 @@
+/** One note's metadata changes inside a batched proposal (renderer mirror). */
+export interface MetadataEditItem {
+  document_id: string
+  changedKeys: Record<string, unknown>
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -7,6 +13,8 @@ export interface Message {
   patchLogId?: string
   patchDiff?: string
   patchDocumentId?: string
+  metadataLogId?: string
+  metadataPayload?: MetadataEditItem[]
   toolName?: string
   toolArgs?: Record<string, unknown>
   toolCallId?: string
@@ -21,6 +29,7 @@ export type ChatAction =
   | { type: 'set_last_assistant_content'; content: string; thinking?: string }
   | { type: 'set_streaming'; streaming: boolean }
   | { type: 'remove_patch'; logId: string }
+  | { type: 'remove_metadata'; logId: string }
   | { type: 'update_tool_result'; toolCallId: string; result?: string; isError?: boolean }
   | { type: 'set_tokens'; tokens: { input: number; output: number; total: number } }
   | { type: 'clear' }
@@ -54,6 +63,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         messages: state.messages.map((m) =>
           m.patchLogId === action.logId ? { ...m, patchLogId: undefined, patchDiff: undefined } : m
+        )
+      }
+    }
+    case 'remove_metadata': {
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.metadataLogId === action.logId
+            ? { ...m, metadataLogId: undefined, metadataPayload: undefined }
+            : m
         )
       }
     }

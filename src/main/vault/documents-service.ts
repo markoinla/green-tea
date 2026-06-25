@@ -16,6 +16,13 @@ import {
   uniqueNotePath,
   MAX_NOTE_BYTES
 } from './note-store'
+import {
+  deriveProperties,
+  fold,
+  tagDisplayString,
+  RESERVED_KEYS,
+  type PropertyType
+} from './metadata'
 
 /**
  * The vault-backed documents service. Markdown files are the source of truth;
@@ -40,6 +47,8 @@ interface IndexRow {
   file_path: string | null
   created_at: string
   updated_at: string
+  /** Parsed frontmatter cached as JSON (fidelity + change-detection fingerprint). */
+  frontmatter: string | null
 }
 
 function nowIso(): string {
@@ -48,6 +57,20 @@ function nowIso(): string {
 
 function getRow(db: Database.Database, id: string): IndexRow | undefined {
   return db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as IndexRow | undefined
+}
+
+/** Parse the cached frontmatter JSON column into an object (safe; never throws). */
+function parseFrontmatterColumn(json: string | null): Record<string, unknown> {
+  if (!json) return {}
+  try {
+    const parsed = JSON.parse(json)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    // Corrupt cache — fall through to an empty object rather than throwing.
+  }
+  return {}
 }
 
 function rowToDocument(row: IndexRow): Document {
@@ -59,18 +82,217 @@ function rowToDocument(row: IndexRow): Document {
     folder_id: row.folder_id,
     file_path: row.file_path,
     created_at: row.created_at,
-    updated_at: row.updated_at
+    updated_at: row.updated_at,
+    frontmatter: parseFrontmatterColumn(row.frontmatter)
   }
 }
 
 function upsertRow(db: Database.Database, row: IndexRow): void {
   db.prepare(
-    `INSERT INTO documents (id, title, content, workspace_id, folder_id, file_path, created_at, updated_at)
-     VALUES (@id, @title, @content, @workspace_id, @folder_id, @file_path, @created_at, @updated_at)
+    `INSERT INTO documents (id, title, content, workspace_id, folder_id, file_path, created_at, updated_at, frontmatter)
+     VALUES (@id, @title, @content, @workspace_id, @folder_id, @file_path, @created_at, @updated_at, @frontmatter)
      ON CONFLICT(id) DO UPDATE SET
        title = @title, content = @content, workspace_id = @workspace_id,
-       folder_id = @folder_id, file_path = @file_path, updated_at = @updated_at`
+       folder_id = @folder_id, file_path = @file_path, updated_at = @updated_at,
+       frontmatter = @frontmatter`
   ).run(row)
+}
+
+// ---------------------------------------------------------------------------
+// metadata derivation (EAV `document_properties` + `property_types` registry)
+//
+// Every write re-derives a note's rows as a single transaction (delete-by-
+// document_id then reinsert), keyed on the RESOLVED docId. The registry is
+// auto-seeded only (user_set=0); a user-set type is never re-seeded or
+// auto-changed, and the file is never rewritten from here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the registry type for (workspace, key), auto-seeding from the inferred
+ * type when absent (user_set=0). Never re-seeds or changes a user_set=1 row.
+ */
+function resolvePropertyType(
+  db: Database.Database,
+  workspaceId: string,
+  key: string,
+  inferred: PropertyType
+): PropertyType {
+  const existing = db
+    .prepare('SELECT type FROM property_types WHERE workspace_id = ? AND key = ?')
+    .get(workspaceId, key) as { type: string } | undefined
+  if (existing) return existing.type as PropertyType
+  db.prepare(
+    'INSERT INTO property_types (workspace_id, key, type, user_set) VALUES (?, ?, ?, 0)'
+  ).run(workspaceId, key, inferred)
+  return inferred
+}
+
+/**
+ * Re-derive the EAV rows for one note and seed the registry. Caller is expected
+ * to invoke this inside the same db.transaction() as upsertRow. DB-only: no disk
+ * writes, no broadcasts.
+ */
+function deriveMetadata(
+  db: Database.Database,
+  docId: string,
+  workspaceId: string,
+  frontmatter: Record<string, unknown>
+): void {
+  db.prepare('DELETE FROM document_properties WHERE document_id = ?').run(docId)
+  const rows = deriveProperties(frontmatter, (key, inferred) =>
+    resolvePropertyType(db, workspaceId, key, inferred)
+  )
+  if (rows.length === 0) return
+  const insert = db.prepare(
+    `INSERT INTO document_properties (document_id, key, value, value_fold, value_type, conforms)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+  for (const r of rows) {
+    insert.run(docId, r.key, r.value, r.value_fold, r.value_type, r.conforms)
+  }
+}
+
+export interface PropertyTypeEntry {
+  key: string
+  type: PropertyType
+  user_set: number
+}
+
+/** List the per-workspace property type registry (auto-seeded + user-set). */
+export function getPropertyTypes(db: Database.Database, workspaceId: string): PropertyTypeEntry[] {
+  return db
+    .prepare(
+      'SELECT key, type, user_set FROM property_types WHERE workspace_id = ? ORDER BY key ASC'
+    )
+    .all(workspaceId) as PropertyTypeEntry[]
+}
+
+/**
+ * Set a user-authoritative type for (workspace, key): upsert with user_set=1 so
+ * it is never auto-re-seeded, then lazily re-derive the EAV rows of every note in
+ * the workspace that uses this key (refreshing value_type/conforms). NO file
+ * writes and NO frontmatter changes — only the derived index moves.
+ */
+export function setPropertyType(
+  db: Database.Database,
+  workspaceId: string,
+  key: string,
+  type: PropertyType
+): void {
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO property_types (workspace_id, key, type, user_set)
+       VALUES (?, ?, ?, 1)
+       ON CONFLICT(workspace_id, key) DO UPDATE SET type = excluded.type, user_set = 1`
+    ).run(workspaceId, key, type)
+
+    // Re-derive only the notes that actually carry this key. deriveMetadata reads
+    // the cached frontmatter JSON column (no disk access) and re-resolves the
+    // (now user-set) type via resolvePropertyType.
+    const affected = db
+      .prepare(
+        `SELECT DISTINCT d.id, d.frontmatter
+         FROM documents d JOIN document_properties p ON p.document_id = d.id
+         WHERE d.workspace_id = ? AND p.key = ?`
+      )
+      .all(workspaceId, key) as { id: string; frontmatter: string | null }[]
+    for (const doc of affected) {
+      deriveMetadata(db, doc.id, workspaceId, parseFrontmatterColumn(doc.frontmatter))
+    }
+  })()
+}
+
+/**
+ * Suggest tags from the workspace-global tag set for the Properties tags chip
+ * input. Sources every `key='tags'` value in `document_properties` for the
+ * workspace, groups by `value_fold`, and picks the §4.2 deterministic display
+ * string per group (most-frequent original, ties broken by MIN(value)). An
+ * optional `prefix` filters by fold (case-insensitive substring). Results are
+ * ordered by descending frequency, ties by display string ascending.
+ */
+export function tagSuggest(db: Database.Database, workspaceId: string, prefix = ''): string[] {
+  const foldedPrefix = fold(prefix)
+  const rows = db
+    .prepare(
+      `SELECT p.value AS value, p.value_fold AS value_fold
+       FROM document_properties p JOIN documents d ON d.id = p.document_id
+       WHERE d.workspace_id = ? AND p.key = 'tags'`
+    )
+    .all(workspaceId) as { value: string; value_fold: string }[]
+
+  // Group original values by their fold so the display rule (§4.2) is applied
+  // per canonical tag rather than per raw spelling.
+  const groups = new Map<string, string[]>()
+  for (const r of rows) {
+    if (foldedPrefix && !r.value_fold.includes(foldedPrefix)) continue
+    const arr = groups.get(r.value_fold)
+    if (arr) arr.push(r.value)
+    else groups.set(r.value_fold, [r.value])
+  }
+
+  const suggestions = [...groups.values()].map((originals) => ({
+    display: tagDisplayString(originals),
+    count: originals.length
+  }))
+  suggestions.sort((a, b) =>
+    b.count !== a.count ? b.count - a.count : a.display < b.display ? -1 : 1
+  )
+  return suggestions.map((s) => s.display)
+}
+
+/**
+ * Suggest existing property names across the workspace for "+ Add property"
+ * name autocomplete. Sources the union of the type registry and any keys present
+ * in `document_properties`, filtered by an optional case-insensitive prefix and
+ * sorted alphabetically. Reserved keys are never included (they are not indexed).
+ */
+export function propertyNameSuggest(
+  db: Database.Database,
+  workspaceId: string,
+  prefix = ''
+): string[] {
+  const foldedPrefix = fold(prefix)
+  const rows = db
+    .prepare(
+      `SELECT key FROM property_types WHERE workspace_id = ?
+       UNION
+       SELECT DISTINCT p.key FROM document_properties p
+       JOIN documents d ON d.id = p.document_id
+       WHERE d.workspace_id = ?`
+    )
+    .all(workspaceId, workspaceId) as { key: string }[]
+
+  const names = rows
+    .map((r) => r.key)
+    .filter((k) => !RESERVED_KEYS.has(k) && (!foldedPrefix || fold(k).includes(foldedPrefix)))
+  return [...new Set(names)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+/**
+ * Human retrieval (Phase 4): the documents in `workspaceId` that carry the
+ * property `key` with a value matching `valueFold`. The predicate is EQUALITY on
+ * the stored `value_fold` (case-insensitive, NFC-folded), composed with workspace
+ * scoping — `value_fold` is already `fold(value)` so the caller may pass a raw or
+ * pre-folded string; we fold it once here so both work. For `date`/`number` the
+ * match is on the coerced TEXT (exact), e.g. `priority=2` matches the string `"2"`
+ * (L4). Returns the same `Document[]` shape the existing list rendering consumes,
+ * ordered by `updated_at DESC` to mirror `listDocuments`.
+ */
+export function listByProperty(
+  db: Database.Database,
+  workspaceId: string,
+  key: string,
+  valueFold: string
+): Document[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT d.* FROM documents d
+       JOIN document_properties p ON p.document_id = d.id
+       WHERE d.workspace_id = ? AND p.key = ? AND p.value_fold = ?
+       ORDER BY d.updated_at DESC`
+    )
+    .all(workspaceId, key, fold(valueFold)) as IndexRow[]
+  return rows.map(rowToDocument)
 }
 
 // ---------------------------------------------------------------------------
@@ -141,22 +363,31 @@ export function getDocument(db: Database.Database, id: string): Document | undef
 
   const note = readNote(row.file_path)
   const content = JSON.stringify(note.doc)
+  const frontmatterJson = JSON.stringify(note.frontmatter)
   const refreshed: IndexRow = {
     ...row,
     title: note.title,
     content,
     created_at: note.created,
-    updated_at: note.updated
+    updated_at: note.updated,
+    frontmatter: frontmatterJson
   }
   // Keep the mirror fresh (file wins) — but only write when something actually
-  // changed, so a plain read has no side effect on the table.
-  if (row.title !== note.title || row.content !== content || row.updated_at !== note.updated) {
-    db.prepare('UPDATE documents SET title = ?, content = ?, updated_at = ? WHERE id = ?').run(
-      note.title,
-      content,
-      note.updated,
-      id
-    )
+  // changed, so a plain read has no side effect on the table. The frontmatter
+  // fingerprint is part of the gate so a metadata-only external edit re-derives
+  // the EAV rows, while a plain open never churns them (M1).
+  const changed =
+    row.title !== note.title ||
+    row.content !== content ||
+    row.updated_at !== note.updated ||
+    row.frontmatter !== frontmatterJson
+  if (changed) {
+    db.transaction(() => {
+      db.prepare(
+        'UPDATE documents SET title = ?, content = ?, updated_at = ?, frontmatter = ? WHERE id = ?'
+      ).run(note.title, content, note.updated, frontmatterJson, id)
+      deriveMetadata(db, id, row.workspace_id, note.frontmatter)
+    })()
   }
   return rowToDocument(refreshed)
 }
@@ -178,18 +409,26 @@ export function searchDocuments(
 // writes
 // ---------------------------------------------------------------------------
 
+// Merge our managed identity/timestamp keys OVER the note's existing
+// frontmatter, so arbitrary user properties (tags, status, anything) survive
+// every write. Only `id`, `title`, `created`, `updated` are owned by us; all
+// other keys pass through untouched (closes the frontmatter data-loss bug).
 function buildFrontmatter(
+  existingFm: Record<string, unknown>,
   id: string,
   title: string,
   filePath: string,
   created: string,
   updated: string
 ): Record<string, unknown> {
-  const fm: Record<string, unknown> = { id }
-  // Only store a title override when the filename can't express the title (Q7).
-  if (titleFromFilename(filePath) !== title) fm.title = title
-  fm.created = created
-  fm.updated = updated
+  const fm: Record<string, unknown> = { ...existingFm, id, created, updated }
+  // Only store a title override when the filename can't express the title (Q7);
+  // otherwise strip any stale title key so the filename remains the title.
+  if (titleFromFilename(filePath) !== title) {
+    fm.title = title
+  } else {
+    delete fm.title
+  }
   return fm
 }
 
@@ -206,19 +445,23 @@ export function createDocument(
   const filePath = uniqueNotePath(dir, slugifyTitle(data.title))
   const created = nowIso()
 
-  const frontmatter = buildFrontmatter(id, data.title, filePath, created, created)
+  const frontmatter = buildFrontmatter({}, id, data.title, filePath, created, created)
   writeNote(filePath, { frontmatter, doc })
 
-  upsertRow(db, {
-    id,
-    title: data.title,
-    content: JSON.stringify(doc),
-    workspace_id: workspaceId,
-    folder_id: folder,
-    file_path: filePath,
-    created_at: created,
-    updated_at: created
-  })
+  db.transaction(() => {
+    upsertRow(db, {
+      id,
+      title: data.title,
+      content: JSON.stringify(doc),
+      workspace_id: workspaceId,
+      folder_id: folder,
+      file_path: filePath,
+      created_at: created,
+      updated_at: created,
+      frontmatter: JSON.stringify(frontmatter)
+    })
+    deriveMetadata(db, id, workspaceId, frontmatter)
+  })()
   return rowToDocument(getRow(db, id)!)
 }
 
@@ -264,23 +507,93 @@ export function updateDocument(
     filePath = uniqueNotePath(targetDir, slugifyTitle(title))
   }
 
-  const frontmatter = buildFrontmatter(id, title, filePath, created, updated)
+  const frontmatter = buildFrontmatter(current.frontmatter, id, title, filePath, created, updated)
   writeNote(filePath, { frontmatter, doc })
   if (filePath !== row.file_path && existsSync(row.file_path)) {
     rmSync(row.file_path, { force: true })
   }
 
-  upsertRow(db, {
-    id,
-    title,
-    content: JSON.stringify(doc),
-    workspace_id: workspaceId,
-    folder_id: folder,
-    file_path: filePath,
-    created_at: created,
-    updated_at: updated
-  })
+  db.transaction(() => {
+    upsertRow(db, {
+      id,
+      title,
+      content: JSON.stringify(doc),
+      workspace_id: workspaceId,
+      folder_id: folder,
+      file_path: filePath,
+      created_at: created,
+      updated_at: updated,
+      frontmatter: JSON.stringify(frontmatter)
+    })
+    deriveMetadata(db, id, workspaceId, frontmatter)
+  })()
   return rowToDocument(getRow(db, id)!)
+}
+
+/**
+ * The single reserved-key chokepoint (M2). Merge `changedKeys` into the note's
+ * existing frontmatter and persist, re-deriving the index in one transaction.
+ * Used by BOTH the renderer and the agent/approval path.
+ *
+ * - Reads with persistBackfill=false so a stray pre-write FS event isn't minted.
+ * - MERGES only the keys in `changedKeys`; a key whose value is `null`/`undefined`
+ *   is deleted (property cleared), everything else is overwritten. Unrelated keys
+ *   pass through untouched.
+ * - RESERVED_KEYS in `changedKeys` are silently dropped; the dropped names are
+ *   returned in `rejectedKeys` so the agent path can surface them. The managed
+ *   id/title/created/updated keys are re-applied by buildFrontmatter regardless,
+ *   so a stale caller can never overwrite them.
+ * - writeNote → markSelfWrite suppresses the watcher echo.
+ */
+export function updateFrontmatter(
+  db: Database.Database,
+  id: string,
+  changedKeys: Record<string, unknown>
+): { document: Document; rejectedKeys: string[] } {
+  const row = getRow(db, id)
+  if (!row || !row.file_path) throw new Error(`Document not found: ${id}`)
+
+  if (!existsSync(row.file_path)) {
+    deleteIndexRow(db, id)
+    throw new Error(`Document file missing, removed from index: ${id}`)
+  }
+
+  // Read WITHOUT persist-backfill: a pre-write backfill would emit a stray FS
+  // event the watcher would then have to reconcile.
+  const current = readNote(row.file_path, false)
+
+  const rejectedKeys: string[] = []
+  const merged: Record<string, unknown> = { ...current.frontmatter }
+  for (const key of Object.keys(changedKeys)) {
+    if (RESERVED_KEYS.has(key)) {
+      rejectedKeys.push(key)
+      continue
+    }
+    const value = changedKeys[key]
+    if (value === null || value === undefined) {
+      delete merged[key]
+    } else {
+      merged[key] = value
+    }
+  }
+
+  const created = current.created
+  const updated = nowIso()
+  // buildFrontmatter re-applies the managed identity/timestamp keys over the
+  // merged object, so id/title/created stay authoritative no matter what.
+  const frontmatter = buildFrontmatter(merged, id, row.title, row.file_path, created, updated)
+  writeNote(row.file_path, { frontmatter, doc: current.doc })
+
+  db.transaction(() => {
+    db.prepare('UPDATE documents SET updated_at = ?, frontmatter = ? WHERE id = ?').run(
+      updated,
+      JSON.stringify(frontmatter),
+      id
+    )
+    deriveMetadata(db, id, row.workspace_id, frontmatter)
+  })()
+
+  return { document: rowToDocument(getRow(db, id)!), rejectedKeys }
 }
 
 export function deleteDocument(db: Database.Database, id: string): void {
@@ -354,16 +667,20 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
     const note = readNote(summary.path)
     const fId = summary.folder ? ensureFolderRow(db, workspaceId, summary.folder) : null
     if (fId) seenFolders.add(fId)
-    upsertRow(db, {
-      id: note.id,
-      title: note.title,
-      content: JSON.stringify(note.doc),
-      workspace_id: workspaceId,
-      folder_id: fId,
-      file_path: summary.path,
-      created_at: note.created,
-      updated_at: note.updated
-    })
+    db.transaction(() => {
+      upsertRow(db, {
+        id: note.id,
+        title: note.title,
+        content: JSON.stringify(note.doc),
+        workspace_id: workspaceId,
+        folder_id: fId,
+        file_path: summary.path,
+        created_at: note.created,
+        updated_at: note.updated,
+        frontmatter: JSON.stringify(note.frontmatter)
+      })
+      deriveMetadata(db, note.id, workspaceId, note.frontmatter)
+    })()
     seen.add(note.id)
   }
 
@@ -486,6 +803,7 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
     return { kind: 'ignored' }
   }
   const content = JSON.stringify(note.doc)
+  const frontmatterJson = JSON.stringify(note.frontmatter)
 
   const vaultDir = getWorkspaceVaultDir(db, workspaceId).normalize('NFC')
   const folderRel = toPosixRel(vaultDir, dirname(abs))
@@ -500,7 +818,16 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
 
   // The equality test EXCLUDES updated_at: it is mtime-derived and not
   // deterministic across a write, so including it would echo every app save.
-  if (row && row.title === note.title && row.content === content && row.folder_id === folderId) {
+  // It INCLUDES a frontmatter fingerprint (C2): a metadata-only external edit
+  // changes neither title/content/folder, so without this the EAV index would
+  // silently drift. Keep this PURE w.r.t. disk — EAV/registry writes are DB-only.
+  if (
+    row &&
+    row.title === note.title &&
+    row.content === content &&
+    row.folder_id === folderId &&
+    row.frontmatter === frontmatterJson
+  ) {
     if (row.file_path !== abs || row.workspace_id !== workspaceId) {
       db.prepare('UPDATE documents SET file_path = ?, workspace_id = ? WHERE id = ?').run(
         abs,
@@ -514,19 +841,24 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
   // Prefer the existing row's stable id. A frontmatter-less file mints a fresh
   // ephemeral id on every read (persistBackfill=false here), so keying the upsert
   // on note.id would INSERT a second row for the same path on each content change
-  // — reuse the path-matched row's id to update it in place instead.
+  // — reuse the path-matched row's id to update it in place instead. The EAV/
+  // registry writes are keyed on this RESOLVED docId (L1), never note.id.
   const docId = row?.id ?? note.id
   const structuralChanged = !row || row.title !== note.title || row.folder_id !== folderId
-  upsertRow(db, {
-    id: docId,
-    title: note.title,
-    content,
-    workspace_id: workspaceId,
-    folder_id: folderId,
-    file_path: abs,
-    created_at: note.created,
-    updated_at: note.updated
-  })
+  db.transaction(() => {
+    upsertRow(db, {
+      id: docId,
+      title: note.title,
+      content,
+      workspace_id: workspaceId,
+      folder_id: folderId,
+      file_path: abs,
+      created_at: note.created,
+      updated_at: note.updated,
+      frontmatter: frontmatterJson
+    })
+    deriveMetadata(db, docId, workspaceId, note.frontmatter)
+  })()
   return row
     ? { kind: 'updated', docId, structuralChanged }
     : { kind: 'created', docId, structuralChanged: true }

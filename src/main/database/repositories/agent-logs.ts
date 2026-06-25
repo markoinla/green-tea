@@ -39,11 +39,12 @@ export function createAgentLog(
     output_patch?: string
     old_text?: string
     new_text?: string
+    metadata_payload?: string
   }
 ): AgentLog {
   const id = randomUUID()
   db.prepare(
-    'INSERT INTO agent_logs (id, document_id, block_id, agent_name, action_type, input_markdown, output_patch, old_text, new_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO agent_logs (id, document_id, block_id, agent_name, action_type, input_markdown, output_patch, old_text, new_text, metadata_payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
     id,
     data.document_id ?? null,
@@ -53,7 +54,8 @@ export function createAgentLog(
     data.input_markdown ?? null,
     data.output_patch ?? null,
     data.old_text ?? null,
-    data.new_text ?? null
+    data.new_text ?? null,
+    data.metadata_payload ?? null
   )
   return db.prepare('SELECT * FROM agent_logs WHERE id = ?').get(id) as AgentLog
 }

@@ -8,6 +8,8 @@ export interface Document {
   file_path?: string | null
   created_at: string
   updated_at: string
+  /** Parsed frontmatter (note metadata) from the backing .md file. */
+  frontmatter?: Record<string, unknown>
 }
 
 export interface Folder {
@@ -52,6 +54,12 @@ export interface AgentLog {
   output_patch: string | null
   old_text: string | null
   new_text: string | null
+  /**
+   * Metadata-proposal payload (Phase 5): JSON array of
+   * `{ document_id, changedKeys }` for `action_type='propose_metadata'`. Null for
+   * markdown patches.
+   */
+  metadata_payload: string | null
   status: string
   created_at: string
 }
@@ -86,6 +94,8 @@ export interface ConversationMessage {
   patch_log_id: string | null
   patch_diff: string | null
   patch_document_id: string | null
+  metadata_log_id: string | null
+  metadata_payload: string | null
   images: string | null
   files: string | null
   created_at: string

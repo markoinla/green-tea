@@ -18,6 +18,10 @@ interface UseDocumentsResult {
       folder_id?: string | null
     }
   ) => Promise<Document>
+  updateFrontmatter: (
+    id: string,
+    changedKeys: Record<string, unknown>
+  ) => Promise<{ document: Document; rejectedKeys: string[] }>
   deleteDocument: (id: string) => Promise<void>
   refresh: () => Promise<void>
 }
@@ -68,6 +72,15 @@ export function useDocuments(workspaceId?: string | null): UseDocumentsResult {
     [refresh]
   )
 
+  const updateFrontmatter = useCallback(
+    async (id: string, changedKeys: Record<string, unknown>) => {
+      const result = await window.api.documents.updateFrontmatter(id, changedKeys)
+      await refresh()
+      return result
+    },
+    [refresh]
+  )
+
   const deleteDocument = useCallback(
     async (id: string) => {
       await window.api.documents.delete(id)
@@ -76,5 +89,13 @@ export function useDocuments(workspaceId?: string | null): UseDocumentsResult {
     [refresh]
   )
 
-  return { documents, loading, createDocument, updateDocument, deleteDocument, refresh }
+  return {
+    documents,
+    loading,
+    createDocument,
+    updateDocument,
+    updateFrontmatter,
+    deleteDocument,
+    refresh
+  }
 }

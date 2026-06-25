@@ -71,6 +71,8 @@ export function addConversationMessage(
     patch_log_id?: string
     patch_diff?: string
     patch_document_id?: string
+    metadata_log_id?: string
+    metadata_payload?: string
     images?: string
     files?: string
   }
@@ -78,8 +80,8 @@ export function addConversationMessage(
   const id = randomUUID()
   db.prepare(
     `INSERT INTO conversation_messages
-      (id, conversation_id, role, content, thinking, tool_name, tool_args, tool_call_id, tool_result, tool_is_error, patch_log_id, patch_diff, patch_document_id, images, files)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, conversation_id, role, content, thinking, tool_name, tool_args, tool_call_id, tool_result, tool_is_error, patch_log_id, patch_diff, patch_document_id, metadata_log_id, metadata_payload, images, files)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     data.conversation_id,
@@ -94,6 +96,8 @@ export function addConversationMessage(
     data.patch_log_id ?? null,
     data.patch_diff ?? null,
     data.patch_document_id ?? null,
+    data.metadata_log_id ?? null,
+    data.metadata_payload ?? null,
     data.images ?? null,
     data.files ?? null
   )

@@ -26,7 +26,21 @@ const greenteaApi = {
       id: string,
       data: { title?: string; workspace_id?: string; content?: string; folder_id?: string | null }
     ): Promise<unknown> => ipcRenderer.invoke('db:documents:update', id, data),
+    updateFrontmatter: (id: string, changedKeys: Record<string, unknown>): Promise<unknown> =>
+      ipcRenderer.invoke('db:documents:updateFrontmatter', id, changedKeys),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('db:documents:delete', id)
+  },
+  metadata: {
+    getTypes: (workspaceId: string): Promise<unknown[]> =>
+      ipcRenderer.invoke('db:metadata:getTypes', workspaceId),
+    setType: (workspaceId: string, key: string, type: string): Promise<void> =>
+      ipcRenderer.invoke('db:metadata:setType', workspaceId, key, type),
+    tagSuggest: (workspaceId: string, prefix?: string): Promise<string[]> =>
+      ipcRenderer.invoke('db:metadata:tagSuggest', workspaceId, prefix),
+    nameSuggest: (workspaceId: string, prefix?: string): Promise<string[]> =>
+      ipcRenderer.invoke('db:metadata:nameSuggest', workspaceId, prefix),
+    listByProperty: (workspaceId: string, key: string, valueFold: string): Promise<unknown[]> =>
+      ipcRenderer.invoke('db:metadata:listByProperty', workspaceId, key, valueFold)
   },
   folders: {
     list: (workspaceId?: string): Promise<unknown[]> =>
@@ -78,6 +92,12 @@ const greenteaApi = {
       ipcRenderer.invoke('agent:reset-session', conversationId),
     approveEdit: (logId: string): Promise<void> => ipcRenderer.invoke('agent:approve-edit', logId),
     rejectEdit: (logId: string): Promise<void> => ipcRenderer.invoke('agent:reject-edit', logId),
+    approveMetadata: (
+      logId: string
+    ): Promise<{ documentIds: string[]; rejectedKeys: string[] }> =>
+      ipcRenderer.invoke('agent:approve-metadata', logId),
+    rejectMetadata: (logId: string): Promise<void> =>
+      ipcRenderer.invoke('agent:reject-metadata', logId),
     generateTitle: (data: { conversationId: string; userMessage: string }): Promise<void> =>
       ipcRenderer.invoke('agent:generate-title', data),
     onEvent: (callback: (data: unknown) => void): (() => void) => {
@@ -329,6 +349,8 @@ const greenteaApi = {
       patch_log_id?: string
       patch_diff?: string
       patch_document_id?: string
+      metadata_log_id?: string
+      metadata_payload?: string
       images?: string
       files?: string
     }): Promise<unknown> => ipcRenderer.invoke('db:conversation-messages:add', data),
