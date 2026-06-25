@@ -52,12 +52,18 @@
     "dotenv": "^17.2.4",
     "electron-updater": "^6.7.3",
     "linkedom": "^0.18.12",
+    "mdast-util-from-markdown": "^2.0.2",
+    "mdast-util-gfm": "^3.1.0",
+    "mdast-util-to-markdown": "^2.1.2",
+    "micromark-extension-gfm": "^3.0.0",
     "sonner": "^2.0.7",
     "turndown": "^7.2.2",
     "typebox": "1.1.38",
-    "utf-8-validate": "^6.0.6"
+    "utf-8-validate": "^6.0.6",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
+    "@types/mdast": "^4.0.4",
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",

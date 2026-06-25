@@ -40,7 +40,13 @@ export default defineConfig({
           '@modelcontextprotocol/sdk',
           'dotenv',
           'ws',
-          'diff'
+          'diff',
+          'mdast-util-from-markdown',
+          'mdast-util-to-markdown',
+          'mdast-util-gfm',
+          'micromark-extension-gfm',
+          'micromark-util-symbol',
+          'yaml'
         ]
       }),
       fixInteropPlugin()
