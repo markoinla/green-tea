@@ -1,7 +1,6 @@
 import { ipcMain } from 'electron'
-import { mkdirSync, renameSync, existsSync } from 'fs'
+import { mkdirSync, renameSync, existsSync, rmSync } from 'fs'
 import { join } from 'path'
-import * as documents from '../database/repositories/documents'
 import * as blocks from '../database/repositories/blocks'
 import * as agentLogs from '../database/repositories/agent-logs'
 import * as folders from '../database/repositories/folders'
@@ -9,6 +8,8 @@ import * as workspaces from '../database/repositories/workspaces'
 import * as settings from '../database/repositories/settings'
 import * as conversations from '../database/repositories/conversations'
 import * as documentVersions from '../database/repositories/document-versions'
+import * as documents from '../vault/documents-service'
+import { getWorkspaceVaultDir, ensureVaultDir } from '../vault/paths'
 import type { BlockNode } from '../database/types'
 import type { SerializableBlock } from '../markdown/types'
 import { serializeBlocks } from '../markdown/serialize'
@@ -48,6 +49,8 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     const baseDir = getAgentBaseDir(db)
     const dirName = sanitizeWorkspaceName(workspace.name)
     mkdirSync(join(baseDir, 'agent-workspace', dirName), { recursive: true })
+    // Create the durable notes vault for this workspace.
+    ensureVaultDir(getWorkspaceVaultDir(db, workspace.id))
     mainWindow?.webContents.send('workspaces:changed')
     return workspace
   })
@@ -59,21 +62,28 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
         const oldWorkspace = workspaces.getWorkspace(db, id)
         if (oldWorkspace && data.name !== oldWorkspace.name) {
           const baseDir = getAgentBaseDir(db)
-          const oldDir = join(baseDir, 'agent-workspace', sanitizeWorkspaceName(oldWorkspace.name))
-          const newDir = join(baseDir, 'agent-workspace', sanitizeWorkspaceName(data.name))
-          if (existsSync(oldDir)) {
-            renameSync(oldDir, newDir)
+          const oldName = sanitizeWorkspaceName(oldWorkspace.name)
+          const newName = sanitizeWorkspaceName(data.name)
+          for (const sub of ['agent-workspace', 'vaults']) {
+            const oldDir = join(baseDir, sub, oldName)
+            const newDir = join(baseDir, sub, newName)
+            if (existsSync(oldDir) && !existsSync(newDir)) renameSync(oldDir, newDir)
           }
         }
       }
       const workspace = workspaces.updateWorkspace(db, id, data)
+      // File paths in the index moved with the vault dir — rebuild from disk.
+      documents.reindexWorkspace(db, id)
       mainWindow?.webContents.send('workspaces:changed')
+      mainWindow?.webContents.send('documents:changed')
       return workspace
     }
   )
 
   ipcMain.handle('db:workspaces:delete', (_event, id: string) => {
+    const vaultDir = getWorkspaceVaultDir(db, id)
     workspaces.deleteWorkspace(db, id)
+    if (existsSync(vaultDir)) rmSync(vaultDir, { recursive: true, force: true })
     mainWindow?.webContents.send('workspaces:changed')
     mainWindow?.webContents.send('documents:changed')
     mainWindow?.webContents.send('folders:changed')
@@ -150,7 +160,24 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
   )
 
   ipcMain.handle('db:document-versions:restore', (_event, id: string) => {
-    documentVersions.restoreVersion(db, id)
+    const version = documentVersions.getVersion(db, id)
+    if (version) {
+      const current = documents.getDocument(db, version.document_id)
+      if (current) {
+        // Snapshot current state, then restore via the file-backed service.
+        documentVersions.createVersion(db, {
+          document_id: current.id,
+          title: current.title,
+          content: current.content,
+          source: 'restore'
+        })
+        documents.updateDocument(db, version.document_id, {
+          title: version.title,
+          content: version.content ?? undefined
+        })
+      }
+    }
+    mainWindow?.webContents.send('documents:content-changed', { id: version?.document_id })
     mainWindow?.webContents.send('documents:changed')
     mainWindow?.webContents.send('document-versions:changed')
   })
@@ -166,22 +193,26 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
   })
 
   ipcMain.handle('db:folders:create', (_event, data: { name: string; workspace_id?: string }) => {
-    const folder = folders.createFolder(db, data)
+    if (!data.workspace_id) throw new Error('workspace_id is required to create a folder')
+    const folder = documents.createFolder(db, { name: data.name, workspace_id: data.workspace_id })
     mainWindow?.webContents.send('folders:changed')
-    return folder
+    return folders.getFolder(db, folder.id)
   })
 
   ipcMain.handle(
     'db:folders:update',
     (_event, id: string, data: { name?: string; collapsed?: number }) => {
+      // Renaming a folder renames its subdirectory (and moves its notes).
+      if (data.name !== undefined) documents.renameFolder(db, id, data.name)
       const folder = folders.updateFolder(db, id, data)
       mainWindow?.webContents.send('folders:changed')
+      mainWindow?.webContents.send('documents:changed')
       return folder
     }
   )
 
   ipcMain.handle('db:folders:delete', (_event, id: string) => {
-    folders.deleteFolder(db, id)
+    documents.deleteFolder(db, id)
     mainWindow?.webContents.send('folders:changed')
     mainWindow?.webContents.send('documents:changed')
   })

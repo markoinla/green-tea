@@ -232,6 +232,18 @@ export function runMigrations(db: Database.Database): void {
     db.exec('ALTER TABLE agent_logs ADD COLUMN new_text TEXT')
   }
 
+  // Migration: add file_path to documents. With markdown-on-disk, the .md file
+  // is the source of truth and the documents row becomes a derived index; this
+  // column maps an index row to its file. (content is kept as a transitional
+  // mirror so agent tools / versions keep working until they move to files.)
+  const hasFilePathCol = db
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('documents') WHERE name = 'file_path'")
+    .get() as { cnt: number }
+
+  if (hasFilePathCol.cnt === 0) {
+    db.exec('ALTER TABLE documents ADD COLUMN file_path TEXT')
+  }
+
   // Migration: create document_versions table for note version history
   db.exec(`
     CREATE TABLE IF NOT EXISTS document_versions (

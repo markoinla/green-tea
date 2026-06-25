@@ -10,6 +10,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { initAutoUpdater } from './auto-updater'
 import { seedDefaultSkills } from './skills/manager'
 import { ensureUserDirs } from './agent/paths'
+import { reindexAllWorkspaces } from './vault/documents-service'
 import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
 import { getMcpManager } from './mcp'
@@ -146,6 +147,10 @@ app.whenReady().then(() => {
 
   // Ensure base user directories exist (re-creates if deleted)
   ensureUserDirs(db)
+
+  // Rebuild the derived documents index from the markdown files on disk
+  // (files are the source of truth; the SQLite rows are a disposable cache).
+  reindexAllWorkspaces(db)
 
   // Ensure theme.json exists (re-creates with defaults if deleted)
   ensureThemeFile(db)

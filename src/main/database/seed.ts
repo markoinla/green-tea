@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { createDocument } from './repositories/documents'
+import { createDocument } from '../vault/documents-service'
 import { listWorkspaces } from './repositories/workspaces'
 
 function text(t: string, marks?: { type: string }[]) {

@@ -4,6 +4,8 @@ export interface Document {
   content: string | null
   workspace_id: string
   folder_id: string | null
+  /** Absolute path to the backing .md file (markdown-on-disk index). */
+  file_path?: string | null
   created_at: string
   updated_at: string
 }
