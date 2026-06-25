@@ -12,6 +12,7 @@ import { basename, dirname, join, relative, sep } from 'path'
 import { parseFrontmatter } from '../markdown/frontmatter'
 import { parseNoteFile, serializeNoteFile, type NoteFile } from '../markdown/note-file'
 import type { TTDoc } from '../markdown/tiptap-markdown'
+import { markSelfWrite } from './self-write'
 
 /**
  * The vault note store: all filesystem reads/writes for markdown notes. Files
@@ -25,7 +26,7 @@ import type { TTDoc } from '../markdown/tiptap-markdown'
 const IGNORED_DIRS = new Set(['.git', '.obsidian', 'node_modules', 'attachments', '.trash'])
 
 // Files larger than this are skipped by the indexer (defensive; a note is text).
-const MAX_NOTE_BYTES = 2 * 1024 * 1024
+export const MAX_NOTE_BYTES = 2 * 1024 * 1024
 
 export interface VaultNote {
   /** Stable identity from frontmatter `id`. */
@@ -173,6 +174,9 @@ export function writeNote(filePath: string, note: NoteFile): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
   const contents = serializeNoteFile(note)
+  // Record this write (final path + exact bytes) so the vault watcher recognizes
+  // the resulting filesystem event as our own and doesn't echo-loop on it.
+  markSelfWrite(filePath, contents)
   const tmp = join(dir, `.${basename(filePath)}.tmp-${randomUUID()}`)
   writeFileSync(tmp, contents, 'utf-8')
   renameSync(tmp, filePath)

@@ -15,6 +15,7 @@ import type { SerializableBlock } from '../markdown/types'
 import { serializeBlocks } from '../markdown/serialize'
 import { deserializeMarkdown } from '../markdown/deserialize'
 import { restartThemeWatcher } from '../theme-watcher'
+import { restartVaultWatcher } from '../vault/vault-watcher'
 import { resetSession } from '../agent/session'
 import { getAgentBaseDir, sanitizeWorkspaceName } from '../agent/paths'
 import type { IpcHandlerContext } from './context'
@@ -127,9 +128,12 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
         data.title === undefined &&
         data.workspace_id === undefined &&
         data.folder_id === undefined
-      if (isContentOnly) {
-        mainWindow?.webContents.send('documents:content-changed', { id })
-      } else {
+      // Content-only autosaves are NOT echoed back to the renderer: the editor
+      // already holds this content, and re-broadcasting it forced a fragile
+      // "is this my own echo?" guard. The vault watcher is the single source of
+      // external content-change notifications (it drops the app's own writes via
+      // a content-hash registry). Structural edits still refresh the sidebar.
+      if (!isContentOnly) {
         mainWindow?.webContents.send('documents:changed')
       }
       return doc
@@ -285,6 +289,7 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     mainWindow?.webContents.send('settings:changed')
     if (key === 'agentBaseDir') {
       restartThemeWatcher()
+      restartVaultWatcher()
     }
   })
 

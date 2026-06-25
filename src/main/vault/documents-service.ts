@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
-import { existsSync, renameSync, rmSync } from 'fs'
-import { join, sep } from 'path'
+import { existsSync, renameSync, rmSync, statSync } from 'fs'
+import { dirname, join, relative, sep } from 'path'
 import type { Document } from '../database/types'
 import { sanitizeWorkspaceName } from '../agent/paths'
 import { maybeCreateAutoVersion } from '../database/repositories/document-versions'
@@ -13,7 +13,8 @@ import {
   listVaultNotes,
   slugifyTitle,
   titleFromFilename,
-  uniqueNotePath
+  uniqueNotePath,
+  MAX_NOTE_BYTES
 } from './note-store'
 
 /**
@@ -390,6 +391,140 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
 export function reindexAllWorkspaces(db: Database.Database): void {
   const workspaces = db.prepare('SELECT id FROM workspaces').all() as { id: string }[]
   for (const { id } of workspaces) reindexWorkspace(db, id)
+}
+
+// ---------------------------------------------------------------------------
+// single-file reconcile (used by the vault watcher, Phase 5)
+//
+// reindexFile is PURE with respect to the app: it reconciles ONE .md path
+// against the index and returns a result describing what changed. It never
+// broadcasts, never checks the self-write registry, and never writes to disk
+// (readNote is called with persistBackfill=false). The watcher owns all of
+// that, which keeps the dependency graph a DAG (no watcher import here).
+// ---------------------------------------------------------------------------
+
+export type ReindexResult =
+  | { kind: 'created'; docId: string; structuralChanged: true }
+  | { kind: 'updated'; docId: string; structuralChanged: boolean }
+  | { kind: 'deleted'; docId: string }
+  | { kind: 'unchanged'; docId: string }
+  | { kind: 'ignored' }
+
+/** NFC POSIX path of `dir` relative to `base` ('' when they are the same dir). */
+function toPosixRel(base: string, dir: string): string {
+  const rel = relative(base, dir)
+  return rel.split(sep).join('/').normalize('NFC')
+}
+
+/** [{ workspaceId, dir (NFC, no trailing sep) }], sorted longest dir first. */
+export function getVaultDirsByWorkspace(
+  db: Database.Database
+): { workspaceId: string; dir: string }[] {
+  const rows = db.prepare('SELECT id FROM workspaces').all() as { id: string }[]
+  return rows
+    .map((r) => ({ workspaceId: r.id, dir: getWorkspaceVaultDir(db, r.id).normalize('NFC') }))
+    .sort((a, b) => b.dir.length - a.dir.length)
+}
+
+/** Owning workspace for an absolute (NFC) path, or null if it has none. */
+function resolveWorkspaceForPath(db: Database.Database, absNfc: string): string | null {
+  for (const { workspaceId, dir } of getVaultDirsByWorkspace(db)) {
+    if (absNfc === dir) return null // the workspace dir itself, not a file in it
+    if (absNfc.startsWith(dir + sep)) return workspaceId
+  }
+  return null // file lives directly in vaults/ root with no owning workspace
+}
+
+/**
+ * Remove the index row whose file_path matches (NFC). Returns the removed
+ * docId, or null if no row matched. The watcher calls this at delete-settle
+ * time rather than eagerly, so a delete+recreate flap (or an external rename
+ * processed old-path-first) never churns a still-valid row.
+ */
+export function deleteIndexRowByPath(db: Database.Database, absPathRaw: string): string | null {
+  const abs = absPathRaw.normalize('NFC')
+  const row = db.prepare('SELECT id FROM documents WHERE file_path = ?').get(abs) as
+    | { id: string }
+    | undefined
+  if (!row) return null
+  deleteIndexRow(db, row.id)
+  return row.id
+}
+
+export function reindexFile(db: Database.Database, absPathRaw: string): ReindexResult {
+  const abs = absPathRaw.normalize('NFC')
+
+  // --- DELETE branch: the file is gone. Report it but DON'T prune the row here
+  // — the watcher confirms the deletion after a settle window and prunes then,
+  // so a transient disappearance (rename/atomic-replace) can't drop a live row.
+  if (!existsSync(abs)) {
+    const row = db.prepare('SELECT id FROM documents WHERE file_path = ?').get(abs) as
+      | { id: string }
+      | undefined
+    if (!row) return { kind: 'ignored' }
+    return { kind: 'deleted', docId: row.id }
+  }
+
+  // --- workspace resolution -------------------------------------------------
+  const workspaceId = resolveWorkspaceForPath(db, abs)
+  if (!workspaceId) return { kind: 'ignored' }
+
+  // --- cheap pre-checks before the TipTap conversion ------------------------
+  let stat: ReturnType<typeof statSync>
+  try {
+    stat = statSync(abs)
+  } catch {
+    return { kind: 'ignored' }
+  }
+  if (!stat.isFile() || stat.size > MAX_NOTE_BYTES) return { kind: 'ignored' }
+
+  // --- read (READ-ONLY: persistBackfill=false so we never write from here) ---
+  let note: ReturnType<typeof readNote>
+  try {
+    note = readNote(abs, false)
+  } catch {
+    return { kind: 'ignored' }
+  }
+  const content = JSON.stringify(note.doc)
+
+  const vaultDir = getWorkspaceVaultDir(db, workspaceId).normalize('NFC')
+  const folderRel = toPosixRel(vaultDir, dirname(abs))
+  const folderId = folderRel ? ensureFolderRow(db, workspaceId, folderRel) : null
+
+  // Find the existing row by stable frontmatter id first (immune to path
+  // normalization / case), then by NFC file_path as a fallback.
+  let row = note.id ? getRow(db, note.id) : undefined
+  if (!row) {
+    row = db.prepare('SELECT * FROM documents WHERE file_path = ?').get(abs) as IndexRow | undefined
+  }
+
+  // The equality test EXCLUDES updated_at: it is mtime-derived and not
+  // deterministic across a write, so including it would echo every app save.
+  if (row && row.title === note.title && row.content === content && row.folder_id === folderId) {
+    if (row.file_path !== abs || row.workspace_id !== workspaceId) {
+      db.prepare('UPDATE documents SET file_path = ?, workspace_id = ? WHERE id = ?').run(
+        abs,
+        workspaceId,
+        row.id
+      )
+    }
+    return { kind: 'unchanged', docId: row.id }
+  }
+
+  const structuralChanged = !row || row.title !== note.title || row.folder_id !== folderId
+  upsertRow(db, {
+    id: note.id,
+    title: note.title,
+    content,
+    workspace_id: workspaceId,
+    folder_id: folderId,
+    file_path: abs,
+    created_at: note.created,
+    updated_at: note.updated
+  })
+  return row
+    ? { kind: 'updated', docId: note.id, structuralChanged }
+    : { kind: 'created', docId: note.id, structuralChanged: true }
 }
 
 // ---------------------------------------------------------------------------

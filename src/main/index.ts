@@ -11,6 +11,7 @@ import { initAutoUpdater } from './auto-updater'
 import { seedDefaultSkills } from './skills/manager'
 import { ensureUserDirs } from './agent/paths'
 import { reindexAllWorkspaces } from './vault/documents-service'
+import { startVaultWatcher, stopVaultWatcher } from './vault/vault-watcher'
 import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
 import { getMcpManager } from './mcp'
@@ -175,6 +176,10 @@ app.whenReady().then(() => {
   // Watch theme.json for live theme overrides
   startThemeWatcher(db, mainWindow)
 
+  // Watch the vault for external .md changes (Phase 5): external editors,
+  // Obsidian, sync, or the agent writing files → live-reload the open note.
+  startVaultWatcher(db, mainWindow)
+
   // Prune old document versions at startup and hourly
   pruneVersions(db)
   setInterval(() => pruneVersions(db), 60 * 60 * 1000)
@@ -191,6 +196,7 @@ app.whenReady().then(() => {
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   stopThemeWatcher()
+  stopVaultWatcher()
   getMcpManager().disconnectAll()
   if (process.platform !== 'darwin') {
     app.quit()

@@ -12,6 +12,7 @@ import type { JSONContent } from '@tiptap/react'
 import { Toaster } from 'sonner'
 import { AppLayout } from './components/layout/AppLayout'
 import { OutlinerEditor } from './components/editor/OutlinerEditor'
+import { FileConflictDialog } from './components/editor/FileConflictDialog'
 import { useDocument } from './hooks/useDocument'
 import { useAutosave } from './hooks/useAutosave'
 import { useWorkspaces } from './hooks/useWorkspaces'
@@ -154,7 +155,7 @@ function DocumentEditor({
   documentId: string
   onQuoteSelection?: (text: string) => void
 }) {
-  const { document, loading, externalContentVersion, externalContent } =
+  const { document, loading, externalContentVersion, externalContent, conflict, resolveConflict } =
     useDocument(documentId)
   const save = useAutosave(documentId)
 
@@ -176,14 +177,21 @@ function DocumentEditor({
   }
 
   return (
-    <OutlinerEditor
-      key={documentId}
-      content={initialContent}
-      onUpdate={save}
-      onQuoteSelection={onQuoteSelection}
-      externalContent={externalContent}
-      externalContentVersion={externalContentVersion}
-    />
+    <>
+      <OutlinerEditor
+        key={documentId}
+        content={initialContent}
+        onUpdate={save}
+        onQuoteSelection={onQuoteSelection}
+        externalContent={externalContent}
+        externalContentVersion={externalContentVersion}
+      />
+      <FileConflictDialog
+        open={!!conflict}
+        onReload={() => resolveConflict('reload')}
+        onKeepMine={() => resolveConflict('keepMine')}
+      />
+    </>
   )
 }
 

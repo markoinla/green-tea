@@ -1,61 +1,78 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useCallback } from 'react'
 import type { JSONContent } from '@tiptap/react'
 
 const DEBOUNCE_MS = 500
 
-/**
- * Tracks whether a documents:content-changed event was triggered by the
- * local autosave. Checked by useDocument to avoid remounting the editor
- * after our own saves.
- */
-let localSaveInFlight = false
-const LOCAL_SAVE_WINDOW_MS = 1000
+// Pending autosave state is hoisted to module scope (keyed by document id) so
+// that the conflict flow (useDocument) can inspect and cancel an armed save —
+// otherwise a queued 500ms flush would overwrite an external change the user is
+// being asked about. One source of truth for save/dirty/cancel.
+//
+// Note: the app's own saves are NOT echoed back as content-changed events — the
+// vault watcher is the single source of external-change notifications and it
+// recognizes our own writes via a content-hash registry. So there is no local
+// "is this my echo?" guard here; the renderer only ever sees genuine external
+// changes.
+interface Pending {
+  content: JSONContent
+  timer: ReturnType<typeof setTimeout>
+}
+const pending = new Map<string, Pending>()
+const conflicted = new Set<string>()
 
-export function isLocalSave(): boolean {
-  return localSaveInFlight
+export function hasUnsavedEdits(id: string): boolean {
+  return pending.has(id)
+}
+
+/** Mark/unmark that an unresolved conflict dialog is open for id (guards the unmount flush). */
+export function setConflictOpen(id: string, open: boolean): void {
+  if (open) conflicted.add(id)
+  else conflicted.delete(id)
+}
+
+/** Drop any queued autosave for id WITHOUT writing it (used when a conflict opens). */
+export function cancelPending(id: string): void {
+  const p = pending.get(id)
+  if (p) {
+    clearTimeout(p.timer)
+    pending.delete(id)
+  }
+}
+
+function doFlush(id: string): void {
+  const p = pending.get(id)
+  if (!p) return
+  clearTimeout(p.timer)
+  pending.delete(id)
+  const content = JSON.stringify(p.content)
+  window.api.documents.update(id, { content }).catch((err) => {
+    console.error('[autosave] failed to save document', id, err)
+  })
 }
 
 export function useAutosave(documentId: string) {
-  const pendingRef = useRef<JSONContent | null>(null)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const flush = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-    if (pendingRef.current) {
-      const content = JSON.stringify(pendingRef.current)
-      pendingRef.current = null
-      localSaveInFlight = true
-      window.api.documents
-        .update(documentId, { content })
-        .catch((err) => {
-          console.error('[autosave] failed to save document', documentId, err)
-        })
-        .finally(() => {
-          setTimeout(() => {
-            localSaveInFlight = false
-          }, LOCAL_SAVE_WINDOW_MS)
-        })
-    }
-  }, [documentId])
-
   const save = useCallback(
     (content: JSONContent) => {
-      pendingRef.current = content
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-      }
-      timerRef.current = setTimeout(flush, DEBOUNCE_MS)
+      const prev = pending.get(documentId)
+      if (prev) clearTimeout(prev.timer)
+      const timer = setTimeout(() => doFlush(documentId), DEBOUNCE_MS)
+      pending.set(documentId, { content, timer })
     },
-    [flush]
+    [documentId]
   )
 
-  // Flush on unmount (note switch, app close)
+  // Flush on unmount (note switch, app close) — EXCEPT when a conflict dialog is
+  // open for this id, in which case the queued edit is discarded rather than
+  // silently overwriting the external change the user is resolving.
   useEffect(() => {
-    return flush
-  }, [flush])
+    return () => {
+      if (conflicted.has(documentId)) {
+        cancelPending(documentId)
+        return
+      }
+      doFlush(documentId)
+    }
+  }, [documentId])
 
   return save
 }
