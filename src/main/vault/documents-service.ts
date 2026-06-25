@@ -1,12 +1,13 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 import { existsSync, renameSync, rmSync, statSync } from 'fs'
-import { dirname, join, relative, sep } from 'path'
+import { dirname, extname, join, relative, sep } from 'path'
 import type { Document } from '../database/types'
 import { sanitizeWorkspaceName } from '../agent/paths'
 import { maybeCreateAutoVersion } from '../database/repositories/document-versions'
 import type { TTDoc } from '../markdown/tiptap-markdown'
 import { getWorkspaceVaultDir, ensureVaultDir } from './paths'
+import { kindForRow } from './artifact-kinds'
 import {
   readNote,
   writeNote,
@@ -14,7 +15,8 @@ import {
   slugifyTitle,
   titleFromFilename,
   uniqueNotePath,
-  MAX_NOTE_BYTES
+  MAX_NOTE_BYTES,
+  MAX_ARTIFACT_BYTES
 } from './note-store'
 import {
   deriveProperties,
@@ -83,8 +85,40 @@ function rowToDocument(row: IndexRow): Document {
     file_path: row.file_path,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    frontmatter: parseFrontmatterColumn(row.frontmatter)
+    frontmatter: parseFrontmatterColumn(row.frontmatter),
+    // Derived (not stored): the single funnel for every read path, so the whole
+    // app sees `kind` without a schema column or migration.
+    kind: kindForRow(row.file_path)
   }
+}
+
+/** True when the backing file is a non-note artifact (served, never parsed). */
+function isArtifactRow(row: Pick<IndexRow, 'file_path'>): boolean {
+  return kindForRow(row.file_path) !== 'note'
+}
+
+/**
+ * Path-based identity for an artifact (v2): reuse the row already pointing at
+ * this exact file (so a same-path rewrite keeps its id and open tabs survive),
+ * else mint a fresh id. This is the ONLY identity rule for artifacts — no in-file
+ * marker, no frontmatter, no write-back from the indexer.
+ */
+function idForArtifact(db: Database.Database, absNfcPath: string): string {
+  const existing = db.prepare('SELECT id FROM documents WHERE file_path = ?').get(absNfcPath) as
+    | { id: string }
+    | undefined
+  return existing?.id ?? randomUUID()
+}
+
+/** Pick a unique `<stem><ext>` within a directory, preserving the artifact's own extension. */
+function uniqueArtifactPath(dir: string, stem: string, ext: string): string {
+  let candidate = join(dir, `${stem}${ext}`)
+  let n = 2
+  while (existsSync(candidate)) {
+    candidate = join(dir, `${stem} ${n}${ext}`)
+    n++
+  }
+  return candidate
 }
 
 function upsertRow(db: Database.Database, row: IndexRow): void {
@@ -361,6 +395,12 @@ export function getDocument(db: Database.Database, id: string): Document | undef
     return undefined
   }
 
+  // Artifact: never markdown-parse, never write back. The row IS the metadata
+  // (content stays null); the file's bytes are served by the gt-file protocol.
+  if (isArtifactRow(row)) {
+    return rowToDocument(row)
+  }
+
   const note = readNote(row.file_path)
   const content = JSON.stringify(note.doc)
   const frontmatterJson = JSON.stringify(note.frontmatter)
@@ -396,13 +436,16 @@ export function searchDocuments(
   db: Database.Database,
   query: string
 ): (Document & { workspace_name: string })[] {
-  return db
+  const rows = db
     .prepare(
       `SELECT d.*, w.name as workspace_name
        FROM documents d JOIN workspaces w ON d.workspace_id = w.id
        WHERE d.title LIKE ? ORDER BY d.updated_at DESC`
     )
-    .all(`%${query}%`) as (Document & { workspace_name: string })[]
+    .all(`%${query}%`) as (IndexRow & { workspace_name: string })[]
+  // Map through rowToDocument so artifacts carry `kind` (title-only match — their
+  // content is null and never searched).
+  return rows.map((r) => ({ ...rowToDocument(r), workspace_name: r.workspace_name }))
 }
 
 // ---------------------------------------------------------------------------
@@ -465,6 +508,51 @@ export function createDocument(
   return rowToDocument(getRow(db, id)!)
 }
 
+/**
+ * Artifact rename/move (v2). Title → filename and folder/workspace → directory,
+ * preserving the file's own extension with a single `renameSync` (no markdown
+ * path, no frontmatter, no content). The id is kept — the row's `file_path` is
+ * updated in place, so a later watcher reconcile finds it by path and never
+ * mints a duplicate. `content` stays null.
+ */
+function updateArtifact(
+  db: Database.Database,
+  row: IndexRow,
+  data: { title?: string; workspace_id?: string; folder_id?: string | null }
+): Document {
+  const oldPath = row.file_path as string
+  const workspaceId = data.workspace_id ?? row.workspace_id
+  const folder = data.folder_id !== undefined ? data.folder_id : row.folder_id
+
+  const titleChanged = data.title !== undefined && data.title !== row.title
+  const folderChanged = data.folder_id !== undefined && (data.folder_id ?? null) !== row.folder_id
+  const workspaceChanged = data.workspace_id !== undefined && data.workspace_id !== row.workspace_id
+
+  let filePath = oldPath
+  if (titleChanged || folderChanged || workspaceChanged) {
+    const targetDir = resolveDir(db, workspaceId, folder)
+    const stem = data.title !== undefined ? slugifyTitle(data.title) : titleFromFilename(oldPath)
+    filePath = uniqueArtifactPath(targetDir, stem, extname(oldPath))
+    if (filePath !== oldPath) renameSync(oldPath, filePath)
+  }
+
+  const updated = nowIso()
+  upsertRow(db, {
+    id: row.id,
+    // Display title tracks the filename (artifacts can't carry a title override),
+    // so it matches what a reindex would derive — no flap.
+    title: titleFromFilename(filePath),
+    content: null,
+    workspace_id: workspaceId,
+    folder_id: folder,
+    file_path: filePath,
+    created_at: row.created_at,
+    updated_at: updated,
+    frontmatter: null
+  })
+  return rowToDocument(getRow(db, row.id)!)
+}
+
 export function updateDocument(
   db: Database.Database,
   id: string,
@@ -479,6 +567,14 @@ export function updateDocument(
   if (!existsSync(row.file_path)) {
     deleteIndexRow(db, id)
     throw new Error(`Document file missing, removed from index: ${id}`)
+  }
+
+  // Artifact: rename/move ONLY (title → filename, folder → directory), preserving
+  // the file's own extension via a plain renameSync. NEVER readNote/writeNote/
+  // buildFrontmatter (markdown machinery) and never `content` — that would parse
+  // an .html as a note, rewrite it with frontmatter, and rmSync the original.
+  if (isArtifactRow(row)) {
+    return updateArtifact(db, row, data)
   }
 
   const current = readNote(row.file_path)
@@ -556,6 +652,12 @@ export function updateFrontmatter(
   if (!existsSync(row.file_path)) {
     deleteIndexRow(db, id)
     throw new Error(`Document file missing, removed from index: ${id}`)
+  }
+
+  // Artifacts have no frontmatter — readNote+writeNote here would parse an .html
+  // as a note and rewrite it with a `---` block. Reject loudly instead.
+  if (isArtifactRow(row)) {
+    throw new Error(`Cannot set metadata on an artifact: ${id}`)
   }
 
   // Read WITHOUT persist-backfill: a pre-write backfill would emit a stray FS
@@ -664,9 +766,33 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
   const seenFolders = new Set<string>()
 
   for (const summary of summaries) {
-    const note = readNote(summary.path)
     const fId = summary.folder ? ensureFolderRow(db, workspaceId, summary.folder) : null
     if (fId) seenFolders.add(fId)
+
+    if (summary.kind !== 'note') {
+      // Artifact: path-derived id, content=null, NO readNote / deriveMetadata /
+      // write-back. `updated_at` carries the file mtime as the change fingerprint
+      // (the indexer never reads the body). `created_at` is preserved across a
+      // rewrite by reusing the existing row's value.
+      const absPath = summary.path.normalize('NFC')
+      const docId = idForArtifact(db, absPath)
+      const existing = getRow(db, docId)
+      upsertRow(db, {
+        id: docId,
+        title: summary.title,
+        content: null,
+        workspace_id: workspaceId,
+        folder_id: fId,
+        file_path: absPath,
+        created_at: existing?.created_at ?? summary.updated,
+        updated_at: summary.updated,
+        frontmatter: null
+      })
+      seen.add(docId)
+      continue
+    }
+
+    const note = readNote(summary.path)
     db.transaction(() => {
       upsertRow(db, {
         id: note.id,
@@ -743,6 +869,19 @@ export function getVaultDirsByWorkspace(
     .sort((a, b) => b.dir.length - a.dir.length)
 }
 
+/**
+ * True when an absolute path is the vault dir of any workspace, or lives inside
+ * one. Used to reject adding a vault-internal file to the flat Files section (it
+ * is already a first-class document/artifact in the tree — no double-listing).
+ */
+export function isPathInsideAnyVault(db: Database.Database, absPathRaw: string): boolean {
+  const abs = absPathRaw.normalize('NFC')
+  for (const { dir } of getVaultDirsByWorkspace(db)) {
+    if (abs === dir || abs.startsWith(dir + sep)) return true
+  }
+  return false
+}
+
 /** Owning workspace for an absolute (NFC) path, or null if it has none. */
 function resolveWorkspaceForPath(db: Database.Database, absNfc: string): string | null {
   for (const { workspaceId, dir } of getVaultDirsByWorkspace(db)) {
@@ -793,7 +932,55 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
   } catch {
     return { kind: 'ignored' }
   }
-  if (!stat.isFile() || stat.size > MAX_NOTE_BYTES) return { kind: 'ignored' }
+  if (!stat.isFile()) return { kind: 'ignored' }
+
+  const fileKind = kindForRow(abs)
+
+  // --- artifact reconcile: path identity, content=null, NO readNote / write- ---
+  // back. `updated_at` carries the mtime as the change fingerprint, so an agent
+  // rewriting report.html (same path, new bytes) reports `updated` → the viewer
+  // live-reloads, even though the index never reads the body.
+  if (fileKind !== 'note') {
+    if (stat.size > MAX_ARTIFACT_BYTES) return { kind: 'ignored' }
+    const mtimeIso = stat.mtime.toISOString()
+    const vaultDir = getWorkspaceVaultDir(db, workspaceId).normalize('NFC')
+    const folderRel = toPosixRel(vaultDir, dirname(abs))
+    const folderId = folderRel ? ensureFolderRow(db, workspaceId, folderRel) : null
+    const title = titleFromFilename(abs)
+
+    const existing = db.prepare('SELECT * FROM documents WHERE file_path = ?').get(abs) as
+      | IndexRow
+      | undefined
+    if (
+      existing &&
+      existing.title === title &&
+      existing.folder_id === folderId &&
+      existing.workspace_id === workspaceId &&
+      existing.updated_at === mtimeIso
+    ) {
+      return { kind: 'unchanged', docId: existing.id }
+    }
+
+    const docId = existing?.id ?? randomUUID()
+    const structuralChanged =
+      !existing || existing.title !== title || existing.folder_id !== folderId
+    upsertRow(db, {
+      id: docId,
+      title,
+      content: null,
+      workspace_id: workspaceId,
+      folder_id: folderId,
+      file_path: abs,
+      created_at: existing?.created_at ?? mtimeIso,
+      updated_at: mtimeIso,
+      frontmatter: null
+    })
+    return existing
+      ? { kind: 'updated', docId, structuralChanged }
+      : { kind: 'created', docId, structuralChanged: true }
+  }
+
+  if (stat.size > MAX_NOTE_BYTES) return { kind: 'ignored' }
 
   // --- read (READ-ONLY: persistBackfill=false so we never write from here) ---
   let note: ReturnType<typeof readNote>

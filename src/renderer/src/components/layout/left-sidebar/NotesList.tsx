@@ -130,6 +130,7 @@ export function NotesList({
                         key={doc.id}
                         id={doc.id}
                         title={doc.title}
+                        kind={doc.kind}
                         isSelected={selectedDocId === doc.id}
                         onSelect={(e) => onSelectDoc(doc.id, { newTab: e.metaKey || e.ctrlKey })}
                         onRename={(newTitle) => onRenameDoc(doc.id, newTitle)}

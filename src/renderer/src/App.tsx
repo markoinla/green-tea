@@ -351,6 +351,7 @@ export default function App() {
           <TabbedEditorHost
             openDocIds={tabs.openDocIds}
             activeDocId={tabs.activeDocId}
+            workspaceId={selectedWorkspaceId}
             onQuoteSelection={setSelectionContext}
             fileNamesById={fileNamesById}
             previewVersion={activePreview}

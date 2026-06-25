@@ -13,6 +13,7 @@ import {
   resolveGtFileAsset,
   createGtFileHandler
 } from './gt-file'
+import { PICKER_BOOTSTRAP_MARKER } from './picker-bootstrap'
 
 let db: Database.Database
 let workDir: string
@@ -31,6 +32,7 @@ beforeEach(() => {
   writeFileSync(join(workDir, 'chart.js'), 'console.log(1)')
   writeFileSync(join(workDir, 'style.css'), 'body{color:red}')
   writeFileSync(join(workDir, 'icon.svg'), '<svg></svg>')
+  writeFileSync(join(workDir, 'sibling.html'), '<html><body>sibling</body></html>')
   writeFileSync(join(outsideDir, 'secret.txt'), 'TOP SECRET')
 
   const row = addWorkspaceFile(db, {
@@ -163,5 +165,63 @@ describe('createGtFileHandler', () => {
     const handle = createGtFileHandler(db)
     const res = await handle(req('/nope.js'))
     expect(res.status).toBe(404)
+  })
+
+  it('injects the picker bootstrap into the entry html before </body>', async () => {
+    const handle = createGtFileHandler(db)
+    const res = await handle(req('/'))
+    const body = await res.text()
+    expect(body).toContain(PICKER_BOOTSTRAP_MARKER)
+    const markerAt = body.indexOf(PICKER_BOOTSTRAP_MARKER)
+    const closeBodyAt = body.toLowerCase().indexOf('</body>')
+    expect(markerAt).toBeGreaterThanOrEqual(0)
+    expect(closeBodyAt).toBeGreaterThanOrEqual(0)
+    expect(markerAt).toBeLessThan(closeBodyAt)
+  })
+
+  it('keeps the CSP header on the injected entry response', async () => {
+    const handle = createGtFileHandler(db)
+    const res = await handle(req('/'))
+    expect(res.headers.get('Content-Security-Policy')).toBe(buildGtFileCsp())
+  })
+
+  it('does NOT inject the bootstrap into a served sibling html file', async () => {
+    const handle = createGtFileHandler(db)
+    const res = await handle(req('/sibling.html'))
+    expect(res.headers.get('Content-Type')).toBe('text/html')
+    const body = await res.text()
+    expect(body).not.toContain(PICKER_BOOTSTRAP_MARKER)
+  })
+
+  it('does NOT inject the bootstrap into js/css assets', async () => {
+    const handle = createGtFileHandler(db)
+    const js = await handle(req('/chart.js'))
+    expect(await js.text()).not.toContain(PICKER_BOOTSTRAP_MARKER)
+    const css = await handle(req('/style.css'))
+    expect(await css.text()).not.toContain(PICKER_BOOTSTRAP_MARKER)
+  })
+
+  it('appends the bootstrap when the entry html has no </body>', async () => {
+    const noBodyDir = mkdtempSync(join(tmpdir(), 'gt-file-nobody-'))
+    try {
+      const entryPath = join(noBodyDir, 'index.html')
+      writeFileSync(entryPath, '<div>no closing body tag here</div>')
+      const ws = createWorkspace(db, { name: 'NoBody' })
+      const row = addWorkspaceFile(db, {
+        workspace_id: ws.id,
+        file_path: entryPath,
+        file_name: 'index.html'
+      })
+      const handle = createGtFileHandler(db)
+      const res = await handle(new Request(`gt-file://${row.id}/`) as unknown as GlobalRequest)
+      const body = await res.text()
+      expect(body).toContain(PICKER_BOOTSTRAP_MARKER)
+      // Appended at the end (after the original content).
+      expect(body.indexOf('no closing body tag here')).toBeLessThan(
+        body.indexOf(PICKER_BOOTSTRAP_MARKER)
+      )
+    } finally {
+      rmSync(noBodyDir, { recursive: true, force: true })
+    }
   })
 })

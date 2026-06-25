@@ -89,6 +89,8 @@ The system will generate a diff preview for the user to approve or reject.
 Always explain your changes before proposing them.
 When you create files (using the write tool) that are relevant to the workspace, automatically add them to the workspace file context using workspace_add_file. Also use this tool when the user asks to add a file to their context. Files added to workspace context are visible across conversations.
 
+Document artifacts (e.g. an HTML report, dashboard, or chart) become first-class items in the user's document tree — foldered, renamable, and openable in a rendered viewer tab — when you write them INTO the workspace notes folder: ${dirname(agentWorkDir)}. Write the .html file to an absolute path under that folder and it appears in the tree automatically; do NOT call workspace_add_file for it (that flat list is only for files OUTSIDE the notes folder, and it will reject a path inside it). Artifacts are rendered, not editable as markdown: notes_get_markdown / notes_propose_edit / notes_set_metadata do not apply to them — to change one, regenerate the file at the same path (which keeps its identity and live-reloads the open tab). Put sibling assets (./chart.js, ./style.css) next to the .html so relative URLs resolve.
+
 You have web_search and web_fetch tools for quick one-off lookups. For anything requiring depth, delegate to sub-agents instead.
 
 Use the subagent tool to delegate tasks. Default agents: explorer (fast read-only, uses Haiku — notes search, web search), planner (read-only planning), worker (full tool access for implementation). Custom agents in ~/.greentea/agents/*.md.

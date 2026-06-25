@@ -1,5 +1,7 @@
 import React from 'react'
-import { FileText, Pencil, Copy, Trash2 } from 'lucide-react'
+import { Pencil, Copy, Trash2 } from 'lucide-react'
+import { iconForKind } from '@renderer/components/artifacts/registry'
+import type { DocumentKind } from '../../../../../main/database/types'
 import { SidebarMenuButton, SidebarMenuItem } from '@renderer/components/ui/sidebar'
 import {
   ContextMenu,
@@ -18,6 +20,8 @@ import { useInlineRename } from '@renderer/hooks/useInlineRename'
 interface DocumentMenuItemProps {
   id: string
   title: string
+  /** Drives the icon (note → FileText; html → FileCode; …). */
+  kind?: DocumentKind
   isSelected: boolean
   onSelect: (e: React.MouseEvent) => void
   onRename: (newTitle: string) => void
@@ -29,6 +33,7 @@ interface DocumentMenuItemProps {
 export const DocumentMenuItem = React.memo(function DocumentMenuItem({
   id: _id, // eslint-disable-line @typescript-eslint/no-unused-vars
   title,
+  kind,
   isSelected,
   onSelect,
   onRename,
@@ -36,6 +41,7 @@ export const DocumentMenuItem = React.memo(function DocumentMenuItem({
   onDelete,
   onDragStart
 }: DocumentMenuItemProps) {
+  const Icon = iconForKind(kind)
   const {
     isEditing,
     editValue,
@@ -62,7 +68,7 @@ export const DocumentMenuItem = React.memo(function DocumentMenuItem({
                   tooltip={title}
                   size="sm"
                 >
-                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
                   {isEditing ? (
                     <input
                       ref={inputRef}

@@ -162,6 +162,17 @@ export function notesProposeEdit(
     return { content: '', error: 'new_text is required' }
   }
 
+  const target = getDocument(db, params.document_id)
+  if (!target) {
+    return { content: '', error: `Document not found: ${params.document_id}` }
+  }
+  if (target.kind && target.kind !== 'note') {
+    return {
+      content: '',
+      error: `"${target.title}" is a ${target.kind} artifact, not a markdown note — markdown patches do not apply. Regenerate the file on disk instead.`
+    }
+  }
+
   const current = getCurrentMarkdown(db, params.document_id)
   if (!current) {
     return { content: '', error: `Document not found: ${params.document_id}` }
@@ -250,6 +261,12 @@ export function notesProposeMetadata(
     }
     if (workspaceId && doc.workspace_id !== workspaceId) {
       return { content: '', error: `Document not in current workspace: ${edit.document_id}` }
+    }
+    if (doc.kind && doc.kind !== 'note') {
+      return {
+        content: '',
+        error: `"${doc.title}" is a ${doc.kind} artifact, not a markdown note — it has no frontmatter to set.`
+      }
     }
 
     // Strip reserved keys here too so the model learns immediately; the

@@ -1,15 +1,30 @@
+/**
+ * A document's kind, derived from its backing file's extension. `'note'` is the
+ * markdown editor path; any other value is a rendered artifact. The extension→
+ * kind mapping (and the helpers) live in `../vault/artifact-kinds`; the type is
+ * defined HERE so the renderer can import it without pulling in node-only code.
+ */
+export type DocumentKind = 'note' | 'html'
+
 export interface Document {
   id: string
   title: string
   content: string | null
   workspace_id: string
   folder_id: string | null
-  /** Absolute path to the backing .md file (markdown-on-disk index). */
+  /** Absolute path to the backing file (markdown-on-disk index, or an artifact). */
   file_path?: string | null
   created_at: string
   updated_at: string
   /** Parsed frontmatter (note metadata) from the backing .md file. */
   frontmatter?: Record<string, unknown>
+  /**
+   * Derived from the backing file's extension (v2). `'note'` is the genuine
+   * markdown editor path; any other value is a rendered artifact (`content` is
+   * null, opened in a kind-specific viewer). Derived in `rowToDocument`, so every
+   * read path carries it.
+   */
+  kind?: DocumentKind
 }
 
 export interface Folder {

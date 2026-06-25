@@ -13,6 +13,7 @@ import { parseFrontmatter } from '../markdown/frontmatter'
 import { parseNoteFile, serializeNoteFile, type NoteFile } from '../markdown/note-file'
 import type { TTDoc } from '../markdown/tiptap-markdown'
 import { markSelfWrite } from './self-write'
+import { kindForExt, type DocumentKind } from './artifact-kinds'
 
 /**
  * The vault note store: all filesystem reads/writes for markdown notes. Files
@@ -27,6 +28,11 @@ const IGNORED_DIRS = new Set(['.git', '.obsidian', 'node_modules', 'attachments'
 
 // Files larger than this are skipped by the indexer (defensive; a note is text).
 export const MAX_NOTE_BYTES = 2 * 1024 * 1024
+
+// Artifacts (html, …) are served, not parsed, and routinely inline libraries or
+// data far past a note's text budget — so they get a much larger cap. The body is
+// never read at index time, so this only bounds what the tree will surface.
+export const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
 
 export interface VaultNote {
   /** Stable identity from frontmatter `id`. */
@@ -50,6 +56,8 @@ export interface VaultNoteSummary {
   path: string
   folder: string
   updated: string
+  /** Derived from the extension. `'note'` is parsed; any other kind is an artifact. */
+  kind: DocumentKind
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +65,10 @@ export interface VaultNoteSummary {
 // ---------------------------------------------------------------------------
 
 export function titleFromFilename(filePath: string): string {
-  return basename(filePath).replace(/\.md$/i, '')
+  // Strip the actual trailing extension (not just `.md`) so `report.html` and
+  // `report.csv` display as "report" like `report.md` does. Notes always carry a
+  // `.md` extension, so this is identical to the old `.md`-only strip for them.
+  return basename(filePath).replace(/\.[^./\\]+$/, '')
 }
 
 /** Turn a desired title into a filesystem-legal filename stem. */
@@ -195,9 +206,12 @@ function toPosix(p: string): string {
 }
 
 /**
- * Recursively list every note in a vault, cheaply (frontmatter only — no body
- * conversion). Honors the ignore-list and the size cap. Used to (re)build the
- * derived index.
+ * Recursively list every indexable file in a vault, cheaply. Notes (`.md`) are
+ * read for frontmatter only (no body conversion); artifacts (html, …) are
+ * metadata-only — the body is NEVER read here (path-based identity, see
+ * documents-service). Honors the ignore-list and a per-kind size cap. An
+ * extension not in `artifact-kinds` is skipped. Used to (re)build the derived
+ * index.
  */
 export function listVaultNotes(vaultDir: string): VaultNoteSummary[] {
   const out: VaultNoteSummary[] = []
@@ -211,22 +225,38 @@ export function listVaultNotes(vaultDir: string): VaultNoteSummary[] {
         walk(full)
         continue
       }
-      if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue
+      if (!entry.isFile()) continue
+      const kind = kindForExt(entry.name)
+      if (!kind) continue
 
       const stat = statSync(full)
-      if (stat.size > MAX_NOTE_BYTES) continue
+      const cap = kind === 'note' ? MAX_NOTE_BYTES : MAX_ARTIFACT_BYTES
+      if (stat.size > cap) continue
       const mtimeIso = stat.mtime.toISOString()
-
-      const { data: frontmatter } = parseFrontmatter(readFileSync(full, 'utf-8'))
       const folderRel = toPosix(relative(vaultDir, dirname(full)))
 
-      out.push({
-        id: typeof frontmatter.id === 'string' ? frontmatter.id : null,
-        title: resolveTitle(frontmatter, full),
-        path: full,
-        folder: folderRel,
-        updated: reconcileUpdated(frontmatter.updated, mtimeIso)
-      })
+      if (kind === 'note') {
+        const { data: frontmatter } = parseFrontmatter(readFileSync(full, 'utf-8'))
+        out.push({
+          id: typeof frontmatter.id === 'string' ? frontmatter.id : null,
+          title: resolveTitle(frontmatter, full),
+          path: full,
+          folder: folderRel,
+          updated: reconcileUpdated(frontmatter.updated, mtimeIso),
+          kind
+        })
+      } else {
+        // Artifact: path-derived identity (id resolved by the indexer), title from
+        // the filename, mtime as the change fingerprint. No body read.
+        out.push({
+          id: null,
+          title: titleFromFilename(full),
+          path: full,
+          folder: folderRel,
+          updated: mtimeIso,
+          kind
+        })
+      }
     }
   }
 

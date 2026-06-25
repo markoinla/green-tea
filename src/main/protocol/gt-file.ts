@@ -3,14 +3,25 @@ import { readFile, realpath } from 'fs/promises'
 import { realpathSync } from 'fs'
 import { dirname, extname, join, normalize, relative, isAbsolute, sep } from 'path'
 import { getWorkspaceFileById } from '../database/repositories/workspace-files'
+import { kindForExt } from '../vault/artifact-kinds'
+import { PICKER_BOOTSTRAP_SCRIPT } from './picker-bootstrap'
 
 /**
- * The gt-file:// protocol serves an HTML artifact (a `workspace_files` row) and
- * its sibling assets to a sandboxed iframe. The workspace-file id is the URL
- * authority (host):
+ * The gt-file:// protocol serves an HTML artifact and its sibling assets to a
+ * sandboxed iframe. The URL authority (host) is an id that resolves to a backing
+ * file two ways:
  *
- *   gt-file://<workspaceFileId>/                       -> the artifact's own file
- *   gt-file://<workspaceFileId>/<relativeAssetPath>    -> a sibling asset
+ *   gt-file://<docId>/             -> a document-tree artifact (v2: an indexed
+ *                                     `documents` row whose kind is non-note)
+ *   gt-file://<workspaceFileId>/   -> a flat Files-section artifact (v1)
+ *   gt-file://<id>/<relativeAsset> -> a sibling asset, either way
+ *
+ * A v2 artifact-doc id is tried first; a flat workspace-file id is the fallback,
+ * so the v1 Files-section path keeps working unchanged. Notes are never served
+ * (their kind is `note`). The clamp root is the backing file's OWN directory in
+ * both cases — relative URLs in the HTML resolve against `gt-file://<id>/`, so
+ * the sibling-dir clamp is exactly what makes `./chart.js` work (and is tighter
+ * than the whole vault).
  *
  * It is modeled on the older gt-image handler but corrected: gt-file has real
  * path-traversal protection (realpath clamp to the file's own directory) and is
@@ -155,11 +166,31 @@ export function resolveGtFileAsset({
 }
 
 /**
+ * Resolve a gt-file host id to a backing absolute file path. A document-tree
+ * artifact (v2) is preferred; a flat workspace file (v1) is the fallback. Notes
+ * are refused (`kind === 'note'`) so the protocol can never serve raw markdown.
+ */
+export function resolveGtFilePath(db: Database.Database, id: string): string | null {
+  const doc = db.prepare('SELECT file_path FROM documents WHERE id = ?').get(id) as
+    | { file_path: string | null }
+    | undefined
+  if (doc?.file_path) {
+    const kind = kindForExt(doc.file_path)
+    if (kind && kind !== 'note') return doc.file_path
+    // A note doc id is never served via gt-file; do NOT fall through to a
+    // workspace-file lookup for it (ids are unique across tables in practice).
+    return null
+  }
+  const wf = getWorkspaceFileById(db, id)
+  return wf?.file_path ?? null
+}
+
+/**
  * Build the gt-file:// protocol handler bound to a database. The handler reads
- * the workspace-file id from the URL host, looks up its absolute `file_path`,
- * and serves either that file (root pathname) or a traversal-guarded sibling
- * asset under its directory. Every response carries the CSP header. Any
- * miss/rejection returns a 404.
+ * the artifact id from the URL host, resolves its absolute `file_path` (doc
+ * artifact, then workspace file), and serves either that file (root pathname) or
+ * a traversal-guarded sibling asset under its directory. Every response carries
+ * the CSP header. Any miss/rejection returns a 404.
  */
 export function createGtFileHandler(
   db: Database.Database
@@ -178,18 +209,19 @@ export function createGtFileHandler(
       return notFound()
     }
 
-    const workspaceFileId = url.hostname
-    if (!workspaceFileId) return notFound()
+    const artifactId = url.hostname
+    if (!artifactId) return notFound()
 
-    const row = getWorkspaceFileById(db, workspaceFileId)
-    if (!row || !row.file_path) return notFound()
+    const filePath = resolveGtFilePath(db, artifactId)
+    if (!filePath) return notFound()
 
-    const baseDir = dirname(row.file_path)
+    const baseDir = dirname(filePath)
 
     // Empty / "/" pathname => serve the artifact's own file.
     const pathname = url.pathname.replace(/^\/+/, '')
 
     let absPath: string
+    const isEntry = pathname.length === 0
     if (pathname.length === 0) {
       // Serve the entry file itself, but still validate it resolves and stays
       // inside its own directory (defends against a symlinked entry escaping).
@@ -197,7 +229,7 @@ export function createGtFileHandler(
       let realEntry: string
       try {
         realBase = await realpath(baseDir)
-        realEntry = await realpath(row.file_path)
+        realEntry = await realpath(filePath)
       } catch {
         return notFound()
       }
@@ -215,6 +247,23 @@ export function createGtFileHandler(
       data = await readFile(absPath)
     } catch {
       return notFound()
+    }
+
+    // Preview-time injection: only the ENTRY html document gets the element
+    // picker bootstrap. The parent cannot postMessage a listener into an
+    // opaque-origin frame, so the script must already be in the document at
+    // load — the only place to add it is here. The served bytes therefore
+    // intentionally differ from the bytes on disk; gt-file:// is a preview
+    // surface consumed only by HtmlViewer. Sibling assets and non-html are
+    // left untouched.
+    if (isEntry && contentTypeFor(absPath) === 'text/html') {
+      const html = data.toString('utf8')
+      // Function replacer (not a `$&` string) so a `$` anywhere in the bootstrap
+      // script is never reinterpreted as a replacement pattern.
+      const injected = /<\/body>/i.test(html)
+        ? html.replace(/<\/body>/i, (match) => PICKER_BOOTSTRAP_SCRIPT + match)
+        : html + PICKER_BOOTSTRAP_SCRIPT
+      data = Buffer.from(injected, 'utf8')
     }
 
     return new Response(new Uint8Array(data), {

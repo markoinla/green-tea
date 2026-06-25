@@ -6,6 +6,8 @@ import { useDocument } from '@renderer/hooks/useDocument'
 import { useAutosave, hasConflict } from '@renderer/hooks/useAutosave'
 import { computeMountedIds } from '@renderer/hooks/tab-state'
 import { isFileTabId, parseFileTabId } from '@renderer/lib/tab-ids'
+import { useDocuments } from '@renderer/hooks/useDocuments'
+import { viewerForKind } from '@renderer/components/artifacts/registry'
 import { OutlinerEditor } from './OutlinerEditor'
 import { HtmlViewer } from './HtmlViewer'
 import { FileConflictDialog } from './FileConflictDialog'
@@ -93,6 +95,8 @@ function DocumentEditor({
 export interface TabbedEditorHostProps {
   openDocIds: string[]
   activeDocId: string | null
+  /** Active workspace — used to resolve each open doc's `kind` for viewer dispatch. */
+  workspaceId: string | null
   onQuoteSelection?: (text: string) => void
   /** LRU keep-mounted cap. */
   liveCap?: number
@@ -117,6 +121,7 @@ export interface TabbedEditorHostProps {
 export function TabbedEditorHost({
   openDocIds,
   activeDocId,
+  workspaceId,
   onQuoteSelection,
   liveCap = 8,
   fileNamesById,
@@ -125,6 +130,16 @@ export function TabbedEditorHost({
   onRestorePreview
 }: TabbedEditorHostProps) {
   const [mountedIds, setMountedIds] = useState<string[]>([])
+
+  // Resolve each open doc's `kind` so an artifact tab renders its registry viewer
+  // instead of the markdown editor. (Notes and not-yet-loaded ids fall through to
+  // DocumentEditor — its hooks read content=null harmlessly until the kind lands.)
+  const { documents } = useDocuments(workspaceId)
+  const docsById = useMemo(() => {
+    const map = new Map<string, (typeof documents)[number]>()
+    for (const d of documents) map.set(d.id, d)
+    return map
+  }, [documents])
 
   useEffect(() => {
     setMountedIds((prev) => computeMountedIds(prev, openDocIds, activeDocId, liveCap, hasConflict))
@@ -150,11 +165,13 @@ export function TabbedEditorHost({
     <div className="flex flex-col flex-1 min-h-0 relative">
       {renderIds.map((id) => {
         const visible = id === activeDocId && !activePreview
-        // Branch ABOVE the hooks: a `file:` (HTML artifact) tab renders the
-        // sandboxed HtmlViewer and never mounts DocumentEditor, so useDocument /
-        // useAutosave never run for it (Rules of Hooks). The version-preview
-        // overlay below is doc-only and never matches a file tab.
+        // Branch ABOVE the hooks: a `file:` (v1 Files-section) tab or a v2
+        // artifact doc renders a viewer and never mounts DocumentEditor, so
+        // useDocument / useAutosave never run for it (Rules of Hooks). The
+        // version-preview overlay below is note-only and never matches either.
         const fileId = isFileTabId(id) ? parseFileTabId(id) : null
+        const artifactDoc = fileId ? null : docsById.get(id)
+        const ArtifactViewer = artifactDoc ? viewerForKind(artifactDoc.kind)?.Viewer : null
         return (
           <div
             key={id}
@@ -163,7 +180,13 @@ export function TabbedEditorHost({
           >
             <ErrorBoundary>
               {fileId ? (
-                <HtmlViewer workspaceFileId={fileId} fileName={fileNamesById?.get(fileId)} />
+                <HtmlViewer
+                  gtFileId={fileId}
+                  fileName={fileNamesById?.get(fileId)}
+                  onQuoteSelection={onQuoteSelection}
+                />
+              ) : ArtifactViewer && artifactDoc ? (
+                <ArtifactViewer doc={artifactDoc} onQuoteSelection={onQuoteSelection} />
               ) : (
                 <DocumentEditor
                   documentId={id}

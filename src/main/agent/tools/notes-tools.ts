@@ -22,6 +22,7 @@ import {
   type MetadataEdit
 } from './notes-write'
 import { addWorkspaceFile, listWorkspaceFiles } from '../../database/repositories/workspace-files'
+import { isPathInsideAnyVault } from '../../vault/documents-service'
 import { getSetting } from '../../database/repositories/settings'
 import { createWebSearchTool } from './web-search'
 import { createWebFetchTool } from './web-fetch'
@@ -432,6 +433,22 @@ export function createNotesTools(
 
       const filePath = p.file_path.trim()
       const fileName = basename(filePath)
+
+      // Reject a path inside any workspace notes folder: such a file is already a
+      // first-class artifact in the document tree (or a note), so listing it in
+      // the flat Files section too would double-list it. Files belong here only
+      // when they live OUTSIDE the vault.
+      if (isPathInsideAnyVault(db, filePath)) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `"${fileName}" is inside the workspace notes folder, so it is already a first-class document/artifact in the tree — no need to add it to the Files section. Open it from the document explorer instead.`
+            }
+          ],
+          details: undefined
+        }
+      }
 
       // Check if file is already in workspace context
       const existing = listWorkspaceFiles(db, workspaceId)

@@ -15,6 +15,11 @@ function docToMarkdown(content: string | null): string {
   return tiptapToMarkdown(JSON.parse(content) as TTDoc).trim()
 }
 
+/** The uniform refusal for markdown-shaped operations on a rendered artifact. */
+function artifactRejectMessage(title: string, kind: string): string {
+  return `"${title}" is a ${kind} artifact, not a markdown note — it is rendered, not editable as text. Markdown read/patch tools do not apply. Regenerate the file on disk to change it.`
+}
+
 /**
  * The indexed properties for a set of documents, grouped by document then key.
  * Sources `document_properties` (the EAV substrate) so the agent sees exactly the
@@ -65,6 +70,9 @@ export function notesListDocuments(db: Database.Database, workspaceId?: string):
     return {
       id: d.id,
       title: d.title,
+      // 'note' is editable markdown; any other kind is a rendered artifact — the
+      // agent can reference its id but cannot read/patch it as markdown.
+      kind: d.kind ?? 'note',
       folder_id: d.folder_id ?? null,
       updated_at: d.updated_at,
       // Frontmatter tags only (v1 does not index inline #tags in note bodies).
@@ -140,6 +148,9 @@ export function notesGetMarkdown(
   if (workspaceId && doc.workspace_id !== workspaceId) {
     return { content: '', error: `Document not in current workspace` }
   }
+  if (doc.kind && doc.kind !== 'note') {
+    return { content: '', error: artifactRejectMessage(doc.title, doc.kind) }
+  }
 
   const body = docToMarkdown(doc.content)
   return {
@@ -157,19 +168,23 @@ export function notesSearch(
   }
 
   // The index mirrors each note's content, so search it directly (title + body).
+  // Artifacts carry content=null and are not text-searchable — exclude them so a
+  // title-only match never surfaces a rendered artifact with an empty snippet.
   const like = `%${params.query}%`
   const rows = (
     workspaceId
       ? db
           .prepare(
             `SELECT id, title, content FROM documents
-             WHERE workspace_id = ? AND (title LIKE ? OR content LIKE ?) ORDER BY updated_at DESC LIMIT 20`
+             WHERE workspace_id = ? AND content IS NOT NULL AND (title LIKE ? OR content LIKE ?)
+             ORDER BY updated_at DESC LIMIT 20`
           )
           .all(workspaceId, like, like)
       : db
           .prepare(
             `SELECT id, title, content FROM documents
-             WHERE title LIKE ? OR content LIKE ? ORDER BY updated_at DESC LIMIT 20`
+             WHERE content IS NOT NULL AND (title LIKE ? OR content LIKE ?)
+             ORDER BY updated_at DESC LIMIT 20`
           )
           .all(like, like)
   ) as Array<{ id: string; title: string; content: string | null }>
@@ -210,6 +225,9 @@ export function notesGetOutline(
   }
   if (workspaceId && doc.workspace_id !== workspaceId) {
     return { content: '', error: `Document not in current workspace` }
+  }
+  if (doc.kind && doc.kind !== 'note') {
+    return { content: '', error: artifactRejectMessage(doc.title, doc.kind) }
   }
 
   const body = docToMarkdown(doc.content)

@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
-import { X, History, FileCode } from 'lucide-react'
+import { X, History, FileCode, type LucideIcon } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useDocuments } from '@renderer/hooks/useDocuments'
 import { useWorkspaceFiles } from '@renderer/hooks/useWorkspaceFiles'
 import { useInlineRename } from '@renderer/hooks/useInlineRename'
 import { isFileTabId, parseFileTabId } from '@renderer/lib/tab-ids'
+import { viewerForKind } from '@renderer/components/artifacts/registry'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -47,6 +48,16 @@ export function TabStrip({
     return map
   }, [documents])
 
+  // Per-kind tab icon for artifact docs (notes stay iconless, matching today).
+  const iconById = useMemo(() => {
+    const map = new Map<string, LucideIcon>()
+    for (const doc of documents) {
+      const entry = viewerForKind(doc.kind)
+      if (entry) map.set(doc.id, entry.icon)
+    }
+    return map
+  }, [documents])
+
   // `file:` (HTML artifact) tabs label from the workspace-file name, not a doc
   // title.
   const fileNames = useMemo(() => {
@@ -71,6 +82,7 @@ export function TabStrip({
           key={id}
           title={labelFor(id)}
           isFile={isFileTabId(id)}
+          icon={isFileTabId(id) ? FileCode : iconById.get(id)}
           isActive={id === activeDocId}
           isDragOver={dragOverIndex === index}
           onActivate={() => onActivate(id)}
@@ -115,6 +127,8 @@ export function VersionHistoryButton({ onClick }: { onClick: () => void }) {
 interface TabProps {
   title: string
   isFile?: boolean
+  /** Optional leading icon (file/artifact tabs); notes pass none. */
+  icon?: LucideIcon
   isActive: boolean
   isDragOver: boolean
   onActivate: () => void
@@ -132,6 +146,7 @@ interface TabProps {
 function Tab({
   title,
   isFile = false,
+  icon: Icon,
   isActive,
   isDragOver,
   onActivate,
@@ -196,7 +211,7 @@ function Tab({
             />
           ) : (
             <>
-              {isFile && <FileCode className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              {Icon && <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" />}
               <span className="flex-1 min-w-0 truncate text-sm">{title}</span>
             </>
           )}

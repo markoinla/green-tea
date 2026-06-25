@@ -32,5 +32,11 @@ export default defineConfig(
       'react/prop-types': 'off'
     }
   },
+  {
+    files: ['**/*.{js,mjs,cjs}'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )

@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3'
 import { getVaultsRoot } from './paths'
 import { reindexFile, deleteIndexRowByPath, type ReindexResult } from './documents-service'
 import { consumeSelfWrite } from './self-write'
+import { kindForExt } from './artifact-kinds'
 
 /**
  * The vault watcher (Phase 5). Observes the vaults/ tree for external .md
@@ -36,7 +37,9 @@ function isIgnoredPath(relPath: string): boolean {
     if (segment.startsWith('.')) return true // dotfiles + our `.<name>.tmp-*` temp writes
     if (IGNORED_DIRS.has(segment)) return true
   }
-  return !basename(relPath).toLowerCase().endsWith('.md')
+  // Accept any extension registered in artifact-kinds (`.md` notes + artifacts);
+  // an unmapped extension is not indexed, so its events are dropped.
+  return kindForExt(basename(relPath)) === null
 }
 
 function alive(): boolean {
@@ -74,7 +77,10 @@ function handlePath(abs: string): void {
   // Self-write short-circuit (optimization): if the bytes on disk match a write
   // we just made, drop the event. Content-hash keyed, so it survives any FS
   // latency. reindexFile's content-diff is the backstop if this ever misses.
-  if (existsSync(abs)) {
+  // Notes only — the app NEVER writes artifacts (artifact reconcile is read-only,
+  // no echo loop), so there is nothing to suppress, and this avoids reading a
+  // multi-megabyte artifact as utf-8 on every event.
+  if (existsSync(abs) && kindForExt(abs) === 'note') {
     try {
       const raw = readFileSync(abs, 'utf-8')
       if (consumeSelfWrite(abs, raw)) return
