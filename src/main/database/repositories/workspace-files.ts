@@ -19,6 +19,12 @@ export function addWorkspaceFile(
   return db.prepare('SELECT * FROM workspace_files WHERE id = ?').get(id) as WorkspaceFile
 }
 
+export function getWorkspaceFileById(db: Database.Database, id: string): WorkspaceFile | undefined {
+  return db.prepare('SELECT * FROM workspace_files WHERE id = ?').get(id) as
+    | WorkspaceFile
+    | undefined
+}
+
 export function removeWorkspaceFile(db: Database.Database, id: string): void {
   db.prepare('DELETE FROM workspace_files WHERE id = ?').run(id)
 }

@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from 'react'
-import { X, History } from 'lucide-react'
+import { X, History, FileCode } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useDocuments } from '@renderer/hooks/useDocuments'
+import { useWorkspaceFiles } from '@renderer/hooks/useWorkspaceFiles'
 import { useInlineRename } from '@renderer/hooks/useInlineRename'
+import { isFileTabId, parseFileTabId } from '@renderer/lib/tab-ids'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -35,6 +37,7 @@ export function TabStrip({
   onReorder
 }: TabStripProps) {
   const { documents, updateDocument } = useDocuments(workspaceId)
+  const { files } = useWorkspaceFiles(workspaceId)
   const dragIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
@@ -44,6 +47,20 @@ export function TabStrip({
     return map
   }, [documents])
 
+  // `file:` (HTML artifact) tabs label from the workspace-file name, not a doc
+  // title.
+  const fileNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const f of files) map.set(f.id, f.file_name)
+    return map
+  }, [files])
+
+  const labelFor = (id: string): string => {
+    const fileId = isFileTabId(id) ? parseFileTabId(id) : null
+    if (fileId) return fileNames.get(fileId) ?? 'HTML'
+    return titles.get(id) ?? 'Untitled'
+  }
+
   return (
     <div
       className="flex items-center min-w-0 flex-1 h-full overflow-x-auto overflow-y-hidden scrollbar-none"
@@ -52,7 +69,8 @@ export function TabStrip({
       {openDocIds.map((id, index) => (
         <Tab
           key={id}
-          title={titles.get(id) ?? 'Untitled'}
+          title={labelFor(id)}
+          isFile={isFileTabId(id)}
           isActive={id === activeDocId}
           isDragOver={dragOverIndex === index}
           onActivate={() => onActivate(id)}
@@ -96,6 +114,7 @@ export function VersionHistoryButton({ onClick }: { onClick: () => void }) {
 
 interface TabProps {
   title: string
+  isFile?: boolean
   isActive: boolean
   isDragOver: boolean
   onActivate: () => void
@@ -112,6 +131,7 @@ interface TabProps {
 
 function Tab({
   title,
+  isFile = false,
   isActive,
   isDragOver,
   onActivate,
@@ -154,7 +174,7 @@ function Tab({
           onDrop={onDrop}
           onMouseDown={handleMouseDown}
           onClick={() => !isEditing && onActivate()}
-          onDoubleClick={startEditing}
+          onDoubleClick={isFile ? undefined : startEditing}
           className={cn(
             'group/tab relative flex items-center gap-1.5 h-full px-3 min-w-[100px] max-w-[200px] border-r dark:border-white/5 border-black/5 cursor-default select-none transition-colors',
             isActive
@@ -175,7 +195,10 @@ function Tab({
               className="flex-1 min-w-0 bg-transparent text-sm outline-none"
             />
           ) : (
-            <span className="flex-1 min-w-0 truncate text-sm">{title}</span>
+            <>
+              {isFile && <FileCode className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              <span className="flex-1 min-w-0 truncate text-sm">{title}</span>
+            </>
           )}
           <button
             onClick={(e) => {

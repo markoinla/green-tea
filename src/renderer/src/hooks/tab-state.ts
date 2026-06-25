@@ -4,6 +4,8 @@
  * Every function takes a TabState and returns a NEW TabState (never mutates).
  */
 
+import { isFileTabId } from '../lib/tab-ids'
+
 export interface TabState {
   openDocIds: string[]
   activeDocId: string | null
@@ -122,14 +124,23 @@ export function reorderTab(state: TabState, from: number, to: number): TabState 
  *
  * NOTE: the caller is responsible for the finding-#12 guard (only call this when
  * `documents.list` resolved non-empty), but we also defend against an empty set.
+ *
+ * `file:` tabs (HTML artifacts) live in `workspace_files`, not the documents list,
+ * so they are NEVER members of `existingIds`. They are exempt from this prune —
+ * otherwise any `documents:changed` event (a constant occurrence: doc edits, agent
+ * note writes, vault-watcher changes) would silently drop an open artifact tab.
  */
+function survivesReconcile(id: string, existingIds: Set<string>): boolean {
+  return isFileTabId(id) || existingIds.has(id)
+}
+
 export function reconcileDeletions(state: TabState, existingIds: Set<string>): TabState {
   if (existingIds.size === 0) return state
-  const openDocIds = state.openDocIds.filter((id) => existingIds.has(id))
+  const openDocIds = state.openDocIds.filter((id) => survivesReconcile(id, existingIds))
   if (openDocIds.length === state.openDocIds.length) return state
 
   let activeDocId = state.activeDocId
-  if (activeDocId && !existingIds.has(activeDocId)) {
+  if (activeDocId && !survivesReconcile(activeDocId, existingIds)) {
     const oldIdx = state.openDocIds.indexOf(activeDocId)
     activeDocId = pickReconcileActive(state.openDocIds, openDocIds, oldIdx)
   }

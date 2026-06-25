@@ -6,6 +6,7 @@ import {
   FolderUp,
   FolderOpen,
   ExternalLink,
+  FileCode,
   X,
   Ellipsis
 } from 'lucide-react'
@@ -41,6 +42,13 @@ interface WorkspaceFilesSectionProps {
   pickAndAddFiles: () => void
   pickAndAddFolder: () => void
   removeFile: (id: string) => void
+  /** Open an HTML artifact in a Green Tea tab (instead of the OS app). */
+  onOpenInApp: (file: WorkspaceFile) => void
+}
+
+/** HTML artifacts open in-app by default; everything else opens in the OS app. */
+function isHtmlFile(fileName: string): boolean {
+  return /\.html?$/i.test(fileName)
 }
 
 export function WorkspaceFilesSection({
@@ -48,7 +56,8 @@ export function WorkspaceFilesSection({
   addFiles,
   pickAndAddFiles,
   pickAndAddFolder,
-  removeFile
+  removeFile,
+  onOpenInApp
 }: WorkspaceFilesSectionProps) {
   const [filesCollapsed, setFilesCollapsed] = useState(false)
   const [fileDragOver, setFileDragOver] = useState(false)
@@ -124,68 +133,92 @@ export function WorkspaceFilesSection({
           ) : (
             <div className="space-y-0.5">
               <TooltipProvider delayDuration={1000}>
-                {files.map((file) => (
-                  <ContextMenu key={file.id}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <ContextMenuTrigger asChild>
-                          <div className="flex items-center gap-1.5 px-1.5 py-1 rounded text-xs hover:bg-sidebar-accent group/file cursor-default">
-                            <FileIcon fileName={file.file_name} />
-                            <span className="truncate flex-1 text-sidebar-foreground">
-                              {file.file_name}
-                            </span>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <button
-                                  type="button"
-                                  className="shrink-0 p-0.5 rounded opacity-0 group-hover/file:opacity-100 hover:bg-background text-muted-foreground hover:text-foreground"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <Ellipsis className="h-3 w-3" />
-                                </button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-40">
-                                <DropdownMenuItem
-                                  onClick={() => window.api.shell.openPath(file.file_path)}
-                                >
-                                  <ExternalLink className="h-3.5 w-3.5 mr-2" />
-                                  Open File
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => window.api.shell.showItemInFolder(file.file_path)}
-                                >
-                                  <FolderOpen className="h-3.5 w-3.5 mr-2" />
-                                  Show in Folder
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => removeFile(file.id)}>
-                                  <X className="h-3.5 w-3.5 mr-2" />
-                                  Remove
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </ContextMenuTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">{file.file_name}</TooltipContent>
-                    </Tooltip>
-                    <ContextMenuContent>
-                      <ContextMenuItem onClick={() => window.api.shell.openPath(file.file_path)}>
-                        <ExternalLink className="h-3.5 w-3.5 mr-2" />
-                        Open File
-                      </ContextMenuItem>
-                      <ContextMenuItem
-                        onClick={() => window.api.shell.showItemInFolder(file.file_path)}
-                      >
-                        <FolderOpen className="h-3.5 w-3.5 mr-2" />
-                        Show in Folder
-                      </ContextMenuItem>
-                      <ContextMenuItem onClick={() => removeFile(file.id)}>
-                        <X className="h-3.5 w-3.5 mr-2" />
-                        Remove
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
-                ))}
+                {files.map((file) => {
+                  const isHtml = isHtmlFile(file.file_name)
+                  return (
+                    <ContextMenu key={file.id}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <ContextMenuTrigger asChild>
+                            <div
+                              className={`flex items-center gap-1.5 px-1.5 py-1 rounded text-xs hover:bg-sidebar-accent group/file ${isHtml ? 'cursor-pointer' : 'cursor-default'}`}
+                              onClick={
+                                isHtml
+                                  ? () => onOpenInApp(file)
+                                  : () => window.api.shell.openPath(file.file_path)
+                              }
+                            >
+                              <FileIcon fileName={file.file_name} />
+                              <span className="truncate flex-1 text-sidebar-foreground">
+                                {file.file_name}
+                              </span>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="shrink-0 p-0.5 rounded opacity-0 group-hover/file:opacity-100 hover:bg-background text-muted-foreground hover:text-foreground"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Ellipsis className="h-3 w-3" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-44">
+                                  {isHtml && (
+                                    <DropdownMenuItem onClick={() => onOpenInApp(file)}>
+                                      <FileCode className="h-3.5 w-3.5 mr-2" />
+                                      Open in Green Tea
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem
+                                    onClick={() => window.api.shell.openPath(file.file_path)}
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                                    Open File
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      window.api.shell.showItemInFolder(file.file_path)
+                                    }
+                                  >
+                                    <FolderOpen className="h-3.5 w-3.5 mr-2" />
+                                    Show in Folder
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => removeFile(file.id)}>
+                                    <X className="h-3.5 w-3.5 mr-2" />
+                                    Remove
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </ContextMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">{file.file_name}</TooltipContent>
+                      </Tooltip>
+                      <ContextMenuContent>
+                        {isHtml && (
+                          <ContextMenuItem onClick={() => onOpenInApp(file)}>
+                            <FileCode className="h-3.5 w-3.5 mr-2" />
+                            Open in Green Tea
+                          </ContextMenuItem>
+                        )}
+                        <ContextMenuItem onClick={() => window.api.shell.openPath(file.file_path)}>
+                          <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                          Open File
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          onClick={() => window.api.shell.showItemInFolder(file.file_path)}
+                        >
+                          <FolderOpen className="h-3.5 w-3.5 mr-2" />
+                          Show in Folder
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => removeFile(file.id)}>
+                          <X className="h-3.5 w-3.5 mr-2" />
+                          Remove
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  )
+                })}
               </TooltipProvider>
             </div>
           )}

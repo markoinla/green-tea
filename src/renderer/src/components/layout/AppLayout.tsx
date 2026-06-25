@@ -21,6 +21,7 @@ interface AppLayoutProps {
   selectedWorkspaceId: string | null
   onSelectWorkspace: (id: string) => void
   onSelectDoc: (id: string, opts?: { newTab?: boolean }) => void
+  onOpenFile: (fileId: string) => void
   openDocIds: string[]
   activeDocId: string | null
   onActivateTab: (id: string) => void
@@ -42,6 +43,7 @@ export function AppLayout({
   selectedWorkspaceId,
   onSelectWorkspace,
   onSelectDoc,
+  onOpenFile,
   openDocIds,
   activeDocId,
   onActivateTab,
@@ -158,6 +160,7 @@ export function AppLayout({
         <LeftSidebar
           selectedDocId={activeDocId}
           onSelectDoc={onSelectDoc}
+          onOpenFile={onOpenFile}
           selectedWorkspaceId={selectedWorkspaceId}
           onSelectWorkspace={onSelectWorkspace}
           width={leftWidth}

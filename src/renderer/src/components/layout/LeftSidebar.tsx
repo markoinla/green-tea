@@ -16,6 +16,8 @@ import { SidebarFooterSection } from './left-sidebar/SidebarFooterSection'
 interface LeftSidebarProps {
   selectedDocId: string | null
   onSelectDoc: (id: string, opts?: { newTab?: boolean }) => void
+  /** Open a workspace HTML artifact in a Green Tea tab. */
+  onOpenFile: (fileId: string) => void
   selectedWorkspaceId: string | null
   onSelectWorkspace: (id: string) => void
   width?: number
@@ -27,6 +29,7 @@ interface LeftSidebarProps {
 export function LeftSidebar({
   selectedDocId,
   onSelectDoc,
+  onOpenFile,
   selectedWorkspaceId,
   onSelectWorkspace,
   width,
@@ -265,6 +268,7 @@ export function LeftSidebar({
         pickAndAddFiles={pickAndAddFiles}
         pickAndAddFolder={pickAndAddFolder}
         removeFile={removeFile}
+        onOpenInApp={(file) => onOpenFile(file.id)}
       />
 
       <SidebarFooterSection selectedWorkspaceId={selectedWorkspaceId} />

@@ -138,6 +138,28 @@ describe('reconcileDeletions', () => {
     const s = state(['a', 'b'], 'a')
     expect(reconcileDeletions(s, new Set())).toBe(s)
   })
+
+  it('exempts file: tabs — never prunes an HTML artifact not in the doc set', () => {
+    const s = state(['a', 'file:abc', 'b'], 'a')
+    // The doc set lacks file:abc (artifacts live in workspace_files, not documents).
+    expect(reconcileDeletions(s, new Set(['a', 'b']))).toBe(s)
+  })
+
+  it('keeps a file: tab alive while pruning a deleted doc tab', () => {
+    const s = state(['a', 'file:abc', 'b'], 'a')
+    expect(reconcileDeletions(s, new Set(['a']))).toEqual(state(['a', 'file:abc'], 'a'))
+  })
+
+  it('treats a file: tab as a survivor when the active doc tab is dropped', () => {
+    const s = state(['a', 'file:abc'], 'a')
+    // `a` no longer exists; the only survivor is the file tab — it must be picked.
+    expect(reconcileDeletions(s, new Set(['z']))).toEqual(state(['file:abc'], 'file:abc'))
+  })
+
+  it('keeps an active file: tab even when every doc tab is deleted', () => {
+    const s = state(['a', 'file:abc', 'b'], 'file:abc')
+    expect(reconcileDeletions(s, new Set(['z']))).toEqual(state(['file:abc'], 'file:abc'))
+  })
 })
 
 describe('computeMountedIds (LRU eviction)', () => {

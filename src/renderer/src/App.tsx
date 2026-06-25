@@ -1,10 +1,12 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Toaster } from 'sonner'
 import { AppLayout } from './components/layout/AppLayout'
 import { TabbedEditorHost } from './components/editor/TabbedEditorHost'
 import { useOpenTabs } from './hooks/useOpenTabs'
 import { flushAll } from './hooks/useAutosave'
 import { useWorkspaces } from './hooks/useWorkspaces'
+import { useWorkspaceFiles } from './hooks/useWorkspaceFiles'
+import { fileTabId } from './lib/tab-ids'
 import { useTaskNotifications } from './hooks/useTaskNotifications'
 import { usePythonCheck } from './hooks/usePythonCheck'
 import { MetadataFilterProvider } from './contexts/MetadataFilterContext'
@@ -120,6 +122,7 @@ export default function App() {
   const autoOpenedWorkspaceRef = useRef<string | null>(null)
   const pendingOpenRef = useRef<{ docId: string; workspaceId: string | null } | null>(null)
   const { workspaces } = useWorkspaces()
+  const { files: workspaceFiles } = useWorkspaceFiles(selectedWorkspaceId)
   const tabs = useOpenTabs(selectedWorkspaceId)
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
@@ -297,6 +300,20 @@ export default function App() {
     t.openTab(id, { newTab: opts?.newTab })
   }, [])
 
+  // Open an HTML artifact from the Files section in a `file:` tab. File tabs flow
+  // through the same tab machinery as documents (no reducer change); the render
+  // branch in TabbedEditorHost swaps in HtmlViewer.
+  const handleOpenFile = useCallback((fileId: string) => {
+    tabsRef.current.openTab(fileTabId(fileId))
+  }, [])
+
+  // workspace-file id → name, for labelling `file:` tabs inside TabbedEditorHost.
+  const fileNamesById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const f of workspaceFiles) map.set(f.id, f.file_name)
+    return map
+  }, [workspaceFiles])
+
   const handleVersionHistoryOpenChange = useCallback((open: boolean) => {
     setVersionHistoryOpen(open)
     if (!open) setPreviewVersion(null)
@@ -314,6 +331,7 @@ export default function App() {
         selectedWorkspaceId={selectedWorkspaceId}
         onSelectWorkspace={handleSelectWorkspace}
         onSelectDoc={handleSelectDoc}
+        onOpenFile={handleOpenFile}
         openDocIds={tabs.openDocIds}
         activeDocId={tabs.activeDocId}
         onActivateTab={tabs.activateTab}
@@ -334,6 +352,7 @@ export default function App() {
             openDocIds={tabs.openDocIds}
             activeDocId={tabs.activeDocId}
             onQuoteSelection={setSelectionContext}
+            fileNamesById={fileNamesById}
             previewVersion={activePreview}
             onExitPreview={() => setPreviewVersion(null)}
             onRestorePreview={handleRestorePreview}

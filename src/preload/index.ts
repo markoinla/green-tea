@@ -92,9 +92,7 @@ const greenteaApi = {
       ipcRenderer.invoke('agent:reset-session', conversationId),
     approveEdit: (logId: string): Promise<void> => ipcRenderer.invoke('agent:approve-edit', logId),
     rejectEdit: (logId: string): Promise<void> => ipcRenderer.invoke('agent:reject-edit', logId),
-    approveMetadata: (
-      logId: string
-    ): Promise<{ documentIds: string[]; rejectedKeys: string[] }> =>
+    approveMetadata: (logId: string): Promise<{ documentIds: string[]; rejectedKeys: string[] }> =>
       ipcRenderer.invoke('agent:approve-metadata', logId),
     rejectMetadata: (logId: string): Promise<void> =>
       ipcRenderer.invoke('agent:reject-metadata', logId),
@@ -460,16 +458,19 @@ const greenteaApi = {
   }
 }
 
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', greenteaApi)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = greenteaApi
+// contextIsolation is pinned to true in the main process webPreferences, so the
+// context bridge is the only supported path. If a future regression turns
+// contextIsolation off, exposeInMainWorld throws and the preload fails loudly
+// rather than silently falling back to an insecure global assignment.
+if (!process.contextIsolated) {
+  throw new Error(
+    'Preload requires contextIsolation:true. Refusing to expose window.api without the context bridge.'
+  )
+}
+
+try {
+  contextBridge.exposeInMainWorld('electron', electronAPI)
+  contextBridge.exposeInMainWorld('api', greenteaApi)
+} catch (error) {
+  console.error(error)
 }

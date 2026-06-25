@@ -25,6 +25,7 @@ import {
   stopThemeWatcher
 } from './theme-watcher'
 import { getPythonBinDir } from './python'
+import { GT_FILE_SCHEME, GT_FILE_PRIVILEGE, createGtFileHandler } from './protocol/gt-file'
 
 // Fix PATH for macOS/Linux — Electron launched from the dock gets a minimal
 // PATH that excludes nvm, homebrew, etc. Fetch the real shell PATH so spawned
@@ -55,7 +56,7 @@ if (pythonBinDir) {
 // ~/Library/Application Support/Green Tea/ (matching productName)
 app.setName('Green Tea')
 
-// Register gt-image:// as a privileged scheme (must happen before app ready)
+// Register gt-image:// and gt-file:// as privileged schemes (must happen before app ready)
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'gt-image',
@@ -65,7 +66,8 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true
     }
-  }
+  },
+  GT_FILE_PRIVILEGE
 ])
 
 function createWindow(): BrowserWindow {
@@ -81,7 +83,9 @@ function createWindow(): BrowserWindow {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegrationInSubFrames: false
     }
   })
 
@@ -90,7 +94,17 @@ function createWindow(): BrowserWindow {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    // Only hand off http(s) URLs to the OS browser. Any other scheme
+    // (file:, gt-file:, javascript:, etc.) is denied without opening.
+    let protocolStr: string | null = null
+    try {
+      protocolStr = new URL(details.url).protocol
+    } catch {
+      protocolStr = null
+    }
+    if (protocolStr === 'http:' || protocolStr === 'https:') {
+      shell.openExternal(details.url)
+    }
     return { action: 'deny' }
   })
 
@@ -147,6 +161,10 @@ app.whenReady().then(() => {
 
   // Initialize database
   const db = getDatabase()
+
+  // Serve HTML artifacts and their sibling assets via gt-file:// protocol.
+  // Traversal-guarded + CSP-headed; see src/main/protocol/gt-file.ts.
+  protocol.handle(GT_FILE_SCHEME, createGtFileHandler(db))
 
   // One-time: move notes from the old `vaults/` tree into the unified
   // `workspaces/` tree. Runs before ensureUserDirs so it can rename the whole

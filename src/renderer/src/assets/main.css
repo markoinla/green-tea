@@ -69,7 +69,7 @@
 /* Editor base styles */
 .ProseMirror {
   outline: none;
-  padding: 0.25rem 4rem 3rem;
+  padding: 3rem 4rem;
   min-height: 100%;
   max-width: 56rem;
   margin-left: auto;
@@ -94,30 +94,34 @@
   letter-spacing: -0.02em;
 }
 
+.ProseMirror > :first-child {
+  margin-top: 0;
+}
+
 .ProseMirror h1 {
   font-size: 2.25em;
-  margin-top: 2em;
-  margin-bottom: 0.5em;
+  margin-top: 0.8em;
+  margin-bottom: 0.4em;
 }
 
 .ProseMirror h2 {
   font-size: 1.75em;
-  margin-top: 1.5em;
-  margin-bottom: 0.5em;
+  margin-top: 0.9em;
+  margin-bottom: 0.4em;
   border-bottom: 1px solid var(--border);
   padding-bottom: 0.3em;
 }
 
 .ProseMirror h3 {
   font-size: 1.375em;
-  margin-top: 1.25em;
-  margin-bottom: 0.5em;
+  margin-top: 1em;
+  margin-bottom: 0.4em;
 }
 
 .ProseMirror h4 {
   font-size: 1.125em;
-  margin-top: 1em;
-  margin-bottom: 0.5em;
+  margin-top: 1.1em;
+  margin-bottom: 0.4em;
 }
 
 .ProseMirror code {

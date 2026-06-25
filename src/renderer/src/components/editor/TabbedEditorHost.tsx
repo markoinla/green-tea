@@ -5,7 +5,9 @@ import { cn } from '@renderer/lib/utils'
 import { useDocument } from '@renderer/hooks/useDocument'
 import { useAutosave, hasConflict } from '@renderer/hooks/useAutosave'
 import { computeMountedIds } from '@renderer/hooks/tab-state'
+import { isFileTabId, parseFileTabId } from '@renderer/lib/tab-ids'
 import { OutlinerEditor } from './OutlinerEditor'
+import { HtmlViewer } from './HtmlViewer'
 import { FileConflictDialog } from './FileConflictDialog'
 import { formatRelativeTime, sourceLabel } from '../VersionHistoryPanel'
 import type { DocumentVersion } from '../../../../main/database/types'
@@ -94,6 +96,8 @@ export interface TabbedEditorHostProps {
   onQuoteSelection?: (text: string) => void
   /** LRU keep-mounted cap. */
   liveCap?: number
+  /** workspace-file id → display name, for HTML artifact (`file:`) tabs. */
+  fileNamesById?: Map<string, string>
   /** Active version-history preview (already scoped to the active doc by App). */
   previewVersion: DocumentVersion | null
   onExitPreview: () => void
@@ -115,6 +119,7 @@ export function TabbedEditorHost({
   activeDocId,
   onQuoteSelection,
   liveCap = 8,
+  fileNamesById,
   previewVersion,
   onExitPreview,
   onRestorePreview
@@ -145,6 +150,11 @@ export function TabbedEditorHost({
     <div className="flex flex-col flex-1 min-h-0 relative">
       {renderIds.map((id) => {
         const visible = id === activeDocId && !activePreview
+        // Branch ABOVE the hooks: a `file:` (HTML artifact) tab renders the
+        // sandboxed HtmlViewer and never mounts DocumentEditor, so useDocument /
+        // useAutosave never run for it (Rules of Hooks). The version-preview
+        // overlay below is doc-only and never matches a file tab.
+        const fileId = isFileTabId(id) ? parseFileTabId(id) : null
         return (
           <div
             key={id}
@@ -152,11 +162,15 @@ export function TabbedEditorHost({
             aria-hidden={!visible}
           >
             <ErrorBoundary>
-              <DocumentEditor
-                documentId={id}
-                isActive={id === activeDocId && !activePreview}
-                onQuoteSelection={onQuoteSelection}
-              />
+              {fileId ? (
+                <HtmlViewer workspaceFileId={fileId} fileName={fileNamesById?.get(fileId)} />
+              ) : (
+                <DocumentEditor
+                  documentId={id}
+                  isActive={id === activeDocId && !activePreview}
+                  onQuoteSelection={onQuoteSelection}
+                />
+              )}
             </ErrorBoundary>
           </div>
         )

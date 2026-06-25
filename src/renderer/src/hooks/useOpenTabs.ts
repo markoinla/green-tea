@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { flush as flushAutosave, flushAll } from './useAutosave'
+import { isFileTabId } from '../lib/tab-ids'
 import {
   EMPTY_TAB_STATE,
   activateByIndex as reduceActivateByIndex,
@@ -104,7 +105,10 @@ export function useOpenTabs(workspaceId: string | null): UseOpenTabsResult {
         if (isStale()) return
         if (docs.length > 0) {
           const existing = new Set(docs.map((d) => d.id))
-          const openDocIds = next.openDocIds.filter((id) => existing.has(id))
+          // Exempt `file:` tabs (HTML artifacts) — they live in workspace_files,
+          // not the documents list, so a missing-from-documents check must not
+          // prune them. They survive a workspace switch as-is.
+          const openDocIds = next.openDocIds.filter((id) => isFileTabId(id) || existing.has(id))
           if (openDocIds.length !== next.openDocIds.length) {
             const activeDocId =
               next.activeDocId && openDocIds.includes(next.activeDocId)
