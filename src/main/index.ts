@@ -11,6 +11,7 @@ import { initAutoUpdater } from './auto-updater'
 import { seedDefaultSkills } from './skills/manager'
 import { ensureUserDirs } from './agent/paths'
 import { reindexAllWorkspaces } from './vault/documents-service'
+import { migrateLegacyVaultLayout } from './vault/paths'
 import { startVaultWatcher, stopVaultWatcher } from './vault/vault-watcher'
 import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
@@ -145,6 +146,17 @@ app.whenReady().then(() => {
 
   // Initialize database
   const db = getDatabase()
+
+  // One-time: move notes from the old `vaults/` tree into the unified
+  // `workspaces/` tree. Runs before ensureUserDirs so it can rename the whole
+  // tree when the target doesn't exist yet. Guarded so a filesystem error
+  // (e.g. EXDEV across mounts) degrades to "notes not yet moved" rather than
+  // blocking startup; reindex below picks up whatever did land in workspaces/.
+  try {
+    migrateLegacyVaultLayout(db)
+  } catch (err) {
+    console.error('[migration] legacy vault layout move failed', err)
+  }
 
   // Ensure base user directories exist (re-creates if deleted)
   ensureUserDirs(db)

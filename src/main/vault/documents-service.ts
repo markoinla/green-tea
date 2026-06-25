@@ -511,9 +511,14 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
     return { kind: 'unchanged', docId: row.id }
   }
 
+  // Prefer the existing row's stable id. A frontmatter-less file mints a fresh
+  // ephemeral id on every read (persistBackfill=false here), so keying the upsert
+  // on note.id would INSERT a second row for the same path on each content change
+  // — reuse the path-matched row's id to update it in place instead.
+  const docId = row?.id ?? note.id
   const structuralChanged = !row || row.title !== note.title || row.folder_id !== folderId
   upsertRow(db, {
-    id: note.id,
+    id: docId,
     title: note.title,
     content,
     workspace_id: workspaceId,
@@ -523,8 +528,8 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
     updated_at: note.updated
   })
   return row
-    ? { kind: 'updated', docId: note.id, structuralChanged }
-    : { kind: 'created', docId: note.id, structuralChanged: true }
+    ? { kind: 'updated', docId, structuralChanged }
+    : { kind: 'created', docId, structuralChanged: true }
 }
 
 // ---------------------------------------------------------------------------

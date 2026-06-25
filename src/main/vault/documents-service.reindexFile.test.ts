@@ -68,6 +68,24 @@ describe('reindexFile', () => {
     expect(docs[0].id).toBe(id)
   })
 
+  it('frontmatter-less file: a content change updates in place, never a duplicate row', () => {
+    // No `id` in frontmatter → each read mints a fresh ephemeral uuid. The path
+    // must still resolve to a single, stable index row across content changes.
+    const path = join(vault, 'No Identity.md')
+    writeExternal(path, { body: 'first version' })
+    expect(reindexFile(db, path).kind).toBe('created')
+
+    writeExternal(path, { body: 'second version' })
+    const res = reindexFile(db, path)
+    expect(res.kind).toBe('updated')
+
+    const docs = listDocuments(db, workspaceId)
+    expect(docs).toHaveLength(1)
+    expect(JSON.parse(docs[0].content!)).toEqual(
+      expect.objectContaining({ type: 'doc' })
+    )
+  })
+
   it('update (content only): refreshes content, structuralChanged=false', () => {
     const doc = createDocument(db, { title: 'Note', workspace_id: workspaceId })
     writeExternal(doc.file_path!, { id: doc.id, body: 'edited externally' })

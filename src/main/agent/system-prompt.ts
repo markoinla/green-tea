@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { dirname } from 'path'
 
 export function buildSystemPrompt(
   agentWorkDir: string,
@@ -121,7 +122,7 @@ Do NOT pass arguments as a JSON string like "{\\"query\\": \\"...\\"}" — pass 
 Always search or describe before calling an unfamiliar MCP tool.
 ${mcpServers && mcpServers.length > 0 ? `\nConnected MCP servers:\n${mcpServers.map((s) => `- ${s}`).join('\n')}` : ''}${googleSection}${microsoftSection}
 
-You can customize the app's appearance by writing a theme.json file to your base directory (${agentWorkDir.replace(/\/agent-workspace\/.*$/, '')}/theme.json).
+You can customize the app's appearance by writing a theme.json file to your base directory (${dirname(dirname(dirname(agentWorkDir)))}/theme.json).
 The file uses this schema: { "radius": "0.5rem", "light": { "background": "oklch(...)", "primary": "oklch(...)", ... }, "dark": { ... } }
 Supported keys: background, foreground, card, card-foreground, popover, popover-foreground, primary, primary-foreground, secondary, secondary-foreground, muted, muted-foreground, accent, accent-foreground, destructive, destructive-foreground, border, input, ring, sidebar, sidebar-foreground, sidebar-primary, sidebar-primary-foreground, sidebar-accent, sidebar-accent-foreground, sidebar-border, sidebar-ring.
 All values should be valid CSS color values (oklch recommended). Partial files are fine — only specified keys override defaults. Changes apply instantly via file watcher. Delete the file to restore defaults.

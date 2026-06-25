@@ -1,29 +1,80 @@
 import type Database from 'better-sqlite3'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, renameSync } from 'fs'
 import { join } from 'path'
-import { getAgentBaseDir, sanitizeWorkspaceName } from '../agent/paths'
-import { getWorkspace } from '../database/repositories/workspaces'
+import { getAgentBaseDir, getWorkspaceDir, getWorkspacesRoot } from '../agent/paths'
 
 /**
- * Vaults are durable note folders. They live in a dedicated `vaults/` directory
- * under the app base dir — deliberately NOT under `agent-workspace/`, which is a
- * sandbox-scoped scratch area that can be reset. One folder per workspace.
+ * Vaults are durable note folders. They live under the single per-workspace
+ * `workspaces/` tree — the same folder the agent works in — so each workspace is
+ * one place on disk (notes at the root, agent scratch in a hidden `.agent/`).
+ * The directory layout itself is owned by `agent/paths.ts`; this module just
+ * exposes the notes-facing names and the one-time migration off the old layout.
  *
- *   ~/Documents/Green Tea/vaults/<sanitized-workspace-name>/
+ *   ~/Documents/Green Tea/workspaces/<sanitized-workspace-name>/
  */
 
 export function getVaultsRoot(db: Database.Database): string {
-  return join(getAgentBaseDir(db), 'vaults')
+  return getWorkspacesRoot(db)
 }
 
-/** Resolve (and create) the on-disk vault folder for a workspace. */
+/** Resolve the on-disk vault folder for a workspace. */
 export function getWorkspaceVaultDir(db: Database.Database, workspaceId: string): string {
-  const workspace = getWorkspace(db, workspaceId)
-  const dirName = workspace ? sanitizeWorkspaceName(workspace.name) : workspaceId
-  return join(getVaultsRoot(db), dirName)
+  return getWorkspaceDir(db, workspaceId)
 }
 
 export function ensureVaultDir(dir: string): string {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   return dir
+}
+
+/**
+ * Recursively move every file under `from` into `to`, creating directories as
+ * needed and NEVER overwriting an existing target file. Used to merge a legacy
+ * vault folder into an existing workspace folder file-by-file, so colliding
+ * folders don't strand the notes that exist only in the legacy copy.
+ */
+function mergeMoveTree(from: string, to: string): void {
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    const src = join(from, entry.name)
+    const dst = join(to, entry.name)
+    if (entry.isDirectory()) {
+      mkdirSync(dst, { recursive: true })
+      mergeMoveTree(src, dst)
+    } else if (entry.isFile() && !existsSync(dst)) {
+      renameSync(src, dst)
+    }
+  }
+}
+
+/**
+ * One-time migration: durable notes used to live in `vaults/`, separate from the
+ * agent's `agent-workspace/`. They now share a single `workspaces/` tree. Move
+ * the old notes across non-destructively — a whole-tree rename when the target is
+ * absent, else a per-FILE merge that never overwrites existing content (so a
+ * colliding folder can't strand legacy-only notes). Idempotent: a no-op once
+ * `vaults/` is gone. The disposable `agent-workspace/` scratch is intentionally
+ * left behind (it rebuilds on demand).
+ */
+export function migrateLegacyVaultLayout(db: Database.Database): void {
+  const base = getAgentBaseDir(db)
+  const legacy = join(base, 'vaults')
+  const current = getWorkspacesRoot(db)
+  if (!existsSync(legacy)) return
+
+  if (!existsSync(current)) {
+    renameSync(legacy, current)
+    return
+  }
+
+  for (const entry of readdirSync(legacy, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const from = join(legacy, entry.name)
+    const to = join(current, entry.name)
+    if (!existsSync(to)) {
+      renameSync(from, to)
+    } else {
+      // Workspace folder already migrated: merge any legacy-only files in.
+      mergeMoveTree(from, to)
+    }
+  }
 }

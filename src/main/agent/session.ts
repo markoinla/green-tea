@@ -253,7 +253,7 @@ export async function createNotesAgentSession(
   mkdirSync(agentWorkDir, { recursive: true })
 
   // Initialize OS-level sandbox — scoped to agentBaseDir so agent can write
-  // to both agent-workspace/ and skills/
+  // to both the workspaces/ tree and skills/
   const agentBaseDir = getAgentBaseDir(db)
   const sandboxConfig = loadSandboxConfig(agentBaseDir)
   await initializeSandbox(sandboxConfig)

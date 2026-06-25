@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { mkdirSync, renameSync, existsSync, rmSync } from 'fs'
+import { renameSync, existsSync, rmSync } from 'fs'
 import { join } from 'path'
 import * as blocks from '../database/repositories/blocks'
 import * as agentLogs from '../database/repositories/agent-logs'
@@ -17,7 +17,7 @@ import { deserializeMarkdown } from '../markdown/deserialize'
 import { restartThemeWatcher } from '../theme-watcher'
 import { restartVaultWatcher } from '../vault/vault-watcher'
 import { resetSession } from '../agent/session'
-import { getAgentBaseDir, sanitizeWorkspaceName } from '../agent/paths'
+import { getWorkspacesRoot, sanitizeWorkspaceName } from '../agent/paths'
 import type { IpcHandlerContext } from './context'
 
 function blockNodeToSerializable(node: BlockNode): SerializableBlock {
@@ -47,10 +47,7 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
 
   ipcMain.handle('db:workspaces:create', (_event, data: { name: string }) => {
     const workspace = workspaces.createWorkspace(db, data)
-    const baseDir = getAgentBaseDir(db)
-    const dirName = sanitizeWorkspaceName(workspace.name)
-    mkdirSync(join(baseDir, 'agent-workspace', dirName), { recursive: true })
-    // Create the durable notes vault for this workspace.
+    // One folder per workspace: the durable notes vault, also the agent's home.
     ensureVaultDir(getWorkspaceVaultDir(db, workspace.id))
     mainWindow?.webContents.send('workspaces:changed')
     return workspace
@@ -62,14 +59,11 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
       if (data.name) {
         const oldWorkspace = workspaces.getWorkspace(db, id)
         if (oldWorkspace && data.name !== oldWorkspace.name) {
-          const baseDir = getAgentBaseDir(db)
-          const oldName = sanitizeWorkspaceName(oldWorkspace.name)
-          const newName = sanitizeWorkspaceName(data.name)
-          for (const sub of ['agent-workspace', 'vaults']) {
-            const oldDir = join(baseDir, sub, oldName)
-            const newDir = join(baseDir, sub, newName)
-            if (existsSync(oldDir) && !existsSync(newDir)) renameSync(oldDir, newDir)
-          }
+          // Rename the single workspace folder; notes and agent scratch move with it.
+          const root = getWorkspacesRoot(db)
+          const oldDir = join(root, sanitizeWorkspaceName(oldWorkspace.name))
+          const newDir = join(root, sanitizeWorkspaceName(data.name))
+          if (existsSync(oldDir) && !existsSync(newDir)) renameSync(oldDir, newDir)
         }
       }
       const workspace = workspaces.updateWorkspace(db, id, data)
