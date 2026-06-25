@@ -1,5 +1,5 @@
-import { Type } from '@sinclair/typebox'
-import type { ToolDefinition } from '@mariozechner/pi-coding-agent'
+import { Type } from 'typebox'
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 
 const PROXY_SEARCH_URL = 'https://greentea-proxy.m-6bb.workers.dev/v1/search'
 

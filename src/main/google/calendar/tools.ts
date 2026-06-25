@@ -1,5 +1,5 @@
-import { Type } from '@sinclair/typebox'
-import type { ToolDefinition } from '@mariozechner/pi-coding-agent'
+import { Type } from 'typebox'
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { hasGoogleAuth } from '../auth'
 import { listEvents, getEvent } from './api'
 import type { CalendarEvent } from '../types'

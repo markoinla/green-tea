@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, mkdirSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import type Database from 'better-sqlite3'
-import { parseFrontmatter } from '@mariozechner/pi-coding-agent'
+import { parseFrontmatter } from '@earendil-works/pi-coding-agent'
 import { getAgentBaseDir } from '../paths'
 
 export interface AgentConfig {

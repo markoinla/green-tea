@@ -8,10 +8,11 @@ import {
   SessionManager,
   DefaultResourceLoader,
   loadSkillsFromDir,
-  createCodingTools
-} from '@mariozechner/pi-coding-agent'
-import type { AgentSession } from '@mariozechner/pi-coding-agent'
-import { getModel, type Model } from '@mariozechner/pi-ai'
+  createBashToolDefinition
+} from '@earendil-works/pi-coding-agent'
+import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent'
+import type { Model } from '@earendil-works/pi-ai'
+import { getBuiltinModel as getModel } from '@earendil-works/pi-ai/providers/all'
 import { createNotesTools } from './tools/notes-tools'
 import { blocksToFlatDocJSON, getCurrentMarkdown } from './tools/notes-write'
 import {
@@ -292,14 +293,23 @@ export async function createNotesAgentSession(
   const sandboxConfig = loadSandboxConfig(agentBaseDir)
   await initializeSandbox(sandboxConfig)
 
-  const toolsOptions = isSandboxInitialized()
-    ? { bash: { operations: createSandboxedBashOps() } }
-    : undefined
+  // When the sandbox is active, supply a custom bash tool backed by sandboxed
+  // operations. It shares the built-in tool name 'bash', so the session registry
+  // uses it in place of the built-in bash (custom tools override built-ins by name).
+  const sandboxedBash: ToolDefinition[] = isSandboxInitialized()
+    ? [
+        createBashToolDefinition(agentWorkDir, {
+          operations: createSandboxedBashOps()
+        }) as ToolDefinition
+      ]
+    : []
 
   const skillsDir = getSkillsDir(db)
   const disabledRaw = getSetting(db, 'disabledSkills')
   const disabledSkills: string[] = disabledRaw ? JSON.parse(disabledRaw) : []
   const resourceLoader = new DefaultResourceLoader({
+    cwd: agentWorkDir,
+    agentDir: agentBaseDir,
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
@@ -320,8 +330,9 @@ export async function createNotesAgentSession(
   const { session } = await createAgentSession({
     cwd: agentWorkDir,
     model,
-    tools: createCodingTools(agentWorkDir, toolsOptions),
-    customTools,
+    // No `tools` allowlist: it would filter out custom tools too. Omitting it keeps
+    // the default built-ins (read, bash, edit, write) plus all custom tools active.
+    customTools: [...sandboxedBash, ...customTools],
     authStorage,
     sessionManager: SessionManager.inMemory(),
     resourceLoader,

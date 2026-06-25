@@ -30,7 +30,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { SandboxManager, type SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime'
 import { rgPath as bundledRgPath } from '@vscode/ripgrep'
-import type { BashOperations } from '@mariozechner/pi-coding-agent'
+import type { BashOperations } from '@earendil-works/pi-coding-agent'
 
 function resolveRgPath(): string {
   // Prefer bundled ripgrep if available

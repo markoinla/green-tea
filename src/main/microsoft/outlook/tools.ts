@@ -1,5 +1,5 @@
-import { Type } from '@sinclair/typebox'
-import type { ToolDefinition } from '@mariozechner/pi-coding-agent'
+import { Type } from 'typebox'
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { hasMicrosoftAuth } from '../auth'
 import { searchMessages, getMessage } from './api'
 import type { OutlookMessage } from '../types'

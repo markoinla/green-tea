@@ -32,10 +32,10 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin({
         exclude: [
-          '@mariozechner/pi-coding-agent',
-          '@mariozechner/pi-ai',
-          '@mariozechner/pi-agent-core',
-          '@sinclair/typebox',
+          '@earendil-works/pi-coding-agent',
+          '@earendil-works/pi-ai',
+          '@earendil-works/pi-agent-core',
+          'typebox',
           '@anthropic-ai/sdk',
           '@modelcontextprotocol/sdk',
           'dotenv',

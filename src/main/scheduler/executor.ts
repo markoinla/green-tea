@@ -6,8 +6,9 @@ import {
   SessionManager,
   DefaultResourceLoader,
   loadSkillsFromDir,
-  createCodingTools
-} from '@mariozechner/pi-coding-agent'
+  createBashToolDefinition
+} from '@earendil-works/pi-coding-agent'
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { getModelConfig } from '../agent/session'
 import { createNotesTools } from '../agent/tools/notes-tools'
 import { getAgentBaseDir, getAgentWorkDir } from '../agent/paths'
@@ -54,14 +55,21 @@ export async function executeScheduledTask(
     const sandboxConfig = loadSandboxConfig(agentBaseDir)
     await initializeSandbox(sandboxConfig)
 
-    const toolsOptions = isSandboxInitialized()
-      ? { bash: { operations: createSandboxedBashOps() } }
-      : undefined
+    // Sandboxed bash shares the built-in tool name 'bash' so it overrides the built-in.
+    const sandboxedBash: ToolDefinition[] = isSandboxInitialized()
+      ? [
+          createBashToolDefinition(agentWorkDir, {
+            operations: createSandboxedBashOps()
+          }) as ToolDefinition
+        ]
+      : []
 
     const skillsDir = getSkillsDir(db)
     const disabledRaw = getSetting(db, 'disabledSkills')
     const disabledSkills: string[] = disabledRaw ? JSON.parse(disabledRaw) : []
     const resourceLoader = new DefaultResourceLoader({
+      cwd: agentWorkDir,
+      agentDir: agentBaseDir,
       noExtensions: true,
       noSkills: true,
       noPromptTemplates: true,
@@ -77,8 +85,8 @@ export async function executeScheduledTask(
     const { session } = await createAgentSession({
       cwd: agentWorkDir,
       model,
-      tools: createCodingTools(agentWorkDir, toolsOptions),
-      customTools,
+      // No `tools` allowlist (it would filter custom tools); keep default built-ins + all custom.
+      customTools: [...sandboxedBash, ...customTools],
       authStorage,
       sessionManager: SessionManager.inMemory(),
       resourceLoader,

@@ -6,14 +6,15 @@ import {
   type AgentSessionEventListener,
   SessionManager,
   DefaultResourceLoader,
-  createCodingTools
-} from '@mariozechner/pi-coding-agent'
-import type { AgentSession, ToolDefinition } from '@mariozechner/pi-coding-agent'
-import { getModel, type Model } from '@mariozechner/pi-ai'
+  createBashToolDefinition
+} from '@earendil-works/pi-coding-agent'
+import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent'
+import type { Model } from '@earendil-works/pi-ai'
+import { getBuiltinModel as getModel } from '@earendil-works/pi-ai/providers/all'
 import type { AgentConfig } from './agents'
 import { createNotesTools } from '../tools/notes-tools'
 import { getSetting } from '../../database/repositories/settings'
-import { getAgentWorkDir } from '../paths'
+import { getAgentBaseDir, getAgentWorkDir } from '../paths'
 import { createSandboxedBashOps, isSandboxInitialized } from '../sandbox'
 
 export interface SubagentResult {
@@ -198,25 +199,24 @@ export async function createSubagentSession(
 
   // Build tool set based on agent's allowed tools
   const agentWorkDir = getAgentWorkDir(db, workspaceId)
-  const toolsOptions = isSandboxInitialized()
-    ? { bash: { operations: createSandboxedBashOps() } }
-    : undefined
-
-  const allCodingTools = createCodingTools(agentWorkDir, toolsOptions)
   const allNotesTools = createNotesTools(db, window, workspaceId)
 
-  let filteredBuiltinTools = allCodingTools
-  let filteredCustomTools: ToolDefinition[] = allNotesTools
+  // Sandboxed bash shares the built-in tool name 'bash', so the session registry uses
+  // it in place of the built-in bash (custom tools override built-ins by name).
+  const sandboxedBash: ToolDefinition[] = isSandboxInitialized()
+    ? [
+        createBashToolDefinition(agentWorkDir, {
+          operations: createSandboxedBashOps()
+        }) as ToolDefinition
+      ]
+    : []
+  const customTools = [...sandboxedBash, ...allNotesTools]
 
-  if (agentConfig.tools && agentConfig.tools.length > 0) {
-    const allowedSet = new Set(agentConfig.tools)
-
-    // Filter built-in tools (Tool[] from createCodingTools)
-    filteredBuiltinTools = allCodingTools.filter((t) => allowedSet.has(t.name))
-
-    // Filter custom tools (ToolDefinition[] from createNotesTools)
-    filteredCustomTools = allNotesTools.filter((t) => allowedSet.has(t.name))
-  }
+  // When the agent declares an explicit tool list, use it as the allowlist — it filters
+  // both built-in and custom tools by name. Otherwise leave it unset so the default
+  // built-ins (read, bash, edit, write) plus all custom tools stay active.
+  const toolsAllowlist =
+    agentConfig.tools && agentConfig.tools.length > 0 ? agentConfig.tools : undefined
 
   // Build system prompt for the subagent
   const systemPromptParts = [
@@ -226,19 +226,21 @@ export async function createSubagentSession(
   ]
 
   const resourceLoader = new DefaultResourceLoader({
+    cwd: agentWorkDir,
+    agentDir: getAgentBaseDir(db),
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    appendSystemPrompt: systemPromptParts.join('\n\n')
+    appendSystemPrompt: systemPromptParts
   })
   await resourceLoader.reload()
 
   const { session } = await createAgentSession({
     cwd: agentWorkDir,
     model,
-    tools: filteredBuiltinTools,
-    customTools: filteredCustomTools,
+    ...(toolsAllowlist ? { tools: toolsAllowlist } : {}),
+    customTools,
     authStorage,
     sessionManager: SessionManager.inMemory(),
     resourceLoader,
