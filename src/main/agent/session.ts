@@ -14,7 +14,7 @@ import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-age
 import type { Model } from '@earendil-works/pi-ai'
 import { getBuiltinModel as getModel } from '@earendil-works/pi-ai/providers/all'
 import { createNotesTools } from './tools/notes-tools'
-import { blocksToFlatDocJSON, getCurrentMarkdown } from './tools/notes-write'
+import { getCurrentMarkdown } from './tools/notes-write'
 import {
   loadSandboxConfig,
   initializeSandbox,
@@ -23,12 +23,10 @@ import {
   isSandboxInitialized
 } from './sandbox'
 import { updateAgentLogStatus } from '../database/repositories/agent-logs'
-import { getDocument } from '../database/repositories/documents'
+import { getDocument, updateDocument } from '../vault/documents-service'
 import { createVersion } from '../database/repositories/document-versions'
 import { getWorkspace } from '../database/repositories/workspaces'
-import type { SerializableBlock } from '../markdown/types'
-import { deserializeMarkdown } from '../markdown/deserialize'
-import { createBlock, deleteBlock } from '../database/repositories/blocks'
+import { markdownToTiptap } from '../markdown/tiptap-markdown'
 import { getSetting } from '../database/repositories/settings'
 import { getSkillsDir } from '../skills/manager'
 import { getAgentBaseDir, getAgentWorkDir } from './paths'
@@ -202,61 +200,28 @@ export function applyEdit(db: Database.Database, logId: string): void {
     throw new Error('No edit data found in this log entry')
   }
 
+  // The first line is the title (rendered as an H1 by getCurrentMarkdown);
+  // split it from the body and persist both through the file-backed service.
   const lines = newMarkdown.split('\n')
   let contentStart = 0
+  let newTitle: string | undefined
   if (lines.length > 0 && lines[0].startsWith('# ')) {
-    const newTitle = lines[0].slice(2).trim()
-    if (newTitle && newTitle !== doc.title) {
-      db.prepare('UPDATE documents SET title = ?, updated_at = ? WHERE id = ?').run(
-        newTitle,
-        new Date().toISOString(),
-        log.document_id
-      )
-    }
+    const parsedTitle = lines[0].slice(2).trim()
+    if (parsedTitle && parsedTitle !== doc.title) newTitle = parsedTitle
     contentStart = 1
     while (contentStart < lines.length && lines[contentStart].trim() === '') {
       contentStart++
     }
   }
   const contentMarkdown = lines.slice(contentStart).join('\n')
+  const newDoc = markdownToTiptap(contentMarkdown)
 
-  const newBlocks = deserializeMarkdown(contentMarkdown)
-
-  const existingBlocks = db
-    .prepare('SELECT id FROM blocks WHERE document_id = ?')
-    .all(log.document_id) as Array<{ id: string }>
-  for (const block of existingBlocks) {
-    deleteBlock(db, block.id)
-  }
-
-  function createBlocksRecursive(
-    blocks: SerializableBlock[],
-    documentId: string,
-    parentId?: string
-  ): void {
-    for (let i = 0; i < blocks.length; i++) {
-      const block = blocks[i]
-      const created = createBlock(db, {
-        document_id: documentId,
-        parent_block_id: parentId,
-        type: block.type,
-        content: block.content,
-        position: i
-      })
-      if (block.children.length > 0) {
-        createBlocksRecursive(block.children, documentId, created.id)
-      }
-    }
-  }
-
-  createBlocksRecursive(newBlocks, log.document_id)
-
-  const docJSON = blocksToFlatDocJSON(newBlocks)
-  db.prepare('UPDATE documents SET content = ?, updated_at = ? WHERE id = ?').run(
-    JSON.stringify(docJSON),
-    new Date().toISOString(),
-    log.document_id
-  )
+  // Write the agent's edit to the .md file (the source of truth) via the vault
+  // service, which also refreshes the index and version history.
+  updateDocument(db, log.document_id, {
+    title: newTitle,
+    content: JSON.stringify(newDoc)
+  })
 
   updateAgentLogStatus(db, logId, 'applied')
 }

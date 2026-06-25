@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 import { existsSync, renameSync, rmSync } from 'fs'
-import { dirname, join } from 'path'
+import { join, sep } from 'path'
 import type { Document } from '../database/types'
 import { sanitizeWorkspaceName } from '../agent/paths'
 import { maybeCreateAutoVersion } from '../database/repositories/document-versions'
@@ -79,8 +79,14 @@ function upsertRow(db: Database.Database, row: IndexRow): void {
 // (kept across renames); a wipe+reindex regenerates them consistently.
 // ---------------------------------------------------------------------------
 
+// A folder "name" may be a multi-segment POSIX path (e.g. "A/B") when a note is
+// discovered in a nested directory on disk. Sanitize each segment but preserve
+// the hierarchy so the directory written to is the exact inverse of the one read.
 function folderSubdir(name: string): string {
-  return sanitizeWorkspaceName(name)
+  return name
+    .split('/')
+    .map((segment) => sanitizeWorkspaceName(segment))
+    .join(sep)
 }
 
 /** Resolve the on-disk directory for a (workspace, folder) and ensure it exists. */
@@ -141,13 +147,16 @@ export function getDocument(db: Database.Database, id: string): Document | undef
     created_at: note.created,
     updated_at: note.updated
   }
-  // Keep the mirror fresh (file wins) without bumping anything else.
-  db.prepare('UPDATE documents SET title = ?, content = ?, updated_at = ? WHERE id = ?').run(
-    note.title,
-    content,
-    note.updated,
-    id
-  )
+  // Keep the mirror fresh (file wins) — but only write when something actually
+  // changed, so a plain read has no side effect on the table.
+  if (row.title !== note.title || row.content !== content || row.updated_at !== note.updated) {
+    db.prepare('UPDATE documents SET title = ?, content = ?, updated_at = ? WHERE id = ?').run(
+      note.title,
+      content,
+      note.updated,
+      id
+    )
+  }
   return rowToDocument(refreshed)
 }
 
@@ -220,27 +229,37 @@ export function updateDocument(
   const row = getRow(db, id)
   if (!row || !row.file_path) throw new Error(`Document not found: ${id}`)
 
-  const current = existsSync(row.file_path) ? readNote(row.file_path) : null
-  const doc: TTDoc =
-    data.content !== undefined ? (JSON.parse(data.content) as TTDoc) : (current?.doc ?? EMPTY_DOC)
+  // The file is the source of truth. If it vanished externally, drop the stale
+  // row rather than recreating the note from an empty doc (which would destroy
+  // content on a title/folder-only edit).
+  if (!existsSync(row.file_path)) {
+    deleteIndexRow(db, id)
+    throw new Error(`Document file missing, removed from index: ${id}`)
+  }
+
+  const current = readNote(row.file_path)
+  const doc: TTDoc = data.content !== undefined ? (JSON.parse(data.content) as TTDoc) : current.doc
 
   // Snapshot previous content before overwriting (version history).
-  if (data.content !== undefined && current) {
+  if (data.content !== undefined) {
     maybeCreateAutoVersion(db, id, row.title, JSON.stringify(current.doc))
   }
 
   const title = data.title ?? row.title
   const workspaceId = data.workspace_id ?? row.workspace_id
   const folder = data.folder_id !== undefined ? data.folder_id : row.folder_id
-  const created = current?.created ?? row.created_at
+  const created = current.created
   const updated = nowIso()
 
-  // Recompute the path when title/folder/workspace change; rename if needed.
-  const targetDir = resolveDir(db, workspaceId, folder)
-  const filenameTitleChanged = titleFromFilename(row.file_path) !== slugifyTitle(title)
-  const dirChanged = dirname(row.file_path) !== targetDir
+  // Rename/move the file ONLY when the title, folder, or workspace genuinely
+  // changes — never on a content-only autosave (which would churn the filename
+  // and pollute frontmatter with title overrides).
+  const titleChanged = data.title !== undefined && data.title !== row.title
+  const folderChanged = data.folder_id !== undefined && (data.folder_id ?? null) !== row.folder_id
+  const workspaceChanged = data.workspace_id !== undefined && data.workspace_id !== row.workspace_id
   let filePath = row.file_path
-  if (dirChanged || filenameTitleChanged) {
+  if (titleChanged || folderChanged || workspaceChanged) {
+    const targetDir = resolveDir(db, workspaceId, folder)
     filePath = uniqueNotePath(targetDir, slugifyTitle(title))
   }
 
@@ -328,10 +347,12 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
   const vaultDir = ensureVaultDir(getWorkspaceVaultDir(db, workspaceId))
   const summaries = listVaultNotes(vaultDir)
   const seen = new Set<string>()
+  const seenFolders = new Set<string>()
 
   for (const summary of summaries) {
     const note = readNote(summary.path)
     const fId = summary.folder ? ensureFolderRow(db, workspaceId, summary.folder) : null
+    if (fId) seenFolders.add(fId)
     upsertRow(db, {
       id: note.id,
       title: note.title,
@@ -351,6 +372,18 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
   }[]
   for (const { id } of rows) {
     if (!seen.has(id)) deleteIndexRow(db, id)
+  }
+
+  // Drop folder rows whose subdirectory is gone (no notes were found in it).
+  // An empty-but-present directory keeps its folder row only if it still exists.
+  const folderRows = db
+    .prepare('SELECT id, name FROM folders WHERE workspace_id = ?')
+    .all(workspaceId) as { id: string; name: string }[]
+  for (const folder of folderRows) {
+    if (seenFolders.has(folder.id)) continue
+    if (!existsSync(join(vaultDir, folderSubdir(folder.name)))) {
+      db.prepare('DELETE FROM folders WHERE id = ?').run(folder.id)
+    }
   }
 }
 

@@ -1,29 +1,17 @@
 import type Database from 'better-sqlite3'
-import { getBlockTree } from '../../database/repositories/blocks'
-import { listDocuments, getDocument } from '../../database/repositories/documents'
+import { listDocuments, getDocument } from '../../vault/documents-service'
 import { listFolders } from '../../database/repositories/folders'
-import type { BlockNode } from '../../database/types'
-import type { SerializableBlock } from '../../markdown/types'
-import { serializeBlocks } from '../../markdown/serialize'
-import { tiptapJsonToBlocks } from '../../markdown/tiptap-to-blocks'
+import { tiptapToMarkdown, type TTDoc } from '../../markdown/tiptap-markdown'
 
 export interface ToolResult {
   content: string
   error?: string
 }
 
-function blockNodeToSerializable(node: BlockNode): SerializableBlock {
-  const block: SerializableBlock = {
-    id: node.id,
-    type: node.type as SerializableBlock['type'],
-    content: node.content,
-    isList: true,
-    children: node.children.map(blockNodeToSerializable)
-  }
-  if (node.type === 'task_item') {
-    block.checked = node.content.startsWith('[x] ') || node.collapsed === 1
-  }
-  return block
+/** Convert a document's stored TipTap JSON into markdown for the agent. */
+function docToMarkdown(content: string | null): string {
+  if (!content) return ''
+  return tiptapToMarkdown(JSON.parse(content) as TTDoc).trim()
 }
 
 export function notesListDocuments(db: Database.Database, workspaceId?: string): ToolResult {
@@ -42,67 +30,22 @@ export function notesGetMarkdown(
   params: { document_id?: string; block_id?: string },
   workspaceId?: string
 ): ToolResult {
-  if (!params.document_id && !params.block_id) {
-    return { content: '', error: 'Either document_id or block_id must be provided' }
+  if (!params.document_id) {
+    return { content: '', error: 'document_id must be provided' }
   }
 
-  if (params.document_id) {
-    const doc = getDocument(db, params.document_id)
-    if (!doc) {
-      return { content: '', error: `Document not found: ${params.document_id}` }
-    }
-    if (workspaceId && doc.workspace_id !== workspaceId) {
-      return { content: '', error: `Document not in current workspace` }
-    }
-
-    // Prefer documents.content (TipTap JSON) — it's the authoritative source the editor uses
-    let serializableBlocks: SerializableBlock[]
-
-    if (doc.content) {
-      serializableBlocks = tiptapJsonToBlocks(doc.content)
-    } else {
-      const tree = getBlockTree(db, params.document_id)
-      serializableBlocks = tree.map(blockNodeToSerializable)
-    }
-
-    if (serializableBlocks.length === 0) {
-      return { content: `# ${doc.title}\n\n(empty document)` }
-    }
-
-    const markdown = serializeBlocks(serializableBlocks)
-    return { content: `# ${doc.title}\n\n${markdown}` }
+  const doc = getDocument(db, params.document_id)
+  if (!doc) {
+    return { content: '', error: `Document not found: ${params.document_id}` }
+  }
+  if (workspaceId && doc.workspace_id !== workspaceId) {
+    return { content: '', error: `Document not in current workspace` }
   }
 
-  // block_id case: get a single block and its children
-  if (params.block_id) {
-    const block = db.prepare('SELECT * FROM blocks WHERE id = ?').get(params.block_id) as
-      | BlockNode
-      | undefined
-    if (!block) {
-      return { content: '', error: `Block not found: ${params.block_id}` }
-    }
-
-    // Get the full tree of the document, then find the subtree for this block
-    const tree = getBlockTree(db, block.document_id)
-    const found = findBlockInTree(tree, params.block_id)
-    if (!found) {
-      return { content: block.content }
-    }
-
-    const serializableBlocks = [blockNodeToSerializable(found)]
-    return { content: serializeBlocks(serializableBlocks) }
+  const body = docToMarkdown(doc.content)
+  return {
+    content: body.length > 0 ? `# ${doc.title}\n\n${body}` : `# ${doc.title}\n\n(empty document)`
   }
-
-  return { content: '', error: 'Invalid parameters' }
-}
-
-function findBlockInTree(nodes: BlockNode[], id: string): BlockNode | null {
-  for (const node of nodes) {
-    if (node.id === id) return node
-    const found = findBlockInTree(node.children, id)
-    if (found) return found
-  }
-  return null
 }
 
 export function notesSearch(
@@ -114,41 +57,41 @@ export function notesSearch(
     return { content: '', error: 'Query must not be empty' }
   }
 
-  const sql = workspaceId
-    ? `SELECT b.id, b.document_id, b.type, b.content, d.title as doc_title
-       FROM blocks b
-       JOIN documents d ON b.document_id = d.id
-       WHERE b.content LIKE ? AND d.workspace_id = ?
-       LIMIT 20`
-    : `SELECT b.id, b.document_id, b.type, b.content, d.title as doc_title
-       FROM blocks b
-       JOIN documents d ON b.document_id = d.id
-       WHERE b.content LIKE ?
-       LIMIT 20`
-
-  const blocks = (
+  // The index mirrors each note's content, so search it directly (title + body).
+  const like = `%${params.query}%`
+  const rows = (
     workspaceId
-      ? db.prepare(sql).all(`%${params.query}%`, workspaceId)
-      : db.prepare(sql).all(`%${params.query}%`)
-  ) as Array<{
-    id: string
-    document_id: string
-    type: string
-    content: string
-    doc_title: string
-  }>
+      ? db
+          .prepare(
+            `SELECT id, title, content FROM documents
+             WHERE workspace_id = ? AND (title LIKE ? OR content LIKE ?) ORDER BY updated_at DESC LIMIT 20`
+          )
+          .all(workspaceId, like, like)
+      : db
+          .prepare(
+            `SELECT id, title, content FROM documents
+             WHERE title LIKE ? OR content LIKE ? ORDER BY updated_at DESC LIMIT 20`
+          )
+          .all(like, like)
+  ) as Array<{ id: string; title: string; content: string | null }>
 
-  if (blocks.length === 0) {
+  if (rows.length === 0) {
     return { content: 'No results found.' }
   }
 
-  const results = blocks.map((b) => ({
-    block_id: b.id,
-    document_id: b.document_id,
-    document_title: b.doc_title,
-    type: b.type,
-    content: b.content
-  }))
+  const needle = params.query.toLowerCase()
+  const results = rows.map((r) => {
+    const md = docToMarkdown(r.content)
+    const idx = md.toLowerCase().indexOf(needle)
+    const snippet =
+      idx >= 0
+        ? md
+            .slice(Math.max(0, idx - 40), idx + 80)
+            .replace(/\s+/g, ' ')
+            .trim()
+        : ''
+    return { document_id: r.id, document_title: r.title, snippet }
+  })
 
   return { content: JSON.stringify(results, null, 2) }
 }
@@ -170,41 +113,12 @@ export function notesGetOutline(
     return { content: '', error: `Document not in current workspace` }
   }
 
-  const tree = getBlockTree(db, params.document_id)
-  if (tree.length === 0) {
-    return { content: `# ${doc.title}\n\n(empty document)` }
+  const body = docToMarkdown(doc.content)
+  const headings = body.split('\n').filter((line) => /^#{1,6}\s/.test(line))
+  if (headings.length === 0) {
+    return { content: `# ${doc.title}\n\n(no headings)` }
   }
-
-  const lines: string[] = [`# ${doc.title}`]
-  buildOutline(tree, lines, 0)
-
-  return { content: lines.join('\n') }
-}
-
-function buildOutline(nodes: BlockNode[], lines: string[], depth: number): void {
-  for (const node of nodes) {
-    const indent = '  '.repeat(depth)
-    const isHeading =
-      node.type === 'heading1' || node.type === 'heading2' || node.type === 'heading3'
-
-    if (isHeading || depth === 0) {
-      const prefix =
-        node.type === 'heading1'
-          ? '# '
-          : node.type === 'heading2'
-            ? '## '
-            : node.type === 'heading3'
-              ? '### '
-              : '- '
-      const contentPreview =
-        node.content.length > 80 ? node.content.slice(0, 80) + '...' : node.content
-      lines.push(`${indent}${prefix}${contentPreview}`)
-    }
-
-    if (node.children.length > 0) {
-      buildOutline(node.children, lines, depth + 1)
-    }
-  }
+  return { content: [`# ${doc.title}`, '', ...headings].join('\n') }
 }
 
 export function notesListFolders(db: Database.Database, workspaceId?: string): ToolResult {

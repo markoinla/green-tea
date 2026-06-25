@@ -83,6 +83,30 @@ describe('updateDocument', () => {
     expect(versions.length).toBeGreaterThan(0)
   })
 
+  it('does NOT rename the file on a content-only save (no churn)', () => {
+    // Force a collision so the filename stem ("Note 2") differs from the title.
+    createDocument(db, { title: 'Note', workspace_id: workspaceId })
+    const doc = createDocument(db, { title: 'Note', workspace_id: workspaceId })
+    const vault = getWorkspaceVaultDir(db, workspaceId)
+    expect(existsSync(join(vault, 'Note 2.md'))).toBe(true)
+
+    updateDocument(db, doc.id, { content: content('edited body') })
+    // still the same file; no churn into "Note 3.md"
+    expect(existsSync(join(vault, 'Note 2.md'))).toBe(true)
+    expect(readdirSync(vault).filter((f) => f.endsWith('.md')).sort()).toEqual([
+      'Note 2.md',
+      'Note.md'
+    ])
+    expect(readFileSync(join(vault, 'Note 2.md'), 'utf-8')).toContain('edited body')
+  })
+
+  it('throws (and prunes) instead of recreating an empty doc when the file vanished', () => {
+    const doc = createDocument(db, { title: 'Gone', workspace_id: workspaceId, content: content('important') })
+    rmSync(join(getWorkspaceVaultDir(db, workspaceId), 'Gone.md'), { force: true })
+    expect(() => updateDocument(db, doc.id, { title: 'Renamed' })).toThrow()
+    expect(getDocument(db, doc.id)).toBeUndefined()
+  })
+
   it('renames the file when the title changes', () => {
     const doc = createDocument(db, { title: 'Old Title', workspace_id: workspaceId })
     const vault = getWorkspaceVaultDir(db, workspaceId)
