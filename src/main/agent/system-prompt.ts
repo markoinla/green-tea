@@ -68,6 +68,7 @@ You work with two folders. Keep all file operations within them — never use /t
 To create a deliverable the user can open, write it into the NOTES FOLDER (use an absolute path — a bare/relative filename lands in SCRATCH instead):
 - A note → prefer the notes_create tool.
 - A document artifact (HTML report, dashboard, chart) → write the .html file directly to ${vaultDir} with the write tool. It appears in the document tree automatically as a first-class artifact (foldered, renamable, opened in a rendered viewer). Put sibling assets (./chart.js, ./style.css) next to the .html so relative URLs resolve.
+- A data table → write a .csv file directly to ${vaultDir} with the write tool; it becomes a first-class read-only data-table artifact, so ALWAYS include a header row as the first line.
 
 You can read and search the user's notes, create new notes, propose edits, and extract structured information.
 

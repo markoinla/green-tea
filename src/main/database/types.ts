@@ -4,7 +4,7 @@
  * kind mapping (and the helpers) live in `../vault/artifact-kinds`; the type is
  * defined HERE so the renderer can import it without pulling in node-only code.
  */
-export type DocumentKind = 'note' | 'html'
+export type DocumentKind = 'note' | 'html' | 'csv'
 
 export interface Document {
   id: string

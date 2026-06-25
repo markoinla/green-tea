@@ -20,7 +20,8 @@ export type { DocumentKind }
 const EXT_TO_KIND: Record<string, DocumentKind> = {
   md: 'note',
   html: 'html',
-  htm: 'html'
+  htm: 'html',
+  csv: 'csv'
 }
 
 /** The kind for a file path, or `null` when its extension isn't indexed at all. */

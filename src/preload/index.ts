@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 const greenteaApi = {
+  // Raw artifact text by document id, for read-only viewers (e.g. the CSV viewer)
+  // that cannot fetch gt-file:// because the renderer CSP blocks connect-src for it.
+  readArtifactText: (id: string): Promise<string> =>
+    ipcRenderer.invoke('documents:readArtifact', id),
   workspaces: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('db:workspaces:list'),
     get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:workspaces:get', id),

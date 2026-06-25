@@ -74,6 +74,7 @@ type UpdateStatus =
   | { state: 'error'; message: string }
 
 interface GreenteaApi {
+  readArtifactText(id: string): Promise<string>
   workspaces: {
     list(): Promise<Workspace[]>
     get(id: string): Promise<Workspace | undefined>

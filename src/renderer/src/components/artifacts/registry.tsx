@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
-import { FileCode, FileText, type LucideIcon } from 'lucide-react'
+import { FileCode, FileSpreadsheet, FileText, type LucideIcon } from 'lucide-react'
 import { HtmlViewer } from '../editor/HtmlViewer'
+import { CsvViewer } from '../editor/CsvViewer'
 import type { Document, DocumentKind } from '../../../../main/database/types'
 
 /**
@@ -37,8 +38,14 @@ function HtmlArtifactViewer({
   )
 }
 
+/** CSV: bytes delivered over the `documents:readArtifact` IPC (not gt-file://). */
+function CsvArtifactViewer({ doc }: { doc: Document; onQuoteSelection?: (text: string) => void }) {
+  return <CsvViewer gtFileId={doc.id} fileName={doc.title} watchDocId={doc.id} />
+}
+
 const REGISTRY: Partial<Record<DocumentKind, ArtifactViewerEntry>> = {
-  html: { Viewer: HtmlArtifactViewer, icon: FileCode, dataSource: 'gt-file' }
+  html: { Viewer: HtmlArtifactViewer, icon: FileCode, dataSource: 'gt-file' },
+  csv: { Viewer: CsvArtifactViewer, icon: FileSpreadsheet, dataSource: 'read' }
 }
 
 /** The viewer for an artifact kind, or null for notes / unregistered kinds. */

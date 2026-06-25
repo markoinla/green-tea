@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
-import { renameSync, existsSync, rmSync } from 'fs'
+import { renameSync, existsSync, rmSync, statSync } from 'fs'
+import { readFile } from 'fs/promises'
 import { join } from 'path'
 import * as blocks from '../database/repositories/blocks'
 import * as agentLogs from '../database/repositories/agent-logs'
@@ -9,6 +10,7 @@ import * as settings from '../database/repositories/settings'
 import * as conversations from '../database/repositories/conversations'
 import * as documentVersions from '../database/repositories/document-versions'
 import * as documents from '../vault/documents-service'
+import { MAX_ARTIFACT_BYTES } from '../vault/note-store'
 import { getWorkspaceVaultDir, ensureVaultDir } from '../vault/paths'
 import type { BlockNode } from '../database/types'
 import type { SerializableBlock } from '../markdown/types'
@@ -137,6 +139,21 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
   ipcMain.handle('db:documents:delete', (_event, id: string) => {
     documents.deleteDocument(db, id)
     mainWindow?.webContents.send('documents:changed')
+  })
+
+  // Raw artifact bytes by document id (read-only viewers, e.g. the CSV viewer).
+  // The renderer CSP blocks `connect-src` for gt-file://, so artifact text is
+  // delivered through this IPC read channel instead of a fetch. Notes are never
+  // served (their bytes are the markdown editor's domain); only artifacts.
+  ipcMain.handle('documents:readArtifact', async (_event, id: string): Promise<string> => {
+    const doc = documents.getDocument(db, id)
+    if (!doc || !doc.file_path) throw new Error(`Document not found: ${id}`)
+    if (doc.kind === 'note') throw new Error(`Not an artifact: ${id}`)
+    const stat = statSync(doc.file_path)
+    if (stat.size > MAX_ARTIFACT_BYTES) {
+      throw new Error(`Artifact too large: ${stat.size} bytes (max ${MAX_ARTIFACT_BYTES})`)
+    }
+    return readFile(doc.file_path, 'utf-8')
   })
 
   // Field-merge frontmatter write (the single reserved-key chokepoint). The
