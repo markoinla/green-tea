@@ -14,12 +14,16 @@ export async function generateConversationTitle(
   if (aiProvider === 'anthropic') {
     return generateWithAnthropic(db, userMessage)
   }
-  return generateWithOpenAI(db, aiProvider as 'default' | 'together' | 'openrouter', userMessage)
+  return generateWithOpenAI(
+    db,
+    aiProvider as 'default' | 'together' | 'openrouter' | 'zenlayer',
+    userMessage
+  )
 }
 
 async function generateWithOpenAI(
   db: Database.Database,
-  provider: 'default' | 'together' | 'openrouter',
+  provider: 'default' | 'together' | 'openrouter' | 'zenlayer',
   userMessage: string
 ): Promise<string> {
   let baseUrl: string
@@ -39,6 +43,12 @@ async function generateWithOpenAI(
     baseUrl = 'https://openrouter.ai/api/v1'
     apiKey = key
     modelId = getSetting(db, 'openrouterModel') || 'minimax/minimax-m2.1'
+  } else if (provider === 'zenlayer') {
+    const key = getSetting(db, 'zenlayerApiKey')
+    if (!key) throw new Error('No Zenlayer AI Gateway API key configured')
+    baseUrl = 'https://gateway.theturbo.ai/v1'
+    apiKey = key
+    modelId = getSetting(db, 'zenlayerModel') || 'glm-5.2'
   } else {
     const key = getSetting(db, 'togetherApiKey')
     if (!key) throw new Error('No Together AI API key configured')

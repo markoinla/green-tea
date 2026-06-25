@@ -101,6 +101,29 @@ export async function createSubagentSession(
           maxTokens: 16384,
           compat: openrouterCompat
         } satisfies Model<'openai-completions'>
+      } else if (aiProvider === 'zenlayer') {
+        const zenlayerApiKey = getSetting(db, 'zenlayerApiKey')
+        if (!zenlayerApiKey) throw new Error('No Zenlayer AI Gateway API key configured.')
+        authStorage.setRuntimeApiKey('zenlayer', zenlayerApiKey)
+        const zenlayerCompat = {
+          supportsDeveloperRole: false,
+          supportsStore: false,
+          supportsReasoningEffort: true,
+          maxTokensField: 'max_tokens' as const
+        }
+        model = {
+          id: agentConfig.model,
+          name: agentConfig.model,
+          api: 'openai-completions',
+          provider: 'zenlayer',
+          baseUrl: 'https://gateway.theturbo.ai/v1',
+          reasoning: reasoningMode,
+          input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 1000000,
+          maxTokens: 16384,
+          compat: zenlayerCompat
+        } satisfies Model<'openai-completions'>
       } else {
         if (aiProvider === 'together') {
           const togetherApiKey = getSetting(db, 'togetherApiKey')
@@ -185,6 +208,30 @@ export async function createSubagentSession(
         contextWindow: 1000000,
         maxTokens: 16384,
         compat: openrouterCompat
+      } satisfies Model<'openai-completions'>
+    } else if (aiProvider === 'zenlayer') {
+      const zenlayerApiKey = getSetting(db, 'zenlayerApiKey')
+      if (!zenlayerApiKey) throw new Error('No Zenlayer AI Gateway API key configured.')
+      authStorage.setRuntimeApiKey('zenlayer', zenlayerApiKey)
+      const zenlayerModelId = getSetting(db, 'zenlayerModel') || 'glm-5.2'
+      const zenlayerCompat = {
+        supportsDeveloperRole: false,
+        supportsStore: false,
+        supportsReasoningEffort: true,
+        maxTokensField: 'max_tokens' as const
+      }
+      model = {
+        id: zenlayerModelId,
+        name: zenlayerModelId,
+        api: 'openai-completions',
+        provider: 'zenlayer',
+        baseUrl: 'https://gateway.theturbo.ai/v1',
+        reasoning: reasoningMode,
+        input: ['text', 'image'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000000,
+        maxTokens: 16384,
+        compat: zenlayerCompat
       } satisfies Model<'openai-completions'>
     } else {
       if (!anthropicApiKey) throw new Error('No Anthropic API key configured.')

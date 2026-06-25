@@ -26,7 +26,8 @@ export function ModelsTab({ settings, updateSetting }: ModelsTabProps) {
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({
     anthropicApiKey: '',
     togetherApiKey: '',
-    openrouterApiKey: ''
+    openrouterApiKey: '',
+    zenlayerApiKey: ''
   })
   const [testStates, setTestStates] = useState<Record<string, TestState>>({})
   const [testErrors, setTestErrors] = useState<Record<string, string>>({})
@@ -35,9 +36,15 @@ export function ModelsTab({ settings, updateSetting }: ModelsTabProps) {
     setApiKeys({
       anthropicApiKey: settings.anthropicApiKey,
       togetherApiKey: settings.togetherApiKey,
-      openrouterApiKey: settings.openrouterApiKey
+      openrouterApiKey: settings.openrouterApiKey,
+      zenlayerApiKey: settings.zenlayerApiKey
     })
-  }, [settings.anthropicApiKey, settings.togetherApiKey, settings.openrouterApiKey])
+  }, [
+    settings.anthropicApiKey,
+    settings.togetherApiKey,
+    settings.openrouterApiKey,
+    settings.zenlayerApiKey
+  ])
 
   function handleToggleModel(modelId: string) {
     const current = isModelEnabled(settings.enabledModels, modelId)

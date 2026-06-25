@@ -118,7 +118,9 @@ export function ChatHeader({
                     ? settings.anthropicModel
                     : settings.aiProvider === 'openrouter'
                       ? settings.openrouterModel
-                      : settings.togetherModel
+                      : settings.aiProvider === 'zenlayer'
+                        ? settings.zenlayerModel
+                        : settings.togetherModel
                   )
                     .split('/')
                     .pop()}

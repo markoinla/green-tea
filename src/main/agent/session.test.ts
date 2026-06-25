@@ -50,6 +50,31 @@ describe('getModelConfig', () => {
     expect(() => getModelConfig(db)).toThrow('No OpenRouter API key configured')
   })
 
+  it('uses zenlayer provider with custom API key', () => {
+    setSetting(db, 'aiProvider', 'zenlayer')
+    setSetting(db, 'zenlayerApiKey', 'zl-key-123')
+
+    const { model } = getModelConfig(db)
+    expect(model.provider).toBe('zenlayer')
+    expect(model.baseUrl).toBe('https://gateway.theturbo.ai/v1')
+    expect(model.id).toBe('glm-5.2')
+  })
+
+  it('throws when zenlayer provider has no API key', () => {
+    setSetting(db, 'aiProvider', 'zenlayer')
+
+    expect(() => getModelConfig(db)).toThrow('No Zenlayer AI Gateway API key configured')
+  })
+
+  it('uses custom zenlayer model ID when configured', () => {
+    setSetting(db, 'aiProvider', 'zenlayer')
+    setSetting(db, 'zenlayerApiKey', 'zl-key')
+    setSetting(db, 'zenlayerModel', 'claude-opus-4-8')
+
+    const { model } = getModelConfig(db)
+    expect(model.id).toBe('claude-opus-4-8')
+  })
+
   it('throws when anthropic provider has no API key', () => {
     setSetting(db, 'aiProvider', 'anthropic')
 

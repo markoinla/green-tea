@@ -2,13 +2,15 @@ import { useState, useEffect, useCallback } from 'react'
 
 export interface Settings {
   theme: 'light' | 'dark'
-  aiProvider: 'default' | 'anthropic' | 'together' | 'openrouter'
+  aiProvider: 'default' | 'anthropic' | 'together' | 'openrouter' | 'zenlayer'
   anthropicModel: string
   anthropicApiKey: string
   togetherModel: string
   togetherApiKey: string
   openrouterModel: string
   openrouterApiKey: string
+  zenlayerModel: string
+  zenlayerApiKey: string
   showToolResults: boolean
   agentBaseDir: string
   reasoningMode: boolean
@@ -25,6 +27,8 @@ const DEFAULTS: Settings = {
   togetherApiKey: '',
   openrouterModel: 'minimax/minimax-m2.1',
   openrouterApiKey: '',
+  zenlayerModel: 'glm-5.2',
+  zenlayerApiKey: '',
   showToolResults: false,
   agentBaseDir: '~/Documents/Green Tea',
   reasoningMode: false,
@@ -47,6 +51,8 @@ export function useSettings() {
       togetherApiKey: all.togetherApiKey || DEFAULTS.togetherApiKey,
       openrouterModel: all.openrouterModel || DEFAULTS.openrouterModel,
       openrouterApiKey: all.openrouterApiKey || DEFAULTS.openrouterApiKey,
+      zenlayerModel: all.zenlayerModel || DEFAULTS.zenlayerModel,
+      zenlayerApiKey: all.zenlayerApiKey || DEFAULTS.zenlayerApiKey,
       showToolResults: all.showToolResults === 'true',
       agentBaseDir: all.agentBaseDir || DEFAULTS.agentBaseDir,
       reasoningMode: all.reasoningMode === 'true',

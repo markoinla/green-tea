@@ -126,6 +126,37 @@ export function getModelConfig(db: Database.Database): {
       maxTokens: 16384,
       compat: openrouterCompat
     } satisfies Model<'openai-completions'>
+  } else if (aiProvider === 'zenlayer') {
+    const zenlayerApiKey = getSetting(db, 'zenlayerApiKey')
+    if (!zenlayerApiKey) {
+      throw new Error(
+        'No Zenlayer AI Gateway API key configured. Open Settings from the sidebar to add your API key.'
+      )
+    }
+    authStorage.setRuntimeApiKey('zenlayer', zenlayerApiKey)
+
+    const zenlayerModelId = getSetting(db, 'zenlayerModel') || 'glm-5.2'
+    // The gateway is OpenAI-compatible but does not implement the /v1/store
+    // conversation API; it does accept OpenAI-style reasoning_effort.
+    const zenlayerCompat = {
+      supportsDeveloperRole: false,
+      supportsStore: false,
+      supportsReasoningEffort: true,
+      maxTokensField: 'max_tokens' as const
+    }
+    model = {
+      id: zenlayerModelId,
+      name: zenlayerModelId,
+      api: 'openai-completions',
+      provider: 'zenlayer',
+      baseUrl: 'https://gateway.theturbo.ai/v1',
+      reasoning: reasoningMode,
+      input: ['text', 'image'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1000000,
+      maxTokens: 16384,
+      compat: zenlayerCompat
+    } satisfies Model<'openai-completions'>
   } else {
     if (!anthropicApiKey) {
       throw new Error(

@@ -139,6 +139,30 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     mainWindow?.webContents.send('documents:changed')
   })
 
+  // Field-merge frontmatter write (the single reserved-key chokepoint). The
+  // renderer never writes whole-blob frontmatter; it sends only changed keys.
+  ipcMain.handle(
+    'db:documents:updateFrontmatter',
+    (_event, id: string, changedKeys: Record<string, unknown>) => {
+      const result = documents.updateFrontmatter(db, id, changedKeys)
+      mainWindow?.webContents.send('documents:changed')
+      return result
+    }
+  )
+
+  // Per-workspace property type registry.
+  ipcMain.handle('db:metadata:getTypes', (_event, workspaceId: string) => {
+    return documents.getPropertyTypes(db, workspaceId)
+  })
+
+  ipcMain.handle(
+    'db:metadata:setType',
+    (_event, workspaceId: string, key: string, type: string) => {
+      documents.setPropertyType(db, workspaceId, key, type as documents.PropertyTypeEntry['type'])
+      mainWindow?.webContents.send('documents:changed')
+    }
+  )
+
   // Document Versions
   ipcMain.handle('db:document-versions:list', (_event, documentId: string) => {
     return documentVersions.listVersions(db, documentId)
@@ -332,6 +356,10 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
         },
         openrouter: {
           url: 'https://openrouter.ai/api/v1/models?limit=1',
+          header: 'Authorization'
+        },
+        zenlayer: {
+          url: 'https://gateway.theturbo.ai/v1/models',
           header: 'Authorization'
         }
       }

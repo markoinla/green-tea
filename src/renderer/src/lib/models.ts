@@ -26,6 +26,7 @@ export const PROVIDERS: ProviderDef[] = [
     name: 'Anthropic',
     description: 'Claude models by Anthropic.',
     models: [
+      { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
       { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
       { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
       { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' }
@@ -60,6 +61,26 @@ export const PROVIDERS: ProviderDef[] = [
     keyField: 'openrouterApiKey',
     keyPlaceholder: 'sk-or-...',
     modelField: 'openrouterModel'
+  },
+  {
+    id: 'zenlayer',
+    name: 'Zenlayer AI Gateway',
+    description: 'Many vendors through one OpenAI-compatible gateway.',
+    models: [
+      { id: 'glm-5.2', name: 'GLM-5.2' },
+      { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+      { id: 'gpt-5.5', name: 'GPT-5.5' },
+      { id: 'gpt-5.2', name: 'GPT-5.2' },
+      { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro' },
+      { id: 'grok-4.3', name: 'Grok 4.3' },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+      { id: 'kimi-k2-thinking', name: 'Kimi K2 Thinking' },
+      { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next' }
+    ],
+    keyField: 'zenlayerApiKey',
+    keyPlaceholder: 'sk-...',
+    modelField: 'zenlayerModel'
   }
 ]
 
