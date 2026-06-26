@@ -12,7 +12,7 @@ const SYSTEM_PROMPT = `You are adapting a skill document for Green Tea, a notes-
 
 Green Tea does NOT have a filesystem for documents. Instead it has:
 - Notes (documents) in workspaces, accessed via notes_* tools
-- notes_list, notes_search, notes_get_markdown, notes_create, notes_propose_edit
+- notes_list, notes_get_markdown, notes_create, notes_propose_edit (full-text search uses the built-in grep tool)
 - Workspace description (persistent project context, like a CLAUDE.md)
 - workspace_add_file for adding generated files to context
 

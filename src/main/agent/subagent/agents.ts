@@ -28,6 +28,11 @@ function getAgentsDir(db: Database.Database): string {
   return join(getAgentBaseDir(db), 'agents')
 }
 
+// NOTE: seedDefaultAgents only writes these when the agents dir is EMPTY, so
+// existing users' on-disk agent .md files are NOT re-seeded when this list
+// changes. Stale tool names there are harmless — the allowlist is an
+// intersection filter (session-factory.ts), so names with no matching tool are
+// simply dropped. This only affects fresh installs.
 const DEFAULT_AGENTS: Record<string, string> = {
   'explorer.md': `---
 name: explorer
@@ -42,8 +47,6 @@ tools:
   - ls
   - notes_list
   - notes_get_markdown
-  - notes_search
-  - notes_get_outline
   - web_search
   - web_fetch
 ---
@@ -69,8 +72,6 @@ tools:
   - ls
   - notes_list
   - notes_get_markdown
-  - notes_search
-  - notes_get_outline
 ---
 
 You are a planning agent. Given context (often from a scout), create a detailed implementation plan.
@@ -97,8 +98,6 @@ tools:
   - ls
   - notes_list
   - notes_get_markdown
-  - notes_search
-  - notes_get_outline
   - notes_create
   - notes_propose_edit
   - notes_update_workspace_description
