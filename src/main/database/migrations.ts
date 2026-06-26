@@ -1,5 +1,24 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
+import { join } from 'path'
+import { homedir } from 'os'
+
+/**
+ * Default base dir for workspace folders, mirrored from `agent/paths.ts`
+ * (DEFAULT_BASE_DIR). Duplicated here so the migration has no runtime dependency
+ * on the agent layer. Backfill targets `<base>/<sanitized-name>/`.
+ */
+const DEFAULT_BASE_DIR = join(homedir(), 'Documents', 'Green Tea')
+
+/** Mirror of `sanitizeWorkspaceName` in `agent/paths.ts` for the path backfill. */
+function sanitizeWorkspaceName(name: string): string {
+  return (
+    name
+      .replace(/[<>:"/\\|?*]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim() || 'default'
+  )
+}
 
 export function runMigrations(db: Database.Database): void {
   db.exec(`
@@ -325,5 +344,26 @@ export function runMigrations(db: Database.Database): void {
   if (hasConvMetadataCol.cnt === 0) {
     db.exec('ALTER TABLE conversation_messages ADD COLUMN metadata_log_id TEXT')
     db.exec('ALTER TABLE conversation_messages ADD COLUMN metadata_payload TEXT')
+  }
+
+  // Migration: add `path` to workspaces. A workspace is now a folder anywhere on
+  // disk (Obsidian-style); the path is the source of truth for resolving the
+  // workspace dir. Backfill existing rows to the default flat location
+  // `~/Documents/Green Tea/<sanitized-name>/` (e.g. the seeded Default workspace
+  // → `~/Documents/Green Tea/Default/`).
+  const hasWorkspacePathCol = db
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('workspaces') WHERE name = 'path'")
+    .get() as { cnt: number }
+
+  if (hasWorkspacePathCol.cnt === 0) {
+    db.exec("ALTER TABLE workspaces ADD COLUMN path TEXT NOT NULL DEFAULT ''")
+    const rows = db.prepare('SELECT id, name FROM workspaces').all() as {
+      id: string
+      name: string
+    }[]
+    const setPath = db.prepare('UPDATE workspaces SET path = ? WHERE id = ?')
+    for (const row of rows) {
+      setPath.run(join(DEFAULT_BASE_DIR, sanitizeWorkspaceName(row.name)), row.id)
+    }
   }
 }

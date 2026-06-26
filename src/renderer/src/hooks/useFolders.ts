@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Folder } from '../../../main/database/types'
 
 interface UseFoldersResult {
@@ -13,14 +13,19 @@ interface UseFoldersResult {
 export function useFolders(workspaceId?: string | null): UseFoldersResult {
   const [folders, setFolders] = useState<Folder[]>([])
   const [loading, setLoading] = useState(true)
+  // Guards against a stale list() resolving after a workspace switch.
+  const workspaceIdRef = useRef(workspaceId)
+  workspaceIdRef.current = workspaceId
 
   const refresh = useCallback(async () => {
+    const reqWs = workspaceId
     setLoading(true)
     try {
-      const result = await window.api.folders.list(workspaceId ?? undefined)
+      const result = await window.api.folders.list(reqWs ?? undefined)
+      if (workspaceIdRef.current !== reqWs) return
       setFolders(result)
     } finally {
-      setLoading(false)
+      if (workspaceIdRef.current === reqWs) setLoading(false)
     }
   }, [workspaceId])
 

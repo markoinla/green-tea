@@ -27,6 +27,14 @@ export interface Message {
 export type ChatAction =
   | { type: 'add_message'; message: Message }
   | { type: 'set_last_assistant_content'; content: string; thinking?: string }
+  | {
+      type: 'upsert_tool_call'
+      id: string
+      timestamp: number
+      toolCallId: string
+      toolName: string
+      toolArgs?: Record<string, unknown>
+    }
   | { type: 'set_streaming'; streaming: boolean }
   | { type: 'remove_patch'; logId: string }
   | { type: 'remove_metadata'; logId: string }
@@ -46,15 +54,47 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, messages: [...state.messages, action.message] }
     case 'set_last_assistant_content': {
       const msgs = [...state.messages]
-      const lastIdx = msgs.length - 1
-      if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
-        msgs[lastIdx] = {
-          ...msgs[lastIdx],
-          content: action.content,
-          thinking: action.thinking ?? msgs[lastIdx].thinking
+      // Target the most recent assistant *text* bubble, skipping tool-call cards
+      // that may have been appended after it once tool calls started streaming.
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant' && !msgs[i].toolName) {
+          msgs[i] = {
+            ...msgs[i],
+            content: action.content,
+            thinking: action.thinking ?? msgs[i].thinking
+          }
+          break
         }
       }
       return { ...state, messages: msgs }
+    }
+    case 'upsert_tool_call': {
+      const msgs = [...state.messages]
+      const idx = msgs.findIndex((m) => m.toolCallId === action.toolCallId)
+      if (idx >= 0) {
+        // Existing card (from streaming or a prior upsert) — refresh name/args as they fill in
+        msgs[idx] = {
+          ...msgs[idx],
+          toolName: action.toolName,
+          toolArgs: action.toolArgs ?? msgs[idx].toolArgs
+        }
+        return { ...state, messages: msgs }
+      }
+      return {
+        ...state,
+        messages: [
+          ...msgs,
+          {
+            id: action.id,
+            role: 'assistant',
+            content: '',
+            timestamp: action.timestamp,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            toolCallId: action.toolCallId
+          }
+        ]
+      }
     }
     case 'set_streaming':
       return { ...state, isStreaming: action.streaming }

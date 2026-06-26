@@ -7,7 +7,7 @@ describe('kindForExt', () => {
     expect(kindForExt('/a/b/note.md')).toBe('note')
     expect(kindForExt('Report.HTML')).toBe('html')
     expect(kindForExt('x.htm')).toBe('html')
-    expect(kindForExt('data.csv')).toBeNull() // not registered yet
+    expect(kindForExt('data.csv')).toBe('csv')
     expect(kindForExt('noext')).toBeNull()
   })
 

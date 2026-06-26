@@ -41,6 +41,13 @@ export interface Workspace {
   name: string
   description: string
   memory: string
+  /**
+   * Absolute path to the workspace's folder on disk (Obsidian-style: a workspace
+   * *is* a folder). The whole tree is the document set; a hidden `.greentea/`
+   * holds agent scratch. Backfilled for legacy workspaces to the default location
+   * `~/Documents/Green Tea/<sanitized-name>/`.
+   */
+  path: string
   created_at: string
   updated_at: string
 }

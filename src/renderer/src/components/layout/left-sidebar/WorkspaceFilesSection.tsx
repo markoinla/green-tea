@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import {
   ChevronRight,
   Plus,
@@ -51,6 +51,8 @@ function isHtmlFile(fileName: string): boolean {
   return /\.html?$/i.test(fileName)
 }
 
+const FILES_COLLAPSED_KEY = 'greentea.sidebar.filesCollapsed'
+
 export function WorkspaceFilesSection({
   files,
   addFiles,
@@ -59,7 +61,15 @@ export function WorkspaceFilesSection({
   removeFile,
   onOpenInApp
 }: WorkspaceFilesSectionProps) {
-  const [filesCollapsed, setFilesCollapsed] = useState(false)
+  // Persisted so the Files section's collapsed state survives refresh and
+  // workspace switches (folder collapse is DB-backed; this is renderer-local).
+  const [filesCollapsed, setFilesCollapsedState] = useState(
+    () => localStorage.getItem(FILES_COLLAPSED_KEY) === '1'
+  )
+  const setFilesCollapsed = useCallback((collapsed: boolean) => {
+    setFilesCollapsedState(collapsed)
+    localStorage.setItem(FILES_COLLAPSED_KEY, collapsed ? '1' : '0')
+  }, [])
   const [fileDragOver, setFileDragOver] = useState(false)
 
   return (

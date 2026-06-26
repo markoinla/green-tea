@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Document } from '../../../main/database/types'
 
 interface UseDocumentsResult {
@@ -29,14 +29,20 @@ interface UseDocumentsResult {
 export function useDocuments(workspaceId?: string | null): UseDocumentsResult {
   const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(true)
+  // Tracks the latest requested workspace so an in-flight list() resolving after
+  // a workspace switch can't clobber the new workspace's data (mirrors App.tsx).
+  const workspaceIdRef = useRef(workspaceId)
+  workspaceIdRef.current = workspaceId
 
   const refresh = useCallback(async () => {
+    const reqWs = workspaceId
     setLoading(true)
     try {
-      const docs = await window.api.documents.list(workspaceId ?? undefined)
+      const docs = await window.api.documents.list(reqWs ?? undefined)
+      if (workspaceIdRef.current !== reqWs) return
       setDocuments(docs)
     } finally {
-      setLoading(false)
+      if (workspaceIdRef.current === reqWs) setLoading(false)
     }
   }, [workspaceId])
 

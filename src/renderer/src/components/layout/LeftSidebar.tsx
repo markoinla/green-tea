@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Search, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { Sidebar, SidebarHeader } from '@renderer/components/ui/sidebar'
 import { useMetadataFilter } from '@renderer/contexts/MetadataFilterContext'
 import { useDocuments } from '@renderer/hooks/useDocuments'
 import type { Document } from '../../../../main/database/types'
 import { useFolders } from '@renderer/hooks/useFolders'
 import { useWorkspaceFiles } from '@renderer/hooks/useWorkspaceFiles'
-import { useSidebarDragAndDrop } from '@renderer/hooks/useSidebarDragAndDrop'
 import { WorkspaceSwitcher } from '@renderer/components/workspace/WorkspaceSwitcher'
 import { CommandMenu } from '@renderer/components/command/CommandMenu'
 import { NotesList } from './left-sidebar/NotesList'
@@ -70,6 +70,11 @@ export function LeftSidebar({
     return () => {
       cancelled = true
     }
+    // Depends on `documents` so the filtered set stays accurate when a doc's
+    // properties change (e.g. editing out the filtered tag must drop it from the
+    // list). The re-query only fires while a filter is active — when inactive the
+    // effect early-returns above — so this isn't the broad refetch storm it looks
+    // like; correctness wins over the rare extra metadata query.
   }, [filterActive, filter, documents])
 
   // Drop a stale filter when the workspace switches (its key/value belong to the
@@ -84,17 +89,16 @@ export function LeftSidebar({
     [filterActive, filteredIds, documents]
   )
 
-  const {
-    dragOverFolderId,
-    dragOverRoot,
-    handleDragStart,
-    handleDropOnFolder,
-    handleDropOnRoot,
-    handleDragOverFolder,
-    handleDragOverRoot,
-    handleDragLeaveFolder,
-    handleDragLeaveRoot
-  } = useSidebarDragAndDrop({ updateDocument })
+  const handleMoveDocument = useCallback(
+    async (docId: string, folderId: string | null) => {
+      try {
+        await updateDocument(docId, { folder_id: folderId })
+      } catch {
+        toast.error('Failed to move document')
+      }
+    },
+    [updateDocument]
+  )
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -241,8 +245,6 @@ export function LeftSidebar({
         folders={folders}
         loading={loading}
         selectedDocId={selectedDocId}
-        dragOverFolderId={dragOverFolderId}
-        dragOverRoot={dragOverRoot}
         onSelectDoc={onSelectDoc}
         onNewDocument={handleNewDocument}
         onNewFolder={handleNewFolder}
@@ -253,13 +255,7 @@ export function LeftSidebar({
         onDeleteFolder={handleDeleteFolder}
         onToggleFolder={handleToggleFolder}
         onNewDocInFolder={handleNewDocInFolder}
-        onDragStart={handleDragStart}
-        onDropOnFolder={handleDropOnFolder}
-        onDragOverFolder={handleDragOverFolder}
-        onDragLeaveFolder={handleDragLeaveFolder}
-        onDragOverRoot={handleDragOverRoot}
-        onDragLeaveRoot={handleDragLeaveRoot}
-        onDropOnRoot={handleDropOnRoot}
+        onMoveDocument={handleMoveDocument}
       />
 
       <WorkspaceFilesSection
