@@ -6,7 +6,7 @@ import type { Document } from '../database/types'
 import { sanitizeWorkspaceName, getDefaultWorkspaceDir } from '../agent/paths'
 import { getWorkspace, normalizePath } from '../database/repositories/workspaces'
 import { maybeCreateAutoVersion } from '../database/repositories/document-versions'
-import type { TTDoc } from '../markdown/tiptap-markdown'
+import type { TTDoc, TTNode } from '../markdown/tiptap-markdown'
 import { getWorkspaceVaultDir, ensureVaultDir } from './paths'
 import { kindForRow } from './artifact-kinds'
 import {
@@ -185,6 +185,112 @@ function deriveMetadata(
   for (const r of rows) {
     insert.run(docId, r.key, r.value, r.value_fold, r.value_type, r.conforms)
   }
+}
+
+/**
+ * Resolve each `wikiLink` node's `label` (a note title) to a workspace-scoped
+ * document id, mutating the tree in place and returning it. The markdown
+ * converter is workspace-agnostic and leaves `docId: null`; this is where the
+ * title->id lookup happens so the editor click can navigate.
+ *
+ * Resolution is case-insensitive, tolerant (empty/whitespace label or no match
+ * yields `docId: null` — an unresolved/broken link), and uses a single
+ * lower(title)->id map to stay cheap for notes with many links.
+ */
+export function resolveWikiLinks(db: Database.Database, workspaceId: string, doc: TTDoc): TTDoc {
+  let titleMap: Map<string, string> | null = null
+  const lookup = (label: string): string | null => {
+    const key = label.trim().toLowerCase()
+    if (!key) return null
+    if (!titleMap) {
+      titleMap = new Map()
+      const rows = db
+        .prepare('SELECT id, lower(title) AS t FROM documents WHERE workspace_id = ?')
+        .all(workspaceId) as { id: string; t: string }[]
+      // First-writer-wins so the lookup is stable when titles collide.
+      for (const r of rows) if (!titleMap.has(r.t)) titleMap.set(r.t, r.id)
+    }
+    return titleMap.get(key) ?? null
+  }
+
+  const walk = (node: TTNode): void => {
+    if (node.type === 'wikiLink') {
+      const label = (node.attrs?.label as string) ?? ''
+      node.attrs = { ...node.attrs, label, docId: lookup(label) }
+      return
+    }
+    if (node.content) for (const child of node.content) walk(child)
+  }
+  for (const node of doc.content) walk(node)
+  return doc
+}
+
+/** An incoming wiki-link: a note that links to the target, with context. */
+export interface Backlink {
+  id: string
+  title: string
+  /** Plain text of the block that holds the link, truncated for display. */
+  snippet: string
+}
+
+const BACKLINK_SNIPPET_MAX = 200
+
+/** Flatten a node subtree to plain text, rendering wiki-links as `[[label]]`. */
+function nodeText(node: TTNode): string {
+  if (node.type === 'text') return (node.text as string) ?? ''
+  if (node.type === 'wikiLink') return `[[${(node.attrs?.label as string) ?? ''}]]`
+  if (!node.content) return ''
+  return node.content.map(nodeText).join('')
+}
+
+/**
+ * Find every note that links to `docId` via a `[[wiki-link]]`. Matching is by
+ * note title (case-insensitive, workspace-scoped) — the same key
+ * `resolveWikiLinks` uses — so a backlink is found even if the source note's
+ * mirrored `docId` was last resolved while the target did not yet exist. The
+ * `content LIKE '%wikiLink%'` pre-filter keeps this cheap on large vaults; only
+ * candidate rows are JSON-parsed. Returns the first matching block per source as
+ * the snippet, sorted by title.
+ */
+export function getBacklinks(db: Database.Database, docId: string): Backlink[] {
+  const target = getRow(db, docId)
+  if (!target) return []
+  const key = target.title.trim().toLowerCase()
+  if (!key) return []
+
+  const rows = db
+    .prepare(
+      `SELECT id, title, content FROM documents
+       WHERE workspace_id = ? AND id != ? AND content LIKE '%wikiLink%'`
+    )
+    .all(target.workspace_id, docId) as { id: string; title: string; content: string | null }[]
+
+  const out: Backlink[] = []
+  for (const row of rows) {
+    if (!row.content) continue
+    let doc: TTDoc
+    try {
+      doc = JSON.parse(row.content) as TTDoc
+    } catch {
+      continue
+    }
+    // The first top-level block that contains a matching link supplies the snippet.
+    const linksTo = (node: TTNode): boolean => {
+      if (node.type === 'wikiLink') {
+        return ((node.attrs?.label as string) ?? '').trim().toLowerCase() === key
+      }
+      return node.content ? node.content.some(linksTo) : false
+    }
+    const block = doc.content.find(linksTo)
+    if (!block) continue
+    const text = nodeText(block).trim().replace(/\s+/g, ' ')
+    const snippet =
+      text.length > BACKLINK_SNIPPET_MAX ? `${text.slice(0, BACKLINK_SNIPPET_MAX)}…` : text
+    out.push({ id: row.id, title: row.title, snippet })
+  }
+
+  out.sort((a, b) => a.title.localeCompare(b.title))
+  return out
 }
 
 export interface PropertyTypeEntry {
@@ -403,6 +509,9 @@ export function getDocument(db: Database.Database, id: string): Document | undef
   }
 
   const note = readNote(row.file_path)
+  // Resolve wiki-link titles to doc ids so the editor click can navigate. The
+  // resolved tree also feeds the mirrored `content` column (agent tools read it).
+  resolveWikiLinks(db, row.workspace_id, note.doc)
   const content = JSON.stringify(note.doc)
   const frontmatterJson = JSON.stringify(note.frontmatter)
   const refreshed: IndexRow = {
@@ -794,6 +903,7 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
     }
 
     const note = readNote(summary.path)
+    resolveWikiLinks(db, workspaceId, note.doc)
     db.transaction(() => {
       upsertRow(db, {
         id: note.id,
@@ -1013,6 +1123,8 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
   } catch {
     return { kind: 'ignored' }
   }
+  // Resolve wiki-link titles to ids so the mirrored content carries them too.
+  resolveWikiLinks(db, workspaceId, note.doc)
   const content = JSON.stringify(note.doc)
   const frontmatterJson = JSON.stringify(note.frontmatter)
 

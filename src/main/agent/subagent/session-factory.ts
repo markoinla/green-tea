@@ -16,6 +16,7 @@ import { createNotesTools } from '../tools/notes-tools'
 import { getSetting } from '../../database/repositories/settings'
 import { getAgentBaseDir, getAgentWorkDir } from '../paths'
 import { createSandboxedBashOps, isSandboxInitialized } from '../sandbox'
+import { safeSend } from '../../util/safe-send'
 
 export interface SubagentResult {
   output: string
@@ -347,7 +348,7 @@ export async function runSubagent(
 
       // Only forward tool events — skip message events to avoid cluttering the main chat
       if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
-        window.webContents.send('agent:subagent-event', {
+        safeSend(window, 'agent:subagent-event', {
           ...event,
           agentName: agentConfig.name
         })

@@ -12,30 +12,13 @@ import * as documentVersions from '../database/repositories/document-versions'
 import * as documents from '../vault/documents-service'
 import { MAX_ARTIFACT_BYTES } from '../vault/note-store'
 import { getWorkspaceVaultDir, ensureVaultDir } from '../vault/paths'
-import type { BlockNode } from '../database/types'
-import type { SerializableBlock } from '../markdown/types'
-import { serializeBlocks } from '../markdown/serialize'
 import { deserializeMarkdown } from '../markdown/deserialize'
+import { tiptapToMarkdown, type TTDoc } from '../markdown/tiptap-markdown'
 import { restartThemeWatcher } from '../theme-watcher'
 import { restartVaultWatcher } from '../vault/vault-watcher'
 import { resetSession } from '../agent/session'
 import { getDefaultWorkspaceDir } from '../agent/paths'
 import type { IpcHandlerContext } from './context'
-
-function blockNodeToSerializable(node: BlockNode): SerializableBlock {
-  const block: SerializableBlock = {
-    id: node.id,
-    type: node.type as SerializableBlock['type'],
-    content: node.content,
-    isList: true,
-    children: node.children.map(blockNodeToSerializable)
-  }
-  if (node.type === 'task_item') {
-    // The collapsed field is repurposed to store checked state for task items
-    block.checked = node.collapsed === 1
-  }
-  return block
-}
 
 /**
  * Create-new seed: drop a single empty `index.md` into a fresh workspace folder
@@ -177,6 +160,10 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
 
   ipcMain.handle('db:documents:get', (_event, id: string) => {
     return documents.getDocument(db, id)
+  })
+
+  ipcMain.handle('db:documents:backlinks', (_event, id: string) => {
+    return documents.getBacklinks(db, id)
   })
 
   ipcMain.handle(
@@ -406,9 +393,14 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
 
   // Markdown
   ipcMain.handle('md:serialize', (_event, documentId: string) => {
-    const tree = blocks.getBlockTree(db, documentId)
-    const serializableBlocks = tree.map(blockNodeToSerializable)
-    return serializeBlocks(serializableBlocks)
+    // Serialize from the document's TipTap content mirror (the file-backed source
+    // of truth), not the legacy `blocks` table — vault documents never populate
+    // `blocks`, so getBlockTree would yield an empty (blank) result. The title is
+    // not part of the body, so prepend it as a heading for a complete export.
+    const doc = documents.getDocument(db, documentId)
+    if (!doc || !doc.content) return ''
+    const body = tiptapToMarkdown(JSON.parse(doc.content) as TTDoc).trim()
+    return doc.title ? `# ${doc.title}\n\n${body}`.trim() : body
   })
 
   ipcMain.handle('md:deserialize', (_event, markdown: string) => {

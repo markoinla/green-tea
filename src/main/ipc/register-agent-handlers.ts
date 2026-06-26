@@ -11,6 +11,7 @@ import { generateConversationTitle } from '../agent/title-generator'
 import * as conversations from '../database/repositories/conversations'
 import type { IpcHandlerContext } from './context'
 import { getMainWindow } from './context'
+import { safeSend } from '../util/safe-send'
 
 export function registerAgentHandlers({ db, mainWindow }: IpcHandlerContext): void {
   ipcMain.handle(
@@ -57,7 +58,7 @@ export function registerAgentHandlers({ db, mainWindow }: IpcHandlerContext): vo
       }
       if (title) {
         conversations.updateConversationTitle(db, data.conversationId, title)
-        mainWindow?.webContents.send('conversations:changed')
+        safeSend(mainWindow, 'conversations:changed')
       }
     }
   )
@@ -73,7 +74,7 @@ export function registerAgentHandlers({ db, mainWindow }: IpcHandlerContext): vo
   ipcMain.handle('agent:approve-edit', (_event, logId: string) => {
     const docId = approveEdit(db, logId)
     if (docId) {
-      mainWindow?.webContents.send('documents:content-changed', { id: docId })
+      safeSend(mainWindow, 'documents:content-changed', { id: docId })
     }
   })
 
@@ -83,12 +84,10 @@ export function registerAgentHandlers({ db, mainWindow }: IpcHandlerContext): vo
 
   ipcMain.handle('agent:approve-metadata', (_event, logId: string) => {
     const { documentIds, rejectedKeys } = approveMetadataEdit(db, logId)
-    if (mainWindow) {
-      for (const id of documentIds) {
-        mainWindow.webContents.send('documents:content-changed', { id })
-      }
-      mainWindow.webContents.send('documents:changed')
+    for (const id of documentIds) {
+      safeSend(mainWindow, 'documents:content-changed', { id })
     }
+    safeSend(mainWindow, 'documents:changed')
     return { documentIds, rejectedKeys }
   })
 

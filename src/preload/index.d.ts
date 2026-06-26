@@ -12,7 +12,7 @@ import type {
   ConversationMessage
 } from '../main/database/types'
 import type { PropertyType } from '../main/vault/metadata'
-import type { PropertyTypeEntry } from '../main/vault/documents-service'
+import type { PropertyTypeEntry, Backlink } from '../main/vault/documents-service'
 
 interface SkillInfo {
   name: string
@@ -88,6 +88,7 @@ interface GreenteaApi {
     list(workspaceId?: string): Promise<Document[]>
     search(query: string): Promise<(Document & { workspace_name: string })[]>
     get(id: string): Promise<Document | undefined>
+    backlinks(id: string): Promise<Backlink[]>
     create(data: {
       title: string
       workspace_id?: string
@@ -246,6 +247,9 @@ interface GreenteaApi {
   shell: {
     openPath(filePath: string): Promise<string>
     showItemInFolder(filePath: string): Promise<void>
+  }
+  export: {
+    pdf(args: { markdown: string; title: string }): Promise<{ saved: boolean; filePath?: string }>
   }
   bugReport: {
     submit(data: {

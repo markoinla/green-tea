@@ -1,8 +1,9 @@
-import { ipcMain, dialog, shell, app } from 'electron'
+import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron'
 import { execFile } from 'child_process'
 import { mkdirSync, copyFileSync, writeFileSync, readFileSync } from 'fs'
 import { join, extname } from 'path'
 import { randomUUID } from 'crypto'
+import { marked } from 'marked'
 import { getUpdateStatus, checkForUpdates, downloadUpdate, quitAndInstall } from '../auto-updater'
 import { loadTheme, saveTheme } from '../theme-watcher'
 import { isPythonBundled } from '../python'
@@ -174,6 +175,79 @@ export function registerSystemHandlers({ db, mainWindow }: IpcHandlerContext): v
         return { success: false, error: (json as { error?: string }).error || 'Request failed' }
       }
       return json as { success: boolean; issue_url?: string }
+    }
+  )
+
+  // Render the document's markdown to a PDF via a hidden, offscreen BrowserWindow
+  // (so only the document content is exported, not the surrounding app chrome),
+  // then save it through a native dialog.
+  ipcMain.handle(
+    'export:pdf',
+    async (
+      _event,
+      args: { markdown: string; title: string }
+    ): Promise<{ saved: boolean; filePath?: string }> => {
+      const window = getMainWindow(mainWindow)
+      if (!window) return { saved: false }
+
+      const result = await dialog.showSaveDialog(window, {
+        defaultPath: `${args.title || 'Untitled'}.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      })
+      if (result.canceled || !result.filePath) return { saved: false }
+
+      const body = await marked.parse(args.markdown)
+      const html = `<!doctype html><html><head><meta charset="utf-8" /><style>
+        html { -webkit-print-color-adjust: exact; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          font-size: 12px;
+          line-height: 1.6;
+          color: #1a1a1a;
+          margin: 0;
+          padding: 0;
+        }
+        h1, h2, h3, h4 { line-height: 1.25; margin: 1.4em 0 0.5em; }
+        h1 { font-size: 2em; }
+        h2 { font-size: 1.5em; }
+        h3 { font-size: 1.25em; }
+        p { margin: 0.6em 0; }
+        ul, ol { padding-left: 1.5em; }
+        code {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-size: 0.9em;
+          background: #f4f4f4;
+          padding: 0.1em 0.3em;
+          border-radius: 3px;
+        }
+        pre { background: #f4f4f4; padding: 0.8em; border-radius: 5px; overflow-x: auto; }
+        pre code { background: none; padding: 0; }
+        blockquote {
+          margin: 0.8em 0;
+          padding-left: 1em;
+          border-left: 3px solid #ddd;
+          color: #555;
+        }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 0.4em 0.6em; text-align: left; }
+        img { max-width: 100%; }
+        a { color: #0b6bcb; }
+      </style></head><body>${body}</body></html>`
+
+      const exportWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
+      try {
+        await exportWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+        const data = await exportWindow.webContents.printToPDF({
+          printBackground: true,
+          pageSize: 'A4',
+          margins: { marginType: 'default' }
+        })
+        writeFileSync(result.filePath, data)
+      } finally {
+        exportWindow.destroy()
+      }
+
+      return { saved: true, filePath: result.filePath }
     }
   )
 }

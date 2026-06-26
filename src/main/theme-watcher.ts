@@ -3,6 +3,7 @@ import { join, dirname } from 'path'
 import type { BrowserWindow } from 'electron'
 import type Database from 'better-sqlite3'
 import { getAgentBaseDir } from './agent/paths'
+import { safeSend } from './util/safe-send'
 
 const THEME_FILENAME = 'theme.json'
 
@@ -252,10 +253,8 @@ function startWatchingDir(db: Database.Database, mainWindow: BrowserWindow): voi
       if (filename !== THEME_FILENAME) return
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
-        if (!mainWindow.isDestroyed()) {
-          const theme = loadTheme(db)
-          mainWindow.webContents.send('theme:changed', theme)
-        }
+        const theme = loadTheme(db)
+        safeSend(mainWindow, 'theme:changed', theme)
       }, 200)
     })
   } catch {
@@ -290,7 +289,7 @@ export function restartThemeWatcher(): void {
   startWatchingDir(storedDb, storedWindow)
   // Send updated theme to renderer since the directory changed
   const theme = loadTheme(storedDb)
-  storedWindow.webContents.send('theme:changed', theme)
+  safeSend(storedWindow, 'theme:changed', theme)
 }
 
 export function stopThemeWatcher(): void {

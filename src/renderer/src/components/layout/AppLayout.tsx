@@ -7,10 +7,13 @@ import {
 } from '@renderer/components/ui/sidebar'
 import { LeftSidebar } from './LeftSidebar'
 import { RightSidebar } from './RightSidebar'
-import { TabStrip, VersionHistoryButton } from './TabStrip'
+import { TabStrip, VersionHistoryButton, CopyMarkdownButton, ExportPdfButton } from './TabStrip'
 import { cn } from '@renderer/lib/utils'
 import { UpdateBanner } from './UpdateBanner'
 import { VersionHistoryPanel } from '../VersionHistoryPanel'
+import { toast } from 'sonner'
+import { useDocuments } from '@renderer/hooks/useDocuments'
+import { isFileTabId } from '@renderer/lib/tab-ids'
 import type { DocumentVersion } from '../../../../main/database/types'
 
 const MIN_SIDEBAR_WIDTH = 200
@@ -108,6 +111,35 @@ export function AppLayout({
   const hasDoc = activeDocId !== null
   const chatWidth = hasDoc ? rightWidth : windowWidth - leftWidth
 
+  const { documents } = useDocuments(selectedWorkspaceId)
+  const activeDoc = activeDocId ? documents.find((d) => d.id === activeDocId) : undefined
+  // Export actions only apply to note docs — not file: tabs or csv/html artifacts.
+  const isActiveNote =
+    !!activeDocId && !isFileTabId(activeDocId) && (!activeDoc?.kind || activeDoc.kind === 'note')
+
+  const handleCopyMarkdown = useCallback(async () => {
+    if (!activeDocId) return
+    try {
+      const md = await window.api.markdown.serialize(activeDocId)
+      await navigator.clipboard.writeText(md)
+      toast.success('Copied as Markdown')
+    } catch {
+      toast.error('Failed to copy Markdown')
+    }
+  }, [activeDocId])
+
+  const handleExportPdf = useCallback(async () => {
+    if (!activeDocId) return
+    try {
+      const md = await window.api.markdown.serialize(activeDocId)
+      const title = activeDoc?.title || 'Untitled'
+      const res = await window.api.export.pdf({ markdown: md, title })
+      if (res.saved) toast.success('Exported to PDF')
+    } catch {
+      toast.error('Failed to export PDF')
+    }
+  }, [activeDocId, activeDoc?.title])
+
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!resizingRef.current) return
     e.preventDefault()
@@ -200,6 +232,8 @@ export function AppLayout({
                 className="flex items-center shrink-0 ml-1"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
+                <CopyMarkdownButton onClick={handleCopyMarkdown} disabled={!isActiveNote} />
+                <ExportPdfButton onClick={handleExportPdf} disabled={!isActiveNote} />
                 <VersionHistoryButton onClick={() => onVersionHistoryOpenChange(true)} />
               </div>
             )}

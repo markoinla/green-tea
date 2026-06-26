@@ -254,7 +254,6 @@ export async function authenticateMicrosoft(
     })
 
     const authUrl = `${MS_AUTH_ENDPOINT}?${params.toString()}`
-    console.log('[Microsoft Auth] Opening browser for authorization')
     await shell.openExternal(authUrl)
 
     const code = await callbackServer.waitForCode()
@@ -273,7 +272,6 @@ export async function authenticateMicrosoft(
       codeVerifier
     })
 
-    console.log('[Microsoft Auth] Authentication successful')
     return { success: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

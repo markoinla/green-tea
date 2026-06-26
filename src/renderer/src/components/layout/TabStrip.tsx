@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { X, History, FileCode, type LucideIcon } from 'lucide-react'
+import { X, History, FileCode, Copy, FileDown, type LucideIcon } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useDocuments } from '@renderer/hooks/useDocuments'
 import { useWorkspaceFiles } from '@renderer/hooks/useWorkspaceFiles'
@@ -120,6 +120,46 @@ export function VersionHistoryButton({ onClick }: { onClick: () => void }) {
       title="Version history"
     >
       <History className="h-4 w-4" />
+    </button>
+  )
+}
+
+// Copy-as-markdown button — sits beside the version-history button.
+export function CopyMarkdownButton({
+  onClick,
+  disabled
+}: {
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="text-muted-foreground hover:text-foreground rounded-sm p-1 transition-colors hover:bg-muted shrink-0 disabled:opacity-40 disabled:pointer-events-none"
+      title="Copy as Markdown"
+    >
+      <Copy className="h-4 w-4" />
+    </button>
+  )
+}
+
+// Export-to-PDF button — sits beside the version-history button.
+export function ExportPdfButton({
+  onClick,
+  disabled
+}: {
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="text-muted-foreground hover:text-foreground rounded-sm p-1 transition-colors hover:bg-muted shrink-0 disabled:opacity-40 disabled:pointer-events-none"
+      title="Export to PDF"
+    >
+      <FileDown className="h-4 w-4" />
     </button>
   )
 }

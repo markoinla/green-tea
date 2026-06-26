@@ -245,7 +245,6 @@ export async function authenticateGoogle(
     })
 
     const authUrl = `${GOOGLE_AUTH_ENDPOINT}?${params.toString()}`
-    console.log('[Google Auth] Opening browser for authorization')
     await shell.openExternal(authUrl)
 
     const code = await callbackServer.waitForCode()
@@ -264,7 +263,6 @@ export async function authenticateGoogle(
       codeVerifier
     })
 
-    console.log('[Google Auth] Authentication successful')
     return { success: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

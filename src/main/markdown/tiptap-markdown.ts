@@ -22,6 +22,12 @@ import { gfm } from 'micromark-extension-gfm'
  *   Obsidian/GitHub. Both use one uniform open/close-tag mechanism.
  * - Collapse state and block IDs are intentionally NOT written to the file; they
  *   are editor view-state stored elsewhere (per the design doc).
+ * - Wiki-links (`wikiLink` nodes) are written as literal `[[Label]]` text — the
+ *   human-readable title only, so the file stays portable/Obsidian-compatible.
+ *   The resolved `docId` is intentionally NOT written to disk; it is re-resolved
+ *   from the title in the service layer on load (see documents-service). On read,
+ *   `[[Label]]` text is parsed back into a `wikiLink` node with `docId: null`
+ *   (this converter is workspace-agnostic and pure — no DB access here).
  */
 
 // ---------------------------------------------------------------------------
@@ -304,9 +310,36 @@ function inlineToTipTap(nodes: MdNode[], inherited: TTMark[] = []): TTNode[] {
 
 function pushText(out: TTNode[], text: string, marks: TTMark[]): void {
   if (text.length === 0) return
+  for (const node of splitWikiLinks(text, marks)) out.push(node)
+}
+
+// `mdast` has no concept of `[[wiki-links]]`, so they arrive as plain text. Split
+// a text run on the `[[Label]]` pattern, emitting `wikiLink` nodes (docId null —
+// title->id resolution happens in the service layer) interleaved with the
+// surrounding text runs, which keep the same marks. A `wikiLink` round-trips
+// back to `[[Label]]` (see inlineToMd), so this split is the exact inverse.
+const WIKI_LINK_RE = /\[\[([^[\]]+)\]\]/g
+
+function splitWikiLinks(text: string, marks: TTMark[]): TTNode[] {
+  const out: TTNode[] = []
+  let last = 0
+  let match: RegExpExecArray | null
+  WIKI_LINK_RE.lastIndex = 0
+  while ((match = WIKI_LINK_RE.exec(text)) !== null) {
+    if (match.index > last) {
+      out.push(textNode(text.slice(last, match.index), marks))
+    }
+    out.push({ type: 'wikiLink', attrs: { label: match[1], docId: null } })
+    last = match.index + match[0].length
+  }
+  if (last < text.length) out.push(textNode(text.slice(last), marks))
+  return out
+}
+
+function textNode(text: string, marks: TTMark[]): TTNode {
   const node: TTNode = { type: 'text', text }
   if (marks.length > 0) node.marks = marks
-  out.push(node)
+  return node
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +500,7 @@ function imageToMd(node: TTNode): MdNode {
 // collisions (`~~~~`) that re-parse differently and break idempotency.
 const MARK_ORDER = ['link', 'highlight', 'underline', 'strike', 'bold', 'italic', 'code']
 
-type InlineRun = { text: string; marks: TTMark[] } | { hardBreak: true }
+type InlineRun = { text: string; marks: TTMark[] } | { hardBreak: true } | { wikiLabel: string }
 
 function markRank(mark: TTMark): number {
   const i = MARK_ORDER.indexOf(mark.type)
@@ -479,6 +512,11 @@ function inlineToMd(nodes: TTNode[]): MdNode[] {
   for (const node of nodes) {
     if (node.type === 'hardBreak') runs.push({ hardBreak: true })
     else if (node.type === 'text') runs.push({ text: node.text ?? '', marks: node.marks ?? [] })
+    else if (node.type === 'wikiLink') {
+      // A wiki-link serializes to literal `[[Label]]` text. The docId is not
+      // written — it is re-resolved from the title on load.
+      runs.push({ wikiLabel: (node.attrs?.label as string) ?? '' })
+    }
   }
   return buildInline(runs)
 }
@@ -490,6 +528,14 @@ function buildInline(runs: InlineRun[]): MdNode[] {
     const run = runs[i]
     if ('hardBreak' in run) {
       out.push({ type: 'break' })
+      i++
+      continue
+    }
+    if ('wikiLabel' in run) {
+      // Emit as a raw `html` node so mdast passes `[[Label]]` through verbatim
+      // (a plain text node would escape the brackets to `\[\[`). On reparse the
+      // `[[Label]]` text is split back into a wikiLink node (see splitWikiLinks).
+      out.push({ type: 'html', value: `[[${run.wikiLabel}]]` })
       i++
       continue
     }
@@ -505,7 +551,7 @@ function buildInline(runs: InlineRun[]): MdNode[] {
     let j = i
     while (j < runs.length) {
       const r = runs[j]
-      if ('hardBreak' in r) break
+      if ('hardBreak' in r || 'wikiLabel' in r) break
       if (!r.marks.some((m) => sameMark(m, outer))) break
       group.push({ text: r.text, marks: r.marks.filter((m) => !sameMark(m, outer)) })
       j++

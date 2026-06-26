@@ -16,6 +16,7 @@ import { OutlinerList, OutlinerOrderedList, OutlinerItem } from './extensions/ou
 import { OutlinerKeymap } from './extensions/outliner-keymap'
 import { Collapsible } from './extensions/collapsible'
 import { SlashCommands } from './extensions/slash-commands'
+import { WikiLink } from './extensions/wiki-link'
 import { ImageUpload } from './extensions/image-upload'
 import { SearchAndReplace } from './extensions/search-and-replace'
 import { ChangeHighlight } from './extensions/change-highlight'
@@ -25,7 +26,9 @@ import { TableCellDropdownMenu } from './TableCellDropdownMenu'
 import { TableContextMenu } from './TableContextMenu'
 import { SearchBar } from './SearchBar'
 import { renderSlashSuggestion } from './SlashCommandList'
+import { renderWikiLinkSuggestion } from './WikiLinkList'
 import { PropertiesBlock } from './properties/PropertiesBlock'
+import { LinkedReferencesPanel } from './LinkedReferencesPanel'
 import type { Document } from '../../../../main/database/types'
 
 const lowlight = createLowlight()
@@ -42,6 +45,8 @@ interface OutlinerEditorProps {
   externalContentVersion?: number
   /** The backing document; when present, the inline Properties editor is shown. */
   document?: Document | null
+  /** Navigate to a document when a resolved wiki-link is clicked. */
+  onNavigateToDoc?: (docId: string) => void
 }
 
 export function OutlinerEditor({
@@ -52,9 +57,15 @@ export function OutlinerEditor({
   onQuoteSelection,
   externalContent,
   externalContentVersion = 0,
-  document = null
+  document = null,
+  onNavigateToDoc
 }: OutlinerEditorProps) {
   const prevExternalVersionRef = useRef(externalContentVersion)
+
+  // The editor is created once; keep the latest navigate callback in a ref so
+  // the handleClickOn closure below always sees the current prop.
+  const onNavigateToDocRef = useRef(onNavigateToDoc)
+  onNavigateToDocRef.current = onNavigateToDoc
 
   const editor = useEditor({
     editable,
@@ -125,8 +136,30 @@ export function OutlinerEditor({
         suggestion: {
           render: renderSlashSuggestion
         }
+      }),
+      WikiLink.configure({
+        suggestion: {
+          items: async ({ query }: { query: string }) => {
+            const docs = (await window.api.documents.search(query)) as Array<{
+              id: string
+              title: string
+              workspace_id: string
+            }>
+            return docs.slice(0, 8).map((d) => ({ id: d.id, label: d.title }))
+          },
+          render: renderWikiLinkSuggestion
+        }
       })
     ],
+    editorProps: {
+      handleClickOn: (_view, _pos, node) => {
+        if (node.type.name !== 'wikiLink') return false
+        const docId = node.attrs.docId as string | null
+        if (!docId) return false
+        onNavigateToDocRef.current?.(docId)
+        return true
+      }
+    },
     content: content ?? {
       type: 'doc',
       content: [{ type: 'paragraph' }]
@@ -186,6 +219,9 @@ export function OutlinerEditor({
         </TableContextMenu>
         <BubbleMenuBar editor={editor} onQuoteSelection={onQuoteSelection} />
         <TableCellDropdownMenu editor={editor} />
+        {document && editable && (
+          <LinkedReferencesPanel documentId={document.id} onNavigateToDoc={onNavigateToDoc} />
+        )}
       </div>
     </div>
   )

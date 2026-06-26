@@ -1,4 +1,5 @@
 import { Menu, type BrowserWindow, type MenuItemConstructorOptions } from 'electron'
+import { safeSend } from './util/safe-send'
 
 /**
  * Tab commands sent to the renderer from application-menu accelerators. Bare
@@ -24,7 +25,7 @@ export type TabCommand =
 export function setupApplicationMenu(mainWindow: BrowserWindow): void {
   const isMac = process.platform === 'darwin'
   const send = (cmd: TabCommand): void => {
-    mainWindow.webContents.send('menu:tab-command', cmd)
+    safeSend(mainWindow, 'menu:tab-command', cmd)
   }
 
   const gotoItems: MenuItemConstructorOptions[] = []

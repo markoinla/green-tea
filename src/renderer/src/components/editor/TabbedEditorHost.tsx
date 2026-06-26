@@ -44,11 +44,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 function DocumentEditor({
   documentId,
   isActive,
-  onQuoteSelection
+  onQuoteSelection,
+  onNavigateToDoc
 }: {
   documentId: string
   isActive: boolean
   onQuoteSelection?: (text: string) => void
+  onNavigateToDoc?: (docId: string) => void
 }) {
   const { document, loading, externalContentVersion, externalContent, conflict, resolveConflict } =
     useDocument(documentId, isActive)
@@ -78,6 +80,7 @@ function DocumentEditor({
         content={initialContent}
         onUpdate={save}
         onQuoteSelection={onQuoteSelection}
+        onNavigateToDoc={onNavigateToDoc}
         externalContent={externalContent}
         externalContentVersion={externalContentVersion}
         document={document}
@@ -98,6 +101,8 @@ export interface TabbedEditorHostProps {
   /** Active workspace — used to resolve each open doc's `kind` for viewer dispatch. */
   workspaceId: string | null
   onQuoteSelection?: (text: string) => void
+  /** Navigate to a document when a wiki-link is clicked. */
+  onNavigateToDoc?: (docId: string) => void
   /** LRU keep-mounted cap. */
   liveCap?: number
   /** workspace-file id → display name, for HTML artifact (`file:`) tabs. */
@@ -123,6 +128,7 @@ export function TabbedEditorHost({
   activeDocId,
   workspaceId,
   onQuoteSelection,
+  onNavigateToDoc,
   liveCap = 8,
   fileNamesById,
   previewVersion,
@@ -192,6 +198,7 @@ export function TabbedEditorHost({
                   documentId={id}
                   isActive={id === activeDocId && !activePreview}
                   onQuoteSelection={onQuoteSelection}
+                  onNavigateToDoc={onNavigateToDoc}
                 />
               )}
             </ErrorBoundary>

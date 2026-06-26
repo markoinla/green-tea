@@ -1,5 +1,10 @@
 import type Database from 'better-sqlite3'
-import { listDocuments, getDocument, listByProperty } from '../../vault/documents-service'
+import {
+  listDocuments,
+  getDocument,
+  listByProperty,
+  getBacklinks
+} from '../../vault/documents-service'
 import { listFolders } from '../../database/repositories/folders'
 import { fold } from '../../vault/metadata'
 import { tiptapToMarkdown, type TTDoc } from '../../markdown/tiptap-markdown'
@@ -236,6 +241,30 @@ export function notesGetOutline(
     return { content: `# ${doc.title}\n\n(no headings)` }
   }
   return { content: [`# ${doc.title}`, '', ...headings].join('\n') }
+}
+
+export function notesGetBacklinks(
+  db: Database.Database,
+  params: { document_id: string },
+  workspaceId?: string
+): ToolResult {
+  if (!params.document_id) {
+    return { content: '', error: 'document_id is required' }
+  }
+
+  const doc = getDocument(db, params.document_id)
+  if (!doc) {
+    return { content: '', error: `Document not found: ${params.document_id}` }
+  }
+  if (workspaceId && doc.workspace_id !== workspaceId) {
+    return { content: '', error: `Document not in current workspace` }
+  }
+
+  const backlinks = getBacklinks(db, params.document_id)
+  if (backlinks.length === 0) {
+    return { content: `No notes link to "${doc.title}".` }
+  }
+  return { content: JSON.stringify(backlinks, null, 2) }
 }
 
 export function notesListFolders(db: Database.Database, workspaceId?: string): ToolResult {

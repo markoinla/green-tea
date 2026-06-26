@@ -21,7 +21,7 @@ export function useGoogleAccount() {
       const s = await window.api.google.getStatus()
       setStatus(s)
     } catch {
-      // ignore
+      // status fetch is best-effort; leave default unauthenticated state on failure
     } finally {
       setLoading(false)
     }

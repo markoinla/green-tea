@@ -9,7 +9,8 @@ import {
   notesGetMarkdown,
   notesSearch,
   notesGetOutline,
-  notesQuery
+  notesQuery,
+  notesGetBacklinks
 } from './notes-read'
 import {
   notesCreateDocument,
@@ -158,6 +159,30 @@ export function createNotesTools(
     async execute(_toolCallId, params) {
       const p = params as { document_id: string }
       const result = notesGetOutline(db, p, workspaceId)
+      if (result.error) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+          details: undefined
+        }
+      }
+      return {
+        content: [{ type: 'text' as const, text: result.content }],
+        details: undefined
+      }
+    }
+  }
+
+  const notesGetBacklinksTool: ToolDefinition = {
+    name: 'notes_get_backlinks',
+    label: 'Get Backlinks',
+    description:
+      'List the notes that link to a given note via a [[wiki-link]]. Returns each linking note with its id, title, and a snippet of the block that holds the link. Useful for finding what references a note.',
+    parameters: Type.Object({
+      document_id: Type.String({ description: 'The note ID to find incoming links for' })
+    }),
+    async execute(_toolCallId, params) {
+      const p = params as { document_id: string }
+      const result = notesGetBacklinks(db, p, workspaceId)
       if (result.error) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
@@ -504,6 +529,7 @@ export function createNotesTools(
     notesListFoldersTool,
     notesGetMarkdownTool,
     notesGetOutlineTool,
+    notesGetBacklinksTool,
     notesSearchTool,
     notesQueryTool,
     notesCreateTool,

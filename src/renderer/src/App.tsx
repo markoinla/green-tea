@@ -353,6 +353,7 @@ export default function App() {
             activeDocId={tabs.activeDocId}
             workspaceId={selectedWorkspaceId}
             onQuoteSelection={setSelectionContext}
+            onNavigateToDoc={handleSelectDoc}
             fileNamesById={fileNamesById}
             previewVersion={activePreview}
             onExitPreview={() => setPreviewVersion(null)}

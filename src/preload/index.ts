@@ -9,11 +9,8 @@ const greenteaApi = {
   workspaces: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('db:workspaces:list'),
     get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:workspaces:get', id),
-    create: (data: {
-      name: string
-      path?: string
-      mode?: 'new' | 'open'
-    }): Promise<unknown> => ipcRenderer.invoke('db:workspaces:create', data),
+    create: (data: { name: string; path?: string; mode?: 'new' | 'open' }): Promise<unknown> =>
+      ipcRenderer.invoke('db:workspaces:create', data),
     update: (id: string, data: { name?: string; description?: string }): Promise<unknown> =>
       ipcRenderer.invoke('db:workspaces:update', id, data),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('db:workspaces:delete', id),
@@ -29,6 +26,7 @@ const greenteaApi = {
       ipcRenderer.invoke('db:documents:list', workspaceId),
     search: (query: string): Promise<unknown[]> => ipcRenderer.invoke('db:documents:search', query),
     get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:documents:get', id),
+    backlinks: (id: string): Promise<unknown[]> => ipcRenderer.invoke('db:documents:backlinks', id),
     create: (data: {
       title: string
       workspace_id?: string
@@ -308,6 +306,12 @@ const greenteaApi = {
       ipcRenderer.invoke('shell:open-path', filePath),
     showItemInFolder: (filePath: string): Promise<void> =>
       ipcRenderer.invoke('shell:show-item-in-folder', filePath)
+  },
+  export: {
+    pdf: (args: {
+      markdown: string
+      title: string
+    }): Promise<{ saved: boolean; filePath?: string }> => ipcRenderer.invoke('export:pdf', args)
   },
   bugReport: {
     submit: (data: {

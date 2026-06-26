@@ -26,6 +26,7 @@ const CORPUS: Record<string, string> = {
   nestedList: '- parent\n  - child\n    - grandchild',
   taskList: '- [x] done\n- [ ] todo',
   nestedTask: '- [ ] parent\n  - [x] child',
+  wikiLink: 'See [[Other Note]] here',
   blockquote: '> a quote',
   codeBlock: '```js\nconst x = 1\n```',
   codeNoLang: '```\nplain code\n```',
@@ -115,6 +116,38 @@ describe('feature fidelity', () => {
     expect(out).toContain('| Sam')
     expect(norm(out)).toBe(out)
   })
+
+  it('parses [[Label]] into a wikiLink node with docId null', () => {
+    const doc = markdownToTiptap('[[Other Note]]')
+    const node = doc.content[0].content?.[0]
+    expect(node?.type).toBe('wikiLink')
+    expect(node?.attrs?.label).toBe('Other Note')
+    expect(node?.attrs?.docId).toBeNull()
+  })
+
+  it('serializes a wikiLink node back to [[Label]] text', () => {
+    const doc: TTDoc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'wikiLink', attrs: { label: 'Other Note', docId: 'abc-123' } }]
+        }
+      ]
+    }
+    // The resolved docId is intentionally NOT written to disk.
+    expect(tiptapToMarkdown(doc).trim()).toBe('[[Other Note]]')
+  })
+
+  it('keeps wikiLinks interleaved with surrounding text', () => {
+    const doc = markdownToTiptap('before [[A Note]] after')
+    const inline = doc.content[0].content ?? []
+    expect(inline.map((n) => n.type)).toEqual(['text', 'wikiLink', 'text'])
+    expect(inline[0].text).toBe('before ')
+    expect(inline[1].attrs?.label).toBe('A Note')
+    expect(inline[2].text).toBe(' after')
+    expect(norm('before [[A Note]] after').trim()).toBe('before [[A Note]] after')
+  })
 })
 
 describe('tiptap doc round-trip (editor-shaped input)', () => {
@@ -128,6 +161,31 @@ describe('tiptap doc round-trip (editor-shaped input)', () => {
   it('handles an empty document', () => {
     const doc = markdownToTiptap('')
     expect(doc).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+  })
+
+  it('round-trips a doc containing a wikiLink back to an equal doc', () => {
+    // Editor-shaped input carries a resolved docId; on reload it parses back with
+    // docId null (resolution is the service layer's job, not the converter's).
+    const doc: TTDoc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'See ' },
+            { type: 'wikiLink', attrs: { label: 'Other Note', docId: 'abc-123' } },
+            { type: 'text', text: ' here' }
+          ]
+        }
+      ]
+    }
+    const md = tiptapToMarkdown(doc)
+    expect(md.trim()).toBe('See [[Other Note]] here')
+    const doc2 = markdownToTiptap(md)
+    expect(doc2.content[0].content?.[1]).toEqual({
+      type: 'wikiLink',
+      attrs: { label: 'Other Note', docId: null }
+    })
   })
 })
 

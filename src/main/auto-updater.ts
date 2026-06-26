@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { is } from '@electron-toolkit/utils'
+import { safeSend } from './util/safe-send'
 
 export type UpdateStatus =
   | { state: 'idle' }
@@ -15,7 +16,7 @@ let currentStatus: UpdateStatus = { state: 'idle' }
 
 function send(window: BrowserWindow, status: UpdateStatus): void {
   currentStatus = status
-  window.webContents.send('app:update-status', status)
+  safeSend(window, 'app:update-status', status)
 }
 
 export function getUpdateStatus(): UpdateStatus {

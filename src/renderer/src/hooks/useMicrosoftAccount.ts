@@ -22,7 +22,7 @@ export function useMicrosoftAccount() {
       const s = await window.api.microsoft.getStatus()
       setStatus(s)
     } catch {
-      // ignore
+      // status fetch is best-effort; leave default unauthenticated state on failure
     } finally {
       setLoading(false)
     }

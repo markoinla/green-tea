@@ -117,19 +117,17 @@ export function useMcpServers() {
       const sts = (await window.api.mcp.getStatuses()) as McpServerStatus[]
       setStatuses(sts)
     } catch {
-      // ignore
+      // status polling is best-effort; ignore transient IPC failures
     }
   }, [])
 
   const [authenticating, setAuthenticating] = useState<string | null>(null)
 
   const authenticate = useCallback(async (name: string) => {
-    console.log('[MCP] authenticate called for:', name)
     setAuthenticating(name)
     setError(null)
     try {
       const result = await window.api.mcp.authenticate(name)
-      console.log('[MCP] authenticate result:', result)
       if (!result.success) {
         setError(result.error || 'Authentication failed')
       }

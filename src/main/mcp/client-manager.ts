@@ -193,7 +193,6 @@ class McpClientManager {
     if (server.idleTimer) clearTimeout(server.idleTimer)
     const timeout = (server.config.idleTimeout ?? DEFAULT_IDLE_TIMEOUT) * 1000
     server.idleTimer = setTimeout(() => {
-      console.log(`MCP server "${name}" idle timeout — disconnecting`)
       this.disconnect(name)
     }, timeout)
   }
@@ -351,9 +350,7 @@ class McpClientManager {
 
     let callbackServer: Awaited<ReturnType<typeof startOAuthCallbackServer>> | null = null
     try {
-      console.log(`[MCP OAuth] Starting authentication for "${name}"`)
       callbackServer = await startOAuthCallbackServer()
-      console.log(`[MCP OAuth] Callback server listening on port ${callbackServer.port}`)
       const authProvider = createElectronOAuthProvider(name, OAUTH_REDIRECT_URL)
 
       const transport = new StreamableHTTPClientTransport(new URL(server.config.url), {
@@ -364,7 +361,6 @@ class McpClientManager {
       try {
         await client.connect(transport)
         // Connected without needing auth — tokens were already valid
-        console.log(`[MCP OAuth] Connected without needing auth for "${name}"`)
         try {
           client.close()
         } catch {
@@ -390,9 +386,7 @@ class McpClientManager {
         }
 
         // UnauthorizedError means the browser was opened for auth
-        console.log(`[MCP OAuth] Waiting for authorization code from browser for "${name}"`)
         const code = await callbackServer.waitForCode()
-        console.log(`[MCP OAuth] Received authorization code for "${name}"`)
         await transport.finishAuth(code)
         callbackServer.close()
 

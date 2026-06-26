@@ -4,6 +4,7 @@ import { executeScheduledTask } from '../scheduler/executor'
 import { describeCron, getNextCronTime } from '../scheduler/cron'
 import type { IpcHandlerContext } from './context'
 import { getMainWindow } from './context'
+import { safeSend } from '../util/safe-send'
 
 export function registerSchedulerHandlers({ db, mainWindow }: IpcHandlerContext): void {
   ipcMain.handle('scheduler:list', (_event, workspaceId: string) => {
@@ -61,8 +62,27 @@ export function registerSchedulerHandlers({ db, mainWindow }: IpcHandlerContext)
     if (!task) throw new Error(`Task not found: ${id}`)
     const window = getMainWindow(mainWindow)
     if (!window) throw new Error('No browser window available')
-    executeScheduledTask(db, window, task).then(() => {
-      mainWindow?.webContents.send('scheduler:changed')
-    })
+    const startedAt = new Date().toISOString()
+    executeScheduledTask(db, window, task)
+      .catch((err) => {
+        const finishedAt = new Date().toISOString()
+        const message = err instanceof Error ? err.message : String(err)
+        const run = scheduledTasks.createTaskRun(db, {
+          task_id: id,
+          status: 'error',
+          started_at: startedAt
+        })
+        scheduledTasks.updateTaskRun(db, run.id, {
+          error_message: message,
+          finished_at: finishedAt
+        })
+        scheduledTasks.updateScheduledTask(db, id, {
+          last_run_at: finishedAt,
+          last_run_status: 'error'
+        })
+      })
+      .finally(() => {
+        safeSend(mainWindow, 'scheduler:changed')
+      })
   })
 }

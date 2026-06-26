@@ -98,7 +98,6 @@ export function useSpeechToText({
     wsRef.current = ws
 
     ws.addEventListener('open', () => {
-      console.log('[stt] ws open')
       setStatus('recording')
 
       // 3. Start MediaRecorder
@@ -109,7 +108,6 @@ export function useSpeechToText({
 
       recorder.addEventListener('dataavailable', (e) => {
         if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          console.log('[stt] sending audio chunk:', e.data.size, 'bytes')
           ws.send(e.data)
         }
       })
@@ -118,11 +116,9 @@ export function useSpeechToText({
     })
 
     ws.addEventListener('message', (event) => {
-      console.log('[stt] ws message:', event.data)
       try {
         const data = JSON.parse(event.data as string)
         const transcript = data?.channel?.alternatives?.[0]?.transcript
-        console.log('[stt] transcript:', JSON.stringify(transcript), 'is_final:', data.is_final)
         if (typeof transcript !== 'string' || transcript === '') return
 
         const isFinal = !!data.is_final
@@ -133,20 +129,18 @@ export function useSpeechToText({
           const combined = [...finalsRef.current, transcript].join(' ')
           onTranscriptRef.current(combined, false)
         }
-      } catch (err) {
-        console.log('[stt] parse error:', err)
+      } catch {
+        // ignore malformed/non-JSON frames from the proxy
       }
     })
 
-    ws.addEventListener('error', (e) => {
-      console.log('[stt] ws error:', e)
+    ws.addEventListener('error', () => {
       cleanup()
       setStatus('error')
       onErrorRef.current?.('Speech-to-text connection failed')
     })
 
-    ws.addEventListener('close', (e) => {
-      console.log('[stt] ws close:', e.code, e.reason)
+    ws.addEventListener('close', () => {
       // Only transition to idle if we were recording (not already error)
       setStatus((prev) => (prev === 'error' ? prev : 'idle'))
       cleanup()
