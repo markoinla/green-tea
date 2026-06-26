@@ -10,8 +10,10 @@ import { useWorkspaceFiles } from '@renderer/hooks/useWorkspaceFiles'
 import { WorkspaceSwitcher } from '@renderer/components/workspace/WorkspaceSwitcher'
 import { CommandMenu } from '@renderer/components/command/CommandMenu'
 import { NotesList } from './left-sidebar/NotesList'
+import { uniqueFolderName } from './left-sidebar/folderTree'
 import { WorkspaceFilesSection } from './left-sidebar/WorkspaceFilesSection'
 import { SidebarFooterSection } from './left-sidebar/SidebarFooterSection'
+import { ConfirmDeleteDialog } from '@renderer/components/settings/ConfirmDeleteDialog'
 
 interface LeftSidebarProps {
   selectedDocId: string | null
@@ -48,6 +50,12 @@ export function LeftSidebar({
     removeFile
   } = useWorkspaceFiles(selectedWorkspaceId)
   const [commandOpen, setCommandOpen] = useState(false)
+  // Pending move-to-trash, awaiting confirmation. `name` is shown in the dialog.
+  const [pendingTrash, setPendingTrash] = useState<{
+    kind: 'doc' | 'folder'
+    id: string
+    name: string
+  } | null>(null)
 
   // Active metadata filter (Phase 4). When set, the note list is restricted to
   // the matching documents via db:metadata:listByProperty; clearing restores the
@@ -118,25 +126,39 @@ export function LeftSidebar({
   }, [selectedWorkspaceId, createDocument, onSelectDoc])
 
   const handleNewFolder = useCallback(async () => {
-    await createFolder({ name: 'Untitled Folder' })
-  }, [createFolder])
+    await createFolder({ name: uniqueFolderName(folders, '') })
+  }, [createFolder, folders])
+
+  // Create a subfolder under an existing folder. Folder names are full slash-paths,
+  // so a child of "Projects" is "Projects/Untitled Folder"; ensure the parent is
+  // expanded so the new folder is visible.
+  const handleNewSubfolder = useCallback(
+    async (parentId: string) => {
+      const parent = folders.find((f) => f.id === parentId)
+      if (!parent) return
+      await createFolder({ name: uniqueFolderName(folders, parent.name) })
+      if (parent.collapsed === 1) await updateFolder(parentId, { collapsed: 0 })
+    },
+    [folders, createFolder, updateFolder]
+  )
 
   const handleNewDocInFolder = useCallback(
     async (folderId: string) => {
       if (!selectedWorkspaceId) return
+      const parent = folders.find((f) => f.id === folderId)
+      if (parent && parent.collapsed === 1) await updateFolder(folderId, { collapsed: 0 })
       const doc = await createDocument({ title: 'Untitled', folder_id: folderId })
       onSelectDoc(doc.id, { newTab: true })
     },
-    [selectedWorkspaceId, createDocument, onSelectDoc]
+    [selectedWorkspaceId, folders, updateFolder, createDocument, onSelectDoc]
   )
 
   const handleDeleteDoc = useCallback(
-    async (id: string) => {
-      // The open tab (if any) closes via the reconcileDeletions path in App once
-      // `documents:changed` fires — no need to clear selection here.
-      await deleteDocument(id)
+    (id: string) => {
+      const doc = documents.find((d) => d.id === id)
+      setPendingTrash({ kind: 'doc', id, name: doc?.title || 'Untitled' })
     },
-    [deleteDocument]
+    [documents]
   )
 
   const handleRenameDoc = useCallback(
@@ -167,11 +189,26 @@ export function LeftSidebar({
   )
 
   const handleDeleteFolder = useCallback(
-    async (id: string) => {
-      await deleteFolder(id)
+    (id: string) => {
+      const folder = folders.find((f) => f.id === id)
+      setPendingTrash({ kind: 'folder', id, name: folder?.name || 'Untitled Folder' })
     },
-    [deleteFolder]
+    [folders]
   )
+
+  const handleConfirmTrash = useCallback(async () => {
+    if (!pendingTrash) return
+    const { kind, id } = pendingTrash
+    setPendingTrash(null)
+    try {
+      // The open tab (if any) closes via the reconcileDeletions path in App once
+      // `documents:changed` fires — no need to clear selection here.
+      if (kind === 'doc') await deleteDocument(id)
+      else await deleteFolder(id)
+    } catch {
+      toast.error(`Failed to move ${kind === 'doc' ? 'document' : 'folder'} to Trash`)
+    }
+  }, [pendingTrash, deleteDocument, deleteFolder])
 
   const handleRenameFolder = useCallback(
     async (id: string, newName: string) => {
@@ -179,6 +216,18 @@ export function LeftSidebar({
     },
     [updateFolder]
   )
+
+  const handleRefresh = useCallback(async () => {
+    if (!selectedWorkspaceId) return
+    try {
+      // Full reindex from disk — reconciles anything changed outside the app
+      // (notes/folders added, removed, or moved) and prunes stale rows.
+      await window.api.documents.reindex(selectedWorkspaceId)
+      toast.success('Refreshed')
+    } catch {
+      toast.error('Failed to refresh')
+    }
+  }, [selectedWorkspaceId])
 
   const handleToggleFolder = useCallback(
     async (id: string, collapsed: number) => {
@@ -255,7 +304,9 @@ export function LeftSidebar({
         onDeleteFolder={handleDeleteFolder}
         onToggleFolder={handleToggleFolder}
         onNewDocInFolder={handleNewDocInFolder}
+        onNewSubfolder={handleNewSubfolder}
         onMoveDocument={handleMoveDocument}
+        onRefresh={handleRefresh}
       />
 
       <WorkspaceFilesSection
@@ -268,6 +319,20 @@ export function LeftSidebar({
       />
 
       <SidebarFooterSection selectedWorkspaceId={selectedWorkspaceId} />
+
+      <ConfirmDeleteDialog
+        open={pendingTrash !== null}
+        onOpenChange={(open) => !open && setPendingTrash(null)}
+        title="Move to Trash"
+        itemName={null}
+        description={
+          pendingTrash?.kind === 'folder'
+            ? `Move the folder "${pendingTrash?.name}" and its notes to the Trash`
+            : `Move "${pendingTrash?.name}" to the Trash`
+        }
+        confirmLabel="Move to Trash"
+        onConfirm={handleConfirmTrash}
+      />
     </Sidebar>
   )
 }

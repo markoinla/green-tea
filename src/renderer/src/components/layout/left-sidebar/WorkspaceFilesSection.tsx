@@ -83,7 +83,7 @@ export function WorkspaceFilesSection({
           <ChevronRight
             className={`h-3 w-3 transition-transform ${filesCollapsed ? '' : 'rotate-90'}`}
           />
-          Files
+          Context
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

@@ -33,14 +33,20 @@ export function useDocuments(workspaceId?: string | null): UseDocumentsResult {
   // a workspace switch can't clobber the new workspace's data (mirrors App.tsx).
   const workspaceIdRef = useRef(workspaceId)
   workspaceIdRef.current = workspaceId
+  // Only the very first load (and a workspace switch) shows the loading state.
+  // Event/mutation-driven refreshes revalidate in the background while the
+  // existing list stays on screen — otherwise a refetch blanks the note tree to
+  // a "Loading…" placeholder and flashes on every change (e.g. folder toggle).
+  const loadedWsRef = useRef<string | null | undefined>(undefined)
 
   const refresh = useCallback(async () => {
     const reqWs = workspaceId
-    setLoading(true)
+    if (loadedWsRef.current !== reqWs) setLoading(true)
     try {
       const docs = await window.api.documents.list(reqWs ?? undefined)
       if (workspaceIdRef.current !== reqWs) return
       setDocuments(docs)
+      loadedWsRef.current = reqWs
     } finally {
       if (workspaceIdRef.current === reqWs) setLoading(false)
     }

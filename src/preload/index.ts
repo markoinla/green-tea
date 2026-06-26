@@ -24,6 +24,8 @@ const greenteaApi = {
   documents: {
     list: (workspaceId?: string): Promise<unknown[]> =>
       ipcRenderer.invoke('db:documents:list', workspaceId),
+    reindex: (workspaceId: string): Promise<void> =>
+      ipcRenderer.invoke('db:documents:reindex', workspaceId),
     search: (query: string): Promise<unknown[]> => ipcRenderer.invoke('db:documents:search', query),
     get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:documents:get', id),
     backlinks: (id: string): Promise<unknown[]> => ipcRenderer.invoke('db:documents:backlinks', id),
@@ -320,6 +322,14 @@ const greenteaApi = {
       description: string
     }): Promise<{ success: boolean; issue_url?: string; error?: string }> =>
       ipcRenderer.invoke('bug-report:submit', data)
+  },
+  share: {
+    publish: (documentId: string): Promise<{ url: string; slug: string }> =>
+      ipcRenderer.invoke('share:publish', documentId),
+    unpublish: (documentId: string): Promise<void> =>
+      ipcRenderer.invoke('share:unpublish', documentId),
+    status: (documentId: string): Promise<{ shared: boolean; url?: string; slug?: string }> =>
+      ipcRenderer.invoke('share:status', documentId)
   },
   workspaceFiles: {
     list: (workspaceId: string): Promise<unknown[]> =>

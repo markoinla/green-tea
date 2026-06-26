@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { FilePlus, FolderPlus } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FilePlus, FolderPlus, RefreshCw } from 'lucide-react'
 import {
   dropTargetForElements,
   monitorForElements
@@ -16,10 +16,12 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger
 } from '@renderer/components/ui/context-menu'
 import { FolderMenuItem } from './FolderMenuItem'
 import { DocumentMenuItem } from './DocumentMenuItem'
+import { buildFolderTree } from './folderTree'
 import { DROP_TYPE_ROOT, isDocumentDragData, isFolderDropData, isRootDropData } from './dnd'
 import type { Document } from '../../../../../main/database/types'
 import type { Folder } from '../../../../../main/database/types'
@@ -39,8 +41,12 @@ interface NotesListProps {
   onDeleteFolder: (id: string) => void
   onToggleFolder: (id: string, collapsed: number) => void
   onNewDocInFolder: (folderId: string) => void
+  /** Create a subfolder under the given folder. */
+  onNewSubfolder: (folderId: string) => void
   /** Move a document into a folder (id) or out to the root (null). */
   onMoveDocument: (docId: string, folderId: string | null) => void
+  /** Rebuild the index from disk (manual reconcile of external changes). */
+  onRefresh: () => void
 }
 
 /**
@@ -95,20 +101,25 @@ export function NotesList({
   onDeleteFolder,
   onToggleFolder,
   onNewDocInFolder,
-  onMoveDocument
+  onNewSubfolder,
+  onMoveDocument,
+  onRefresh
 }: NotesListProps) {
-  const folderDocs = useMemo(() => {
-    const map = new Map<string, Document[]>()
-    for (const folder of folders) {
-      map.set(folder.id, [])
-    }
-    for (const doc of documents) {
-      if (doc.folder_id && map.has(doc.folder_id)) {
-        map.get(doc.folder_id)!.push(doc)
-      }
-    }
-    return map
-  }, [folders, documents])
+  // The folder rows are flat but their names are slash-paths; build the nested
+  // tree the sidebar renders from them (synthesizing row-less intermediates).
+  const folderTree = useMemo(() => buildFolderTree(folders, documents), [folders, documents])
+
+  // Collapse state for synthetic intermediate nodes (which have no row to persist
+  // it on). Kept in memory only — resets on reload, which is fine for grouping.
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set())
+  const onTogglePath = useCallback((path: string) => {
+    setCollapsedPaths((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
 
   // Root docs are those with no folder, PLUS any whose folder_id points to a
   // folder that isn't in the current list. The latter guards a transient
@@ -154,12 +165,13 @@ export function NotesList({
                 </div>
               ) : (
                 <SidebarMenu>
-                  {folders.map((folder) => (
+                  {folderTree.map((node) => (
                     <FolderMenuItem
-                      key={folder.id}
-                      folder={folder}
-                      documents={folderDocs.get(folder.id) || []}
+                      key={node.path}
+                      node={node}
                       selectedDocId={selectedDocId}
+                      collapsedPaths={collapsedPaths}
+                      onTogglePath={onTogglePath}
                       onSelectDoc={onSelectDoc}
                       onRenameDoc={onRenameDoc}
                       onDeleteDoc={onDeleteDoc}
@@ -168,6 +180,7 @@ export function NotesList({
                       onDeleteFolder={onDeleteFolder}
                       onToggleFolder={onToggleFolder}
                       onNewDocInFolder={onNewDocInFolder}
+                      onNewSubfolder={onNewSubfolder}
                     />
                   ))}
 
@@ -201,6 +214,11 @@ export function NotesList({
         <ContextMenuItem onClick={onNewFolder}>
           <FolderPlus className="h-3.5 w-3.5 mr-2" />
           New Folder
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={onRefresh}>
+          <RefreshCw className="h-3.5 w-3.5 mr-2" />
+          Refresh
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

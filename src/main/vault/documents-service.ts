@@ -1,3 +1,4 @@
+import { shell } from 'electron'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 import { existsSync, renameSync, rmSync, statSync } from 'fs'
@@ -808,10 +809,11 @@ export function updateFrontmatter(
   return { document: rowToDocument(getRow(db, id)!), rejectedKeys }
 }
 
-export function deleteDocument(db: Database.Database, id: string): void {
+export async function deleteDocument(db: Database.Database, id: string): Promise<void> {
   const row = getRow(db, id)
   if (row?.file_path && existsSync(row.file_path)) {
-    rmSync(row.file_path, { force: true })
+    // Move the note to the OS trash so it stays recoverable from Finder.
+    await shell.trashItem(row.file_path)
   }
   deleteIndexRow(db, id)
 }
@@ -850,15 +852,15 @@ export function renameFolder(db: Database.Database, id: string, name: string): v
   reindexWorkspace(db, folder.workspace_id)
 }
 
-export function deleteFolder(db: Database.Database, id: string): void {
+export async function deleteFolder(db: Database.Database, id: string): Promise<void> {
   const folder = db.prepare('SELECT name, workspace_id FROM folders WHERE id = ?').get(id) as
     | { name: string; workspace_id: string }
     | undefined
   if (folder) {
     const dir = join(getWorkspaceVaultDir(db, folder.workspace_id), folderSubdir(folder.name))
     if (existsSync(dir)) {
-      // Remove the directory and its notes; index rows are pruned via reindex.
-      rmSync(dir, { recursive: true, force: true })
+      // Move the directory and its notes to the OS trash; index rows are pruned below.
+      await shell.trashItem(dir)
     }
     db.prepare('DELETE FROM documents WHERE folder_id = ?').run(id)
   }
@@ -940,6 +942,39 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
       db.prepare('DELETE FROM folders WHERE id = ?').run(folder.id)
     }
   }
+}
+
+/**
+ * Prune folder rows whose subdirectory no longer exists on disk (the user deleted
+ * or renamed the folder in Finder/Explorer), along with the documents indexed
+ * under them. Returns true if anything was removed.
+ *
+ * This is the folder-level counterpart to deleteIndexRowByPath: the recursive
+ * watcher reports a directory removal as a single event (with no per-file deletes
+ * to rely on), so without this the folder lingers in the tree as a stale row.
+ */
+export function pruneMissingFolders(db: Database.Database, workspaceId: string): boolean {
+  const vaultDir = getWorkspaceVaultDir(db, workspaceId).normalize('NFC')
+  // If the workspace's own folder is gone the workspace is "unavailable" — leave
+  // its index intact (the user may relocate it back) rather than wiping it here.
+  if (!existsSync(vaultDir)) return false
+
+  const folderRows = db
+    .prepare('SELECT id, name FROM folders WHERE workspace_id = ?')
+    .all(workspaceId) as { id: string; name: string }[]
+
+  let changed = false
+  for (const folder of folderRows) {
+    if (existsSync(join(vaultDir, folderSubdir(folder.name)))) continue
+    // The directory (and everything in it) is gone — drop its indexed docs too.
+    const docs = db.prepare('SELECT id FROM documents WHERE folder_id = ?').all(folder.id) as {
+      id: string
+    }[]
+    for (const doc of docs) deleteIndexRow(db, doc.id)
+    db.prepare('DELETE FROM folders WHERE id = ?').run(folder.id)
+    changed = true
+  }
+  return changed
 }
 
 /**

@@ -4,7 +4,13 @@ import type { BrowserWindow } from 'electron'
 import type Database from 'better-sqlite3'
 import { listWorkspaces } from '../database/repositories/workspaces'
 import { getWorkspaceVaultDir } from './paths'
-import { reindexFile, deleteIndexRowByPath, type ReindexResult } from './documents-service'
+import {
+  reindexFile,
+  deleteIndexRowByPath,
+  pruneMissingFolders,
+  getVaultDirsByWorkspace,
+  type ReindexResult
+} from './documents-service'
 import { consumeSelfWrite } from './self-write'
 import { kindForExt } from './artifact-kinds'
 
@@ -33,6 +39,8 @@ const IGNORED_DIRS = new Set(['.git', '.obsidian', 'node_modules', 'attachments'
 
 const watchers = new Map<string, FSWatcher>()
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
+// Per-workspace-root debounce for folder-structure (directory removal) reconciles.
+const folderTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const settleTimers = new Set<ReturnType<typeof setTimeout>>()
 let stopped = true
 let storedDb: Database.Database | null = null
@@ -48,14 +56,19 @@ function currentRoots(db: Database.Database): string[] {
   return [...roots]
 }
 
-function isIgnoredPath(relPath: string): boolean {
+function hasIgnoredSegment(relPath: string): boolean {
   for (const segment of relPath.split(sep)) {
     if (segment.startsWith('.')) return true // dotfiles + our `.<name>.tmp-*` temp writes
     if (IGNORED_DIRS.has(segment)) return true
   }
-  // Accept any extension registered in artifact-kinds (`.md` notes + artifacts);
-  // an unmapped extension is not indexed, so its events are dropped.
-  return kindForExt(basename(relPath)) === null
+  return false
+}
+
+// An indexed path is one whose extension is registered in artifact-kinds (`.md`
+// notes + artifacts). Non-indexed paths are usually directories — their only
+// reconcile-worthy event is removal (a deleted/renamed folder), handled below.
+function isIndexedFile(relPath: string): boolean {
+  return kindForExt(basename(relPath)) !== null
 }
 
 function alive(): boolean {
@@ -84,6 +97,31 @@ function broadcast(result: ReindexResult): void {
     case 'ignored':
       break
   }
+}
+
+/**
+ * Reconcile folder rows for the workspace owning `forPath` after a deletion:
+ * prune any whose directory is now gone. Debounced per workspace root and run on
+ * a settle delay so a delete+recreate flap (or a rename) doesn't churn rows.
+ * Covers both signals — a directory-removal event and the last child-file delete
+ * — so a folder is pruned regardless of which the OS reports.
+ */
+function scheduleFolderReconcile(forPath: string): void {
+  if (!alive()) return
+  const entry = getVaultDirsByWorkspace(storedDb!).find(
+    (e) => forPath === e.dir || forPath.startsWith(e.dir + sep)
+  )
+  if (!entry) return
+  const prev = folderTimers.get(entry.dir)
+  if (prev) clearTimeout(prev)
+  folderTimers.set(
+    entry.dir,
+    setTimeout(() => {
+      folderTimers.delete(entry.dir)
+      if (!alive()) return
+      if (pruneMissingFolders(storedDb!, entry.workspaceId)) send('documents:changed')
+    }, DELETE_SETTLE_MS)
+  )
 }
 
 function handlePath(abs: string): void {
@@ -120,6 +158,9 @@ function handlePath(abs: string): void {
       } else {
         const removed = deleteIndexRowByPath(storedDb!, abs)
         if (removed) broadcast(result)
+        // The file may have vanished because its whole folder was deleted; prune
+        // any now-missing folder rows (no-op if the folder still exists on disk).
+        scheduleFolderReconcile(abs)
       }
     }, DELETE_SETTLE_MS)
     settleTimers.add(t)
@@ -131,8 +172,18 @@ function handlePath(abs: string): void {
 function onEvent(root: string, _eventType: string, filename: string | Buffer | null): void {
   if (stopped || filename == null) return
   const rel = filename.toString()
-  if (isIgnoredPath(rel)) return
+  if (hasIgnoredSegment(rel)) return
   const abs = join(root, rel).normalize('NFC')
+
+  if (!isIndexedFile(rel)) {
+    // Not a note/artifact path — usually a directory. The one structural change
+    // that per-file events don't cover is a *removed* directory (deleting or
+    // renaming a folder), which leaves stale folder rows. Reconcile when the
+    // path is gone; ignore directory creations/renames-in (their child files
+    // reindex themselves and lazily recreate the folder row).
+    if (!existsSync(abs)) scheduleFolderReconcile(abs)
+    return
+  }
 
   // Per-path debounce: coalesces the temp+rename event pair (and rapid repeated
   // saves) into a single reconcile. Each fires as its own macrotask, so even a
@@ -178,7 +229,9 @@ function syncWatchers(db: Database.Database): void {
     try {
       watchers.set(
         root,
-        watch(root, { recursive: true }, (eventType, filename) => onEvent(root, eventType, filename))
+        watch(root, { recursive: true }, (eventType, filename) =>
+          onEvent(root, eventType, filename)
+        )
       )
     } catch (err) {
       console.error('[vault-watcher] failed to watch', root, err)
@@ -204,6 +257,8 @@ export function stopVaultWatcher(): void {
   stopped = true
   for (const t of timers.values()) clearTimeout(t)
   timers.clear()
+  for (const t of folderTimers.values()) clearTimeout(t)
+  folderTimers.clear()
   for (const t of settleTimers) clearTimeout(t)
   settleTimers.clear()
   for (const w of watchers.values()) w.close()

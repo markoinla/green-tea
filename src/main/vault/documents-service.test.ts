@@ -1,5 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'fs'
+
+// The service moves deleted notes to the OS trash via Electron's shell.trashItem,
+// which isn't available outside the Electron runtime. Mock it to remove the path
+// so deletion behaviour stays observable in the node test environment.
+vi.mock('electron', () => ({
+  shell: {
+    trashItem: vi.fn(async (p: string) => {
+      const { rmSync: rm } = await import('fs')
+      rm(p, { recursive: true, force: true })
+    })
+  }
+}))
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type Database from 'better-sqlite3'
@@ -135,11 +147,11 @@ describe('folders as subdirectories', () => {
 })
 
 describe('deleteDocument', () => {
-  it('removes the file and the index row', () => {
+  it('moves the file to trash and removes the index row', async () => {
     const doc = createDocument(db, { title: 'Trash', workspace_id: workspaceId })
     const vault = getWorkspaceVaultDir(db, workspaceId)
     expect(existsSync(join(vault, 'Trash.md'))).toBe(true)
-    deleteDocument(db, doc.id)
+    await deleteDocument(db, doc.id)
     expect(existsSync(join(vault, 'Trash.md'))).toBe(false)
     expect(getDocument(db, doc.id)).toBeUndefined()
   })

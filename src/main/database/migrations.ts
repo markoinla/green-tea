@@ -366,4 +366,30 @@ export function runMigrations(db: Database.Database): void {
       setPath.run(join(DEFAULT_BASE_DIR, sanitizeWorkspaceName(row.name)), row.id)
     }
   }
+
+  // Migration: share links (M2). A local index of published shares. Keyed on the
+  // STABLE on-disk document identity (`doc_key`) — a note's frontmatter UUID, or
+  // an artifact's workspace-relative path — NOT `documents.id`, which is a
+  // disposable cache that is rebuilt from disk on every reindex (and regenerated
+  // for artifacts on rename or DB wipe). Deliberately NO foreign key to
+  // documents(id): this row must outlive a documents row that gets dropped and
+  // recreated by reindex. reindex never touches this table, so a share survives
+  // restart and reindex; it only vanishes on a full greentea.db deletion (at
+  // which point the identities are gone too and re-publishing is correct).
+  // UNIQUE(doc_key) enforces one live share per document; re-publish overwrites
+  // in place (the previously-stored slug is reused for a stable public URL).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shares (
+      slug TEXT PRIMARY KEY,
+      doc_key TEXT NOT NULL,
+      workspace_id TEXT,
+      file_path TEXT,
+      type TEXT NOT NULL,
+      url TEXT NOT NULL,
+      title TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_shares_doc_key ON shares(doc_key);
+  `)
 }

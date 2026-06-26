@@ -154,6 +154,15 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     return documents.listDocuments(db, workspaceId)
   })
 
+  // Rebuild the index for a workspace from disk (the authoritative reconcile):
+  // picks up notes/folders added, removed, or moved outside the app and prunes
+  // anything stale. Exposed to the UI as a manual "Refresh" of the file tree.
+  ipcMain.handle('db:documents:reindex', (_event, workspaceId: string) => {
+    documents.reindexWorkspace(db, workspaceId)
+    mainWindow?.webContents.send('documents:changed')
+    mainWindow?.webContents.send('folders:changed')
+  })
+
   ipcMain.handle('db:documents:search', (_event, query: string) => {
     return documents.searchDocuments(db, query)
   })
@@ -203,8 +212,8 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     }
   )
 
-  ipcMain.handle('db:documents:delete', (_event, id: string) => {
-    documents.deleteDocument(db, id)
+  ipcMain.handle('db:documents:delete', async (_event, id: string) => {
+    await documents.deleteDocument(db, id)
     mainWindow?.webContents.send('documents:changed')
   })
 
@@ -330,16 +339,20 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     'db:folders:update',
     (_event, id: string, data: { name?: string; collapsed?: number }) => {
       // Renaming a folder renames its subdirectory (and moves its notes).
-      if (data.name !== undefined) documents.renameFolder(db, id, data.name)
+      const renamed = data.name !== undefined
+      if (renamed) documents.renameFolder(db, id, data.name!)
       const folder = folders.updateFolder(db, id, data)
       mainWindow?.webContents.send('folders:changed')
-      mainWindow?.webContents.send('documents:changed')
+      // Only a rename touches notes on disk. A collapse toggle must NOT broadcast
+      // documents:changed — doing so flips useDocuments to loading and flashes the
+      // note list's "Loading…" placeholder on every expand/collapse.
+      if (renamed) mainWindow?.webContents.send('documents:changed')
       return folder
     }
   )
 
-  ipcMain.handle('db:folders:delete', (_event, id: string) => {
-    documents.deleteFolder(db, id)
+  ipcMain.handle('db:folders:delete', async (_event, id: string) => {
+    await documents.deleteFolder(db, id)
     mainWindow?.webContents.send('folders:changed')
     mainWindow?.webContents.send('documents:changed')
   })

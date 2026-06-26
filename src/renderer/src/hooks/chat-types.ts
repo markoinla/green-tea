@@ -120,7 +120,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const msgs = [...state.messages]
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].toolCallId === action.toolCallId) {
-          msgs[i] = { ...msgs[i], toolResult: action.result, toolIsError: action.isError }
+          // A result has arrived, so the tool is no longer pending. Default a
+          // missing/undefined isError to false so the pending spinner clears.
+          msgs[i] = { ...msgs[i], toolResult: action.result, toolIsError: action.isError ?? false }
           break
         }
       }

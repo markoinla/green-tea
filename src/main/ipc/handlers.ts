@@ -9,6 +9,7 @@ import { registerSchedulerHandlers } from './register-scheduler-handlers'
 import { registerMcpHandlers } from './register-mcp-handlers'
 import { registerGoogleHandlers } from './register-google-handlers'
 import { registerMicrosoftHandlers } from './register-microsoft-handlers'
+import { registerShareHandlers } from './register-share-handlers'
 
 export function registerIpcHandlers(db: Database.Database, mainWindow?: BrowserWindow): void {
   const context = { db, mainWindow }
@@ -22,4 +23,5 @@ export function registerIpcHandlers(db: Database.Database, mainWindow?: BrowserW
   registerMcpHandlers(context)
   registerGoogleHandlers(context)
   registerMicrosoftHandlers(context)
+  registerShareHandlers(context)
 }

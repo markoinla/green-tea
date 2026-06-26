@@ -8,6 +8,7 @@ import {
 import { LeftSidebar } from './LeftSidebar'
 import { RightSidebar } from './RightSidebar'
 import { TabStrip, VersionHistoryButton, CopyMarkdownButton, ExportPdfButton } from './TabStrip'
+import { ShareControl } from './ShareControl'
 import { cn } from '@renderer/lib/utils'
 import { UpdateBanner } from './UpdateBanner'
 import { VersionHistoryPanel } from '../VersionHistoryPanel'
@@ -116,6 +117,13 @@ export function AppLayout({
   // Export actions only apply to note docs — not file: tabs or csv/html artifacts.
   const isActiveNote =
     !!activeDocId && !isFileTabId(activeDocId) && (!activeDoc?.kind || activeDoc.kind === 'note')
+  // Sharing is v1-limited to notes (kind undefined/'note') and html artifacts;
+  // `file:` tabs have no Document row / shareable identity, so they're excluded.
+  const canShare =
+    !!activeDocId &&
+    !isFileTabId(activeDocId) &&
+    !!activeDoc &&
+    (!activeDoc.kind || activeDoc.kind === 'note' || activeDoc.kind === 'html')
 
   const handleCopyMarkdown = useCallback(async () => {
     if (!activeDocId) return
@@ -234,6 +242,7 @@ export function AppLayout({
               >
                 <CopyMarkdownButton onClick={handleCopyMarkdown} disabled={!isActiveNote} />
                 <ExportPdfButton onClick={handleExportPdf} disabled={!isActiveNote} />
+                <ShareControl docId={activeDocId} canShare={canShare} />
                 <VersionHistoryButton onClick={() => onVersionHistoryOpenChange(true)} />
               </div>
             )}

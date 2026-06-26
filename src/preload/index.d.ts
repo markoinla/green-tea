@@ -86,6 +86,7 @@ interface GreenteaApi {
   }
   documents: {
     list(workspaceId?: string): Promise<Document[]>
+    reindex(workspaceId: string): Promise<void>
     search(query: string): Promise<(Document & { workspace_name: string })[]>
     get(id: string): Promise<Document | undefined>
     backlinks(id: string): Promise<Backlink[]>
@@ -257,6 +258,11 @@ interface GreenteaApi {
       email?: string
       description: string
     }): Promise<{ success: boolean; issue_url?: string; error?: string }>
+  }
+  share: {
+    publish(documentId: string): Promise<{ url: string; slug: string }>
+    unpublish(documentId: string): Promise<void>
+    status(documentId: string): Promise<{ shared: boolean; url?: string; slug?: string }>
   }
   workspaceFiles: {
     list(workspaceId: string): Promise<WorkspaceFile[]>

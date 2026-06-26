@@ -18,7 +18,9 @@ export function dbMessageToChatMessage(m: ConversationMessage): Message {
     toolArgs: m.tool_args ? JSON.parse(m.tool_args) : undefined,
     toolCallId: m.tool_call_id ?? undefined,
     toolResult: m.tool_result ?? undefined,
-    toolIsError: m.tool_is_error ? true : undefined,
+    // Persisted tool messages are always finalized; a non-error tool must map to
+    // `false` (not `undefined`) so it doesn't render as an endlessly-pending spinner.
+    toolIsError: m.tool_name ? !!m.tool_is_error : undefined,
     images: m.images ? JSON.parse(m.images) : undefined,
     files: m.files ? JSON.parse(m.files) : undefined
   }

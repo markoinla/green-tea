@@ -28,7 +28,9 @@ import { SearchBar } from './SearchBar'
 import { renderSlashSuggestion } from './SlashCommandList'
 import { renderWikiLinkSuggestion } from './WikiLinkList'
 import { PropertiesBlock } from './properties/PropertiesBlock'
+import { DocumentTitle } from './DocumentTitle'
 import { LinkedReferencesPanel } from './LinkedReferencesPanel'
+import { cn } from '@renderer/lib/utils'
 import type { Document } from '../../../../main/database/types'
 
 const lowlight = createLowlight()
@@ -212,8 +214,15 @@ export function OutlinerEditor({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <SearchBar editor={editor} />
-      {document && editable && <PropertiesBlock document={document} />}
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div
+        className={cn('flex-1 min-h-0 overflow-auto', document && editable && 'note-has-header')}
+      >
+        {document && editable && (
+          <div className="mx-auto w-full max-w-[56rem] px-16 pt-12">
+            <DocumentTitle document={document} />
+            <PropertiesBlock document={document} />
+          </div>
+        )}
         <TableContextMenu editor={editor}>
           <EditorContent editor={editor} />
         </TableContextMenu>

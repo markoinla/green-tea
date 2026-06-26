@@ -93,8 +93,8 @@ export function TagChipInput({
       <PopoverAnchor asChild>
         <div
           className={cn(
-            'flex flex-wrap items-center gap-1 rounded-md border border-input bg-transparent px-2 py-1 min-h-9',
-            'focus-within:border-ring focus-within:ring-ring/50 focus-within:ring-[3px]',
+            'flex flex-wrap items-center gap-1.5 rounded-md border border-transparent bg-transparent px-1 -mx-1 py-0.5 min-h-7',
+            'hover:border-input focus-within:border-ring focus-within:ring-ring/50 focus-within:ring-[3px]',
             disabled && 'pointer-events-none opacity-50'
           )}
           onClick={() => inputRef.current?.focus()}
@@ -102,7 +102,7 @@ export function TagChipInput({
           {values.map((value, index) => (
             <span
               key={`${value}-${index}`}
-              className="inline-flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-xs text-accent-foreground"
+              className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-xs text-accent-foreground"
             >
               {onChipClick ? (
                 <button

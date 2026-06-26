@@ -16,6 +16,10 @@ export interface Settings {
   reasoningMode: boolean
   autoApproveEdits: boolean
   enabledModels: Record<string, boolean>
+  // Share keys use the dotted settings names the main process reads verbatim
+  // (getSetting(db,'share.publishToken') / getSetting(db,'share.baseUrl')).
+  'share.publishToken': string
+  'share.baseUrl': string
 }
 
 const DEFAULTS: Settings = {
@@ -33,7 +37,9 @@ const DEFAULTS: Settings = {
   agentBaseDir: '~/Documents/Green Tea',
   reasoningMode: false,
   autoApproveEdits: true,
-  enabledModels: {}
+  enabledModels: {},
+  'share.publishToken': '',
+  'share.baseUrl': 'https://share.greentea.app'
 }
 
 export function useSettings() {
@@ -57,7 +63,9 @@ export function useSettings() {
       agentBaseDir: all.agentBaseDir || DEFAULTS.agentBaseDir,
       reasoningMode: all.reasoningMode === 'true',
       autoApproveEdits: all.autoApproveEdits !== 'false',
-      enabledModels: all.enabledModels ? JSON.parse(all.enabledModels) : DEFAULTS.enabledModels
+      enabledModels: all.enabledModels ? JSON.parse(all.enabledModels) : DEFAULTS.enabledModels,
+      'share.publishToken': all['share.publishToken'] || DEFAULTS['share.publishToken'],
+      'share.baseUrl': all['share.baseUrl'] || DEFAULTS['share.baseUrl']
     })
     setLoading(false)
   }, [])

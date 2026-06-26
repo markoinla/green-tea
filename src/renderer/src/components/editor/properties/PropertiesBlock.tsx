@@ -62,7 +62,9 @@ interface PropertiesBlockProps {
  * preference in `settings` (never written to the .md file, M7).
  */
 export function PropertiesBlock({ document: doc }: PropertiesBlockProps) {
-  const [collapsed, setCollapsed] = useState(true)
+  // Expanded by default (Obsidian-style); the global preference overrides this
+  // once the user toggles it.
+  const [collapsed, setCollapsed] = useState(false)
   const [types, setTypes] = useState<{ key: string; type: PropertyType }[]>([])
   const workspaceId = doc.workspace_id
   const frontmatter = useMemo(() => doc.frontmatter ?? {}, [doc.frontmatter])
@@ -138,27 +140,36 @@ export function PropertiesBlock({ document: doc }: PropertiesBlockProps) {
   )
 
   return (
-    <div className="border-b border-black/5 dark:border-white/5 px-6 py-2 shrink-0">
+    <div className="my-5 py-2">
       <button
         type="button"
         onClick={toggleCollapsed}
-        className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+        className="group relative flex items-center gap-1.5 text-[0.95rem] font-semibold text-muted-foreground hover:text-foreground transition-colors"
       >
-        <ChevronRight className={cn('size-3 transition-transform', !collapsed && 'rotate-90')} />
-        Properties
+        <ChevronRight
+          className={cn(
+            'absolute -left-5 size-3.5 opacity-0 transition-[transform,opacity] group-hover:opacity-100',
+            !collapsed && 'rotate-90'
+          )}
+        />
+        <span>Properties</span>
         {collapsed && rows.length > 0 && (
-          <span className="text-muted-foreground/60">({rows.length})</span>
+          <span className="text-muted-foreground/60 font-normal">({rows.length})</span>
         )}
       </button>
 
       {!collapsed && (
-        <div className="mt-2 flex flex-col gap-1.5">
-          {/* title is sourced from Document.title, not frontmatter.title (L3). */}
-          <ReadonlyRow label="title" value={doc.title} />
+        <div className="mt-2.5 flex flex-col gap-1.5">
+          {/* title is rendered as the heading above (DocumentTitle), not as a row. */}
           {READONLY_RESERVED_KEYS.map((key) => {
             const raw = frontmatter[key]
             return (
-              <ReadonlyRow key={key} label={key} value={raw !== undefined ? String(raw) : '—'} />
+              <ReadonlyRow
+                key={key}
+                label={key}
+                icon={Calendar}
+                value={raw !== undefined ? formatReadonlyDate(String(raw)) : '—'}
+              />
             )
           })}
 
@@ -188,13 +199,30 @@ export function PropertiesBlock({ document: doc }: PropertiesBlockProps) {
   )
 }
 
-function ReadonlyRow({ label, value }: { label: string; value: string }) {
+/** Reformat an ISO timestamp's date part to MM/DD/YYYY (timezone-safe). */
+function formatReadonlyDate(raw: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw)
+  return m ? `${m[2]}/${m[3]}/${m[1]}` : raw
+}
+
+function ReadonlyRow({
+  label,
+  value,
+  icon: Icon
+}: {
+  label: string
+  value: string
+  icon?: React.ComponentType<{ className?: string }>
+}) {
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className="w-28 shrink-0 text-muted-foreground truncate" title={label}>
-        {label}
-      </span>
-      <span className="flex-1 text-muted-foreground/80 truncate">{value}</span>
+    <div className="flex items-center gap-2 text-sm min-h-7">
+      <div className="w-36 shrink-0 flex items-center gap-1.5 text-muted-foreground">
+        {Icon && <Icon className="size-4 shrink-0 text-muted-foreground/70" />}
+        <span className="truncate" title={label}>
+          {label}
+        </span>
+      </div>
+      <span className="flex-1 truncate text-foreground/90">{value}</span>
     </div>
   )
 }
@@ -215,8 +243,8 @@ function PropertyRowEditor({
   tagSuggest: (prefix: string) => Promise<string[]>
 }) {
   return (
-    <div className="flex items-center gap-2 text-sm group">
-      <div className="w-28 shrink-0 flex items-center gap-1">
+    <div className="flex items-center gap-2 text-sm group min-h-7">
+      <div className="w-36 shrink-0 flex items-center gap-1.5 text-muted-foreground">
         <TypeControl type={row.type} onSelect={onSetType} />
         <span className="truncate" title={row.key}>
           {row.key}
@@ -256,9 +284,9 @@ function TypeControl({
         <button
           type="button"
           aria-label={`Property type: ${type}`}
-          className="shrink-0 text-muted-foreground hover:text-foreground"
+          className="shrink-0 text-muted-foreground/70 hover:text-foreground"
         >
-          <Icon className="size-3.5" />
+          <Icon className="size-4" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-32">
@@ -350,7 +378,11 @@ function ScalarWidget({
     <div className="flex items-center gap-1">
       <Input
         type={type}
-        className="h-7"
+        className={cn(
+          'h-7 px-1 -mx-1 rounded border-transparent bg-transparent dark:bg-transparent shadow-none',
+          'hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:border-transparent focus-visible:ring-0',
+          type === 'text' && 'w-full'
+        )}
         defaultValue={current}
         onBlur={(e) => onChangeValue(inputStringToValue(e.target.value, type))}
       />
@@ -415,8 +447,12 @@ function AddPropertyControl({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="xs" className="self-start text-muted-foreground">
-          <Plus className="size-3" />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="self-start -ml-2 mt-0.5 gap-1.5 text-sm font-normal text-muted-foreground"
+        >
+          <Plus className="size-4" />
           Add property
         </Button>
       </PopoverTrigger>
