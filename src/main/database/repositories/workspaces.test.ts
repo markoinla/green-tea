@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { join } from 'path'
 import type Database from 'better-sqlite3'
 import { createTestDb } from '../__test__/setup'
 import {
@@ -6,7 +7,10 @@ import {
   getWorkspace,
   createWorkspace,
   updateWorkspace,
-  deleteWorkspace
+  deleteWorkspace,
+  normalizePath,
+  findByPath,
+  assertNoOverlap
 } from './workspaces'
 import { createDocument } from './documents'
 import { createFolder } from './folders'
@@ -63,6 +67,46 @@ describe('workspaces repository', () => {
     }
 
     expect(() => deleteWorkspace(db, all[0].id)).toThrow('Cannot delete the last workspace')
+  })
+
+  it('creates a workspace with an explicit path', () => {
+    const ws = createWorkspace(db, { name: 'Picked', path: '/tmp/some/picked' })
+    expect(ws.path).toBe('/tmp/some/picked')
+  })
+
+  it('backfills the seeded Default workspace path on migration', () => {
+    const all = listWorkspaces(db)
+    const def = all.find((w) => w.name === 'Default')
+    expect(def).toBeDefined()
+    expect(def!.path).toMatch(/Documents\/Green Tea\/Default$/)
+  })
+
+  describe('path helpers', () => {
+    it('normalizePath strips trailing separators and resolves to absolute', () => {
+      expect(normalizePath('/a/b/')).toBe('/a/b')
+      expect(normalizePath('/a/b')).toBe('/a/b')
+      expect(normalizePath('/')).toBe('/')
+    })
+
+    it('findByPath matches regardless of trailing separator', () => {
+      const ws = createWorkspace(db, { name: 'P', path: '/tmp/find/me' })
+      expect(findByPath(db, '/tmp/find/me/')!.id).toBe(ws.id)
+      expect(findByPath(db, '/tmp/find/me')!.id).toBe(ws.id)
+      expect(findByPath(db, '/tmp/find/other')).toBeUndefined()
+    })
+
+    it('assertNoOverlap rejects equal, containing, and contained paths', () => {
+      createWorkspace(db, { name: 'Base', path: '/tmp/overlap/base' })
+      expect(() => assertNoOverlap(db, '/tmp/overlap/base')).toThrow(/already part of/)
+      expect(() => assertNoOverlap(db, '/tmp/overlap/base/child')).toThrow(/inside/)
+      expect(() => assertNoOverlap(db, '/tmp/overlap')).toThrow(/contains/)
+    })
+
+    it('assertNoOverlap allows a sibling that merely shares a name prefix', () => {
+      createWorkspace(db, { name: 'R', path: '/tmp/sib/research' })
+      expect(() => assertNoOverlap(db, '/tmp/sib/research2')).not.toThrow()
+      expect(() => assertNoOverlap(db, join('/tmp/sib', 'unrelated'))).not.toThrow()
+    })
   })
 
   it('deleteWorkspace cascades documents and folders', () => {

@@ -3,7 +3,8 @@ import { randomUUID } from 'crypto'
 import { existsSync, renameSync, rmSync, statSync } from 'fs'
 import { dirname, extname, join, relative, sep } from 'path'
 import type { Document } from '../database/types'
-import { sanitizeWorkspaceName } from '../agent/paths'
+import { sanitizeWorkspaceName, getDefaultWorkspaceDir } from '../agent/paths'
+import { getWorkspace, normalizePath } from '../database/repositories/workspaces'
 import { maybeCreateAutoVersion } from '../database/repositories/document-versions'
 import type { TTDoc } from '../markdown/tiptap-markdown'
 import { getWorkspaceVaultDir, ensureVaultDir } from './paths'
@@ -831,9 +832,32 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
   }
 }
 
+/**
+ * A workspace folder is "unavailable" when it points at an explicit, user-chosen
+ * `ws.path` that no longer exists on disk (moved/deleted out from under us). The
+ * launch reindex skips these rather than recreating the folder (which would mask
+ * the moved state); the UI offers Relocate / Remove. Default-location workspaces
+ * (path == `~/Documents/Green Tea/<name>/`, app-managed) are NOT unavailable —
+ * their folder is (re)created on demand for first-run.
+ */
+export function isWorkspaceUnavailable(db: Database.Database, workspaceId: string): boolean {
+  const ws = getWorkspace(db, workspaceId)
+  if (!ws || !ws.path) return false
+  const dir = getWorkspaceVaultDir(db, workspaceId)
+  if (existsSync(dir)) return false
+  // Missing AND not the app-managed default location → genuinely unavailable.
+  const defaultDir = getDefaultWorkspaceDir(db, ws.name)
+  return normalizePath(dir) !== normalizePath(defaultDir)
+}
+
 export function reindexAllWorkspaces(db: Database.Database): void {
   const workspaces = db.prepare('SELECT id FROM workspaces').all() as { id: string }[]
-  for (const { id } of workspaces) reindexWorkspace(db, id)
+  for (const { id } of workspaces) {
+    // Don't resurrect a moved/deleted arbitrary folder by mkdir-ing it back; leave
+    // the workspace unavailable for the UI to recover (Relocate / Remove).
+    if (isWorkspaceUnavailable(db, id)) continue
+    reindexWorkspace(db, id)
+  }
 }
 
 // ---------------------------------------------------------------------------

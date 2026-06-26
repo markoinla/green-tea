@@ -9,11 +9,20 @@ const greenteaApi = {
   workspaces: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('db:workspaces:list'),
     get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:workspaces:get', id),
-    create: (data: { name: string }): Promise<unknown> =>
-      ipcRenderer.invoke('db:workspaces:create', data),
+    create: (data: {
+      name: string
+      path?: string
+      mode?: 'new' | 'open'
+    }): Promise<unknown> => ipcRenderer.invoke('db:workspaces:create', data),
     update: (id: string, data: { name?: string; description?: string }): Promise<unknown> =>
       ipcRenderer.invoke('db:workspaces:update', id, data),
-    delete: (id: string): Promise<void> => ipcRenderer.invoke('db:workspaces:delete', id)
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('db:workspaces:delete', id),
+    // Folder moved/deleted out from under a workspace — repoint to a new path.
+    relocate: (id: string, newPath: string): Promise<unknown> =>
+      ipcRenderer.invoke('db:workspaces:relocate', id, newPath),
+    // Which workspaces' folders still exist on disk (the "unavailable" check).
+    availability: (): Promise<{ id: string; path: string; available: boolean }[]> =>
+      ipcRenderer.invoke('db:workspaces:availability')
   },
   documents: {
     list: (workspaceId?: string): Promise<unknown[]> =>

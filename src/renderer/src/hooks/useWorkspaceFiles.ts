@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { WorkspaceFile } from '../../../main/database/types'
 
 interface UseWorkspaceFilesResult {
@@ -13,19 +13,24 @@ interface UseWorkspaceFilesResult {
 export function useWorkspaceFiles(workspaceId?: string | null): UseWorkspaceFilesResult {
   const [files, setFiles] = useState<WorkspaceFile[]>([])
   const [loading, setLoading] = useState(true)
+  // Guards against a stale list() resolving after a workspace switch.
+  const workspaceIdRef = useRef(workspaceId)
+  workspaceIdRef.current = workspaceId
 
   const refresh = useCallback(async () => {
-    if (!workspaceId) {
+    const reqWs = workspaceId
+    if (!reqWs) {
       setFiles([])
       setLoading(false)
       return
     }
     setLoading(true)
     try {
-      const result = await window.api.workspaceFiles.list(workspaceId)
+      const result = await window.api.workspaceFiles.list(reqWs)
+      if (workspaceIdRef.current !== reqWs) return
       setFiles(result)
     } finally {
-      setLoading(false)
+      if (workspaceIdRef.current === reqWs) setLoading(false)
     }
   }, [workspaceId])
 

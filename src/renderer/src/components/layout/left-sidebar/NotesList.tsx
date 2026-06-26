@@ -1,5 +1,11 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FilePlus, FolderPlus } from 'lucide-react'
+import {
+  dropTargetForElements,
+  monitorForElements
+} from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
+import { autoScrollForElements } from '@atlaskit/pragmatic-drag-and-drop-auto-scroll/element'
+import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine'
 import {
   SidebarContent,
   SidebarGroup,
@@ -14,6 +20,7 @@ import {
 } from '@renderer/components/ui/context-menu'
 import { FolderMenuItem } from './FolderMenuItem'
 import { DocumentMenuItem } from './DocumentMenuItem'
+import { DROP_TYPE_ROOT, isDocumentDragData, isFolderDropData, isRootDropData } from './dnd'
 import type { Document } from '../../../../../main/database/types'
 import type { Folder } from '../../../../../main/database/types'
 
@@ -22,8 +29,6 @@ interface NotesListProps {
   folders: Folder[]
   loading: boolean
   selectedDocId: string | null
-  dragOverFolderId: string | null
-  dragOverRoot: boolean
   onSelectDoc: (id: string, opts?: { newTab?: boolean }) => void
   onNewDocument: () => void
   onNewFolder: () => void
@@ -34,13 +39,45 @@ interface NotesListProps {
   onDeleteFolder: (id: string) => void
   onToggleFolder: (id: string, collapsed: number) => void
   onNewDocInFolder: (folderId: string) => void
-  onDragStart: (e: React.DragEvent, docId: string) => void
-  onDropOnFolder: (e: React.DragEvent, folderId: string) => void
-  onDragOverFolder: (e: React.DragEvent, folderId: string) => void
-  onDragLeaveFolder: () => void
-  onDragOverRoot: (e: React.DragEvent) => void
-  onDragLeaveRoot: () => void
-  onDropOnRoot: (e: React.DragEvent) => void
+  /** Move a document into a folder (id) or out to the root (null). */
+  onMoveDocument: (docId: string, folderId: string | null) => void
+}
+
+/**
+ * The root drop zone (move a document out to top level) plus auto-scroll for the
+ * sidebar's scroll container. Lives in its own component so the drop-target
+ * binding is attached/torn down with the element's mount lifecycle.
+ */
+function RootDropZone({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [isDraggedOver, setIsDraggedOver] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const scrollEl = el.closest('[data-sidebar="content"]') as HTMLElement | null
+    return combine(
+      dropTargetForElements({
+        element: el,
+        // Only documents that aren't already at root.
+        canDrop: ({ source }) => isDocumentDragData(source.data) && source.data.folderId !== null,
+        getData: () => ({ type: DROP_TYPE_ROOT }),
+        onDragEnter: () => setIsDraggedOver(true),
+        onDragLeave: () => setIsDraggedOver(false),
+        onDrop: () => setIsDraggedOver(false)
+      }),
+      scrollEl ? autoScrollForElements({ element: scrollEl }) : () => {}
+    )
+  }, [])
+
+  return (
+    <div
+      ref={ref}
+      className={`min-h-[32px] transition-colors rounded ${isDraggedOver ? 'bg-sidebar-accent' : ''}`}
+    >
+      {children}
+    </div>
+  )
 }
 
 export function NotesList({
@@ -48,8 +85,6 @@ export function NotesList({
   folders,
   loading,
   selectedDocId,
-  dragOverFolderId,
-  dragOverRoot,
   onSelectDoc,
   onNewDocument,
   onNewFolder,
@@ -60,13 +95,7 @@ export function NotesList({
   onDeleteFolder,
   onToggleFolder,
   onNewDocInFolder,
-  onDragStart,
-  onDropOnFolder,
-  onDragOverFolder,
-  onDragLeaveFolder,
-  onDragOverRoot,
-  onDragLeaveRoot,
-  onDropOnRoot
+  onMoveDocument
 }: NotesListProps) {
   const folderDocs = useMemo(() => {
     const map = new Map<string, Document[]>()
@@ -81,7 +110,35 @@ export function NotesList({
     return map
   }, [folders, documents])
 
-  const rootDocs = useMemo(() => documents.filter((doc) => !doc.folder_id), [documents])
+  // Root docs are those with no folder, PLUS any whose folder_id points to a
+  // folder that isn't in the current list. The latter guards a transient
+  // docs/folders refetch race (and any dangling folder_id) from making a
+  // document silently vanish — it falls back to root instead.
+  const rootDocs = useMemo(() => {
+    const folderIds = new Set(folders.map((f) => f.id))
+    return documents.filter((doc) => !doc.folder_id || !folderIds.has(doc.folder_id))
+  }, [documents, folders])
+
+  // A single global monitor performs the move on drop, reading the innermost
+  // drop target. Centralizing it (rather than per-target onDrop) avoids
+  // double-handling and keeps the move + no-op guard in one place.
+  useEffect(() => {
+    return monitorForElements({
+      canMonitor: ({ source }) => isDocumentDragData(source.data),
+      onDrop: ({ source, location }) => {
+        const target = location.current.dropTargets[0]
+        if (!target) return
+        const src = source.data
+        if (!isDocumentDragData(src)) return
+        let destFolderId: string | null
+        if (isFolderDropData(target.data)) destFolderId = target.data.folderId
+        else if (isRootDropData(target.data)) destFolderId = null
+        else return
+        if (src.folderId === destFolderId) return // no-op
+        onMoveDocument(src.docId, destFolderId)
+      }
+    })
+  }, [onMoveDocument])
 
   return (
     <ContextMenu>
@@ -103,7 +160,6 @@ export function NotesList({
                       folder={folder}
                       documents={folderDocs.get(folder.id) || []}
                       selectedDocId={selectedDocId}
-                      isDragOver={dragOverFolderId === folder.id}
                       onSelectDoc={onSelectDoc}
                       onRenameDoc={onRenameDoc}
                       onDeleteDoc={onDeleteDoc}
@@ -111,35 +167,26 @@ export function NotesList({
                       onRenameFolder={onRenameFolder}
                       onDeleteFolder={onDeleteFolder}
                       onToggleFolder={onToggleFolder}
-                      onDragStart={onDragStart}
-                      onDrop={onDropOnFolder}
-                      onDragOver={onDragOverFolder}
-                      onDragLeave={onDragLeaveFolder}
                       onNewDocInFolder={onNewDocInFolder}
                     />
                   ))}
 
-                  <div
-                    onDragOver={onDragOverRoot}
-                    onDragLeave={onDragLeaveRoot}
-                    onDrop={onDropOnRoot}
-                    className={`min-h-[24px] transition-colors rounded ${dragOverRoot ? 'bg-sidebar-accent' : ''}`}
-                  >
+                  <RootDropZone>
                     {rootDocs.map((doc) => (
                       <DocumentMenuItem
                         key={doc.id}
                         id={doc.id}
                         title={doc.title}
                         kind={doc.kind}
+                        folderId={null}
                         isSelected={selectedDocId === doc.id}
                         onSelect={(e) => onSelectDoc(doc.id, { newTab: e.metaKey || e.ctrlKey })}
                         onRename={(newTitle) => onRenameDoc(doc.id, newTitle)}
                         onDuplicate={() => onDuplicateDoc(doc.id)}
                         onDelete={() => onDeleteDoc(doc.id)}
-                        onDragStart={(e) => onDragStart(e, doc.id)}
                       />
                     ))}
-                  </div>
+                  </RootDropZone>
                 </SidebarMenu>
               )}
             </SidebarGroupContent>

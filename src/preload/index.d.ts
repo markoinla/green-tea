@@ -78,9 +78,11 @@ interface GreenteaApi {
   workspaces: {
     list(): Promise<Workspace[]>
     get(id: string): Promise<Workspace | undefined>
-    create(data: { name: string }): Promise<Workspace>
+    create(data: { name: string; path?: string; mode?: 'new' | 'open' }): Promise<Workspace>
     update(id: string, data: { name?: string; description?: string }): Promise<Workspace>
     delete(id: string): Promise<void>
+    relocate(id: string, newPath: string): Promise<Workspace>
+    availability(): Promise<{ id: string; path: string; available: boolean }[]>
   }
   documents: {
     list(workspaceId?: string): Promise<Document[]>

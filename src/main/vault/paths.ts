@@ -4,15 +4,17 @@ import { join } from 'path'
 import { getAgentBaseDir, getWorkspaceDir, getWorkspacesRoot } from '../agent/paths'
 
 /**
- * Vaults are durable note folders. They live under the single per-workspace
- * `workspaces/` tree — the same folder the agent works in — so each workspace is
- * one place on disk (notes at the root, agent scratch in a hidden `.agent/`).
- * The directory layout itself is owned by `agent/paths.ts`; this module just
- * exposes the notes-facing names and the one-time migration off the old layout.
- *
- *   ~/Documents/Green Tea/workspaces/<sanitized-workspace-name>/
+ * A workspace *is* a folder anywhere on disk (`ws.path`) — notes at the root, a
+ * hidden `.greentea/` for agent scratch. The directory layout is owned by
+ * `agent/paths.ts`; this module just exposes the notes-facing names and the
+ * one-time migration off the old `workspaces/` layout.
  */
 
+/**
+ * @deprecated There is no single root once workspaces have arbitrary paths. The
+ * vault watcher now watches each workspace folder (`ws.path`) individually. This
+ * remains only for the one-time legacy-layout migration and a couple of tests.
+ */
 export function getVaultsRoot(db: Database.Database): string {
   return getWorkspacesRoot(db)
 }

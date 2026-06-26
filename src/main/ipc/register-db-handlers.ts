@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
-import { renameSync, existsSync, rmSync, statSync } from 'fs'
-import { readFile } from 'fs/promises'
+import { renameSync, existsSync, statSync, readdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { readFile } from 'fs/promises'
 import * as blocks from '../database/repositories/blocks'
 import * as agentLogs from '../database/repositories/agent-logs'
 import * as folders from '../database/repositories/folders'
@@ -19,7 +19,7 @@ import { deserializeMarkdown } from '../markdown/deserialize'
 import { restartThemeWatcher } from '../theme-watcher'
 import { restartVaultWatcher } from '../vault/vault-watcher'
 import { resetSession } from '../agent/session'
-import { getWorkspacesRoot, sanitizeWorkspaceName } from '../agent/paths'
+import { getDefaultWorkspaceDir } from '../agent/paths'
 import type { IpcHandlerContext } from './context'
 
 function blockNodeToSerializable(node: BlockNode): SerializableBlock {
@@ -37,6 +37,24 @@ function blockNodeToSerializable(node: BlockNode): SerializableBlock {
   return block
 }
 
+/**
+ * Create-new seed: drop a single empty `index.md` into a fresh workspace folder
+ * so it isn't bare (§2 residual default). Skipped if the folder already has any
+ * indexable file (so re-creating over an existing folder doesn't clobber it).
+ * The note carries no frontmatter — reindexWorkspace's readNote backfills
+ * id/created/updated on first index.
+ */
+function ensureSeedNote(vaultDir: string): void {
+  const hasFiles =
+    existsSync(vaultDir) &&
+    readdirSync(vaultDir, { withFileTypes: true }).some(
+      (e) => e.isFile() && !e.name.startsWith('.')
+    )
+  if (hasFiles) return
+  const indexPath = join(vaultDir, 'index.md')
+  if (!existsSync(indexPath)) writeFileSync(indexPath, '# index\n', 'utf-8')
+}
+
 export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void {
   // Workspaces
   ipcMain.handle('db:workspaces:list', () => {
@@ -47,12 +65,65 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     return workspaces.getWorkspace(db, id)
   })
 
-  ipcMain.handle('db:workspaces:create', (_event, data: { name: string }) => {
-    const workspace = workspaces.createWorkspace(db, data)
-    // One folder per workspace: the durable notes vault, also the agent's home.
-    ensureVaultDir(getWorkspaceVaultDir(db, workspace.id))
+  ipcMain.handle(
+    'db:workspaces:create',
+    (_event, data: { name: string; path?: string; mode?: 'new' | 'open' }) => {
+      // Picker payload: `path` is the picked/default folder; `mode` is whether the
+      // user is creating a fresh workspace folder or opening an existing one full
+      // of notes. When `path` is omitted (legacy callers), default the folder to
+      // `~/Documents/Green Tea/<sanitized-name>/`.
+      const path = data.path ?? getDefaultWorkspaceDir(db, data.name)
+      const mode = data.mode ?? 'new'
+      // Reject equal/overlapping registrations against the one global DB.
+      workspaces.assertNoOverlap(db, path)
+      const workspace = workspaces.createWorkspace(db, { name: data.name, path })
+      // One folder per workspace: the durable notes vault, also the agent's home.
+      const vaultDir = getWorkspaceVaultDir(db, workspace.id)
+      ensureVaultDir(vaultDir)
+      if (mode === 'open') {
+        // Open-existing: recursively index whatever `.md`/`.html`/`.csv` already
+        // lives in the chosen folder (dotfolders incl. `.greentea/` are skipped by
+        // the vault walk). No reinvention — reindexWorkspace walks ws.path.
+        documents.reindexWorkspace(db, workspace.id)
+        mainWindow?.webContents.send('documents:changed')
+        mainWindow?.webContents.send('folders:changed')
+      } else {
+        // Create-new: seed a single empty `index.md` so the folder isn't bare.
+        ensureSeedNote(vaultDir)
+        documents.reindexWorkspace(db, workspace.id)
+        mainWindow?.webContents.send('documents:changed')
+      }
+      // A new workspace folder must be picked up by the (multi-root) watcher.
+      restartVaultWatcher()
+      mainWindow?.webContents.send('workspaces:changed')
+      return workspace
+    }
+  )
+
+  // Mark a workspace's folder as relocated (folder moved/recreated elsewhere on
+  // disk). Repoints `ws.path`, rebuilds the index from the new location, and
+  // re-aims the watcher. Used by the "unavailable" recovery flow.
+  ipcMain.handle('db:workspaces:relocate', (_event, id: string, newPath: string) => {
+    workspaces.assertNoOverlap(db, newPath)
+    workspaces.setWorkspacePath(db, id, newPath)
+    ensureVaultDir(getWorkspaceVaultDir(db, id))
+    documents.reindexWorkspace(db, id)
+    restartVaultWatcher()
     mainWindow?.webContents.send('workspaces:changed')
-    return workspace
+    mainWindow?.webContents.send('documents:changed')
+    mainWindow?.webContents.send('folders:changed')
+    return workspaces.getWorkspace(db, id)
+  })
+
+  // Per-workspace availability: a workspace whose `path` folder no longer exists
+  // on disk is "unavailable" (moved/deleted out from under us). The UI offers
+  // Relocate / Remove rather than erroring.
+  ipcMain.handle('db:workspaces:availability', () => {
+    return workspaces.listWorkspaces(db).map((w) => ({
+      id: w.id,
+      path: w.path,
+      available: !documents.isWorkspaceUnavailable(db, w.id)
+    }))
   })
 
   ipcMain.handle(
@@ -61,11 +132,17 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
       if (data.name) {
         const oldWorkspace = workspaces.getWorkspace(db, id)
         if (oldWorkspace && data.name !== oldWorkspace.name) {
-          // Rename the single workspace folder; notes and agent scratch move with it.
-          const root = getWorkspacesRoot(db)
-          const oldDir = join(root, sanitizeWorkspaceName(oldWorkspace.name))
-          const newDir = join(root, sanitizeWorkspaceName(data.name))
-          if (existsSync(oldDir) && !existsSync(newDir)) renameSync(oldDir, newDir)
+          // The workspace folder is now `ws.path`. Only auto-rename the folder when
+          // it still lives at its default location (`<base>/<sanitized-name>/`);
+          // arbitrary user-picked folders keep their path on rename. Repoint
+          // `ws.path` to the new folder so resolution stays correct.
+          const oldDir = oldWorkspace.path
+          const defaultOldDir = getDefaultWorkspaceDir(db, oldWorkspace.name)
+          if (workspaces.normalizePath(oldDir) === workspaces.normalizePath(defaultOldDir)) {
+            const newDir = getDefaultWorkspaceDir(db, data.name)
+            if (existsSync(oldDir) && !existsSync(newDir)) renameSync(oldDir, newDir)
+            workspaces.setWorkspacePath(db, id, newDir)
+          }
         }
       }
       const workspace = workspaces.updateWorkspace(db, id, data)
@@ -78,9 +155,12 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
   )
 
   ipcMain.handle('db:workspaces:delete', (_event, id: string) => {
-    const vaultDir = getWorkspaceVaultDir(db, id)
+    // De-register only (Obsidian "Remove"): drop the DB rows but leave the folder
+    // and all its files on disk untouched. The user owns the folder; deleting the
+    // workspace just stops Green Tea from tracking it.
     workspaces.deleteWorkspace(db, id)
-    if (existsSync(vaultDir)) rmSync(vaultDir, { recursive: true, force: true })
+    // The removed folder must no longer be watched.
+    restartVaultWatcher()
     mainWindow?.webContents.send('workspaces:changed')
     mainWindow?.webContents.send('documents:changed')
     mainWindow?.webContents.send('folders:changed')

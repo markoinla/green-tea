@@ -1,15 +1,17 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   ChevronDown,
+  ChevronLeft,
   Plus,
   Pencil,
   Check,
-  X,
   Trash2,
   MoreHorizontal,
   Type,
   SquarePen,
-  FolderPlus
+  FolderPlus,
+  Folder,
+  Leaf
 } from 'lucide-react'
 import { useWorkspaces } from '@renderer/hooks/useWorkspaces'
 import { useWorkspace } from '@renderer/hooks/useWorkspace'
@@ -21,6 +23,8 @@ import {
   DialogTitle,
   DialogDescription
 } from '@renderer/components/ui/dialog'
+import { Input } from '@renderer/components/ui/input'
+import { Label } from '@renderer/components/ui/label'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,14 +60,12 @@ export function WorkspaceSwitcher({
   const { workspaces, createWorkspace, deleteWorkspace, updateWorkspace } = useWorkspaces()
   const { workspace } = useWorkspace(selectedWorkspaceId)
   const [isOpen, setIsOpen] = useState(false)
-  const [isCreating, setIsCreating] = useState(false)
-  const [newName, setNewName] = useState('')
+  const [showCreate, setShowCreate] = useState(false)
   const [showDescription, setShowDescription] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showRename, setShowRename] = useState(false)
   const [renameName, setRenameName] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
-  const createInputRef = useRef<HTMLInputElement>(null)
   const handleDelete = async () => {
     if (!selectedWorkspaceId) return
     const currentIndex = workspaces.findIndex((ws) => ws.id === selectedWorkspaceId)
@@ -88,7 +90,6 @@ export function WorkspaceSwitcher({
     const handleClick = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setIsOpen(false)
-        setIsCreating(false)
       }
     }
     if (isOpen) {
@@ -97,29 +98,10 @@ export function WorkspaceSwitcher({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [isOpen])
 
-  useEffect(() => {
-    if (isCreating && createInputRef.current) {
-      createInputRef.current.focus()
-    }
-  }, [isCreating])
-
-  const handleCreate = async () => {
-    const trimmed = newName.trim()
-    if (!trimmed) return
-    const ws = await createWorkspace({ name: trimmed })
-    onSelectWorkspace(ws.id)
-    setNewName('')
-    setIsCreating(false)
+  const handleCreated = (id: string) => {
+    onSelectWorkspace(id)
+    setShowCreate(false)
     setIsOpen(false)
-  }
-
-  const handleCreateKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleCreate()
-    } else if (e.key === 'Escape') {
-      setIsCreating(false)
-      setNewName('')
-    }
   }
 
   return (
@@ -184,7 +166,7 @@ export function WorkspaceSwitcher({
                 onSelect={() => setShowDeleteConfirm(true)}
               >
                 <Trash2 className="h-4 w-4" />
-                Delete
+                Remove
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -211,43 +193,16 @@ export function WorkspaceSwitcher({
               </button>
             ))}
             <div className="border-t border-sidebar-border my-1" />
-            {isCreating ? (
-              <div className="px-3 py-1.5 flex items-center gap-1.5">
-                <input
-                  ref={createInputRef}
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={handleCreateKeyDown}
-                  placeholder="Workspace name"
-                  className="flex-1 bg-sidebar-accent/50 text-sidebar-foreground text-sm px-2 py-1 rounded border border-sidebar-border outline-none min-w-0"
-                />
-                <button
-                  onClick={handleCreate}
-                  disabled={!newName.trim()}
-                  className="h-7 px-2 rounded text-xs font-medium bg-accent text-accent-foreground hover:bg-accent/90 disabled:opacity-50 transition-colors"
-                >
-                  Create
-                </button>
-                <button
-                  onClick={() => {
-                    setIsCreating(false)
-                    setNewName('')
-                  }}
-                  className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsCreating(true)}
-                className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors flex items-center gap-2"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Create Workspace</span>
-              </button>
-            )}
+            <button
+              onClick={() => {
+                setIsOpen(false)
+                setShowCreate(true)
+              }}
+              className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors flex items-center gap-2"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>New workspace</span>
+            </button>
           </div>
         )}
       </div>
@@ -274,22 +229,242 @@ export function WorkspaceSwitcher({
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete workspace</AlertDialogTitle>
+            <AlertDialogTitle>Remove workspace</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete{' '}
-              <span className="font-medium text-foreground">{workspace?.name}</span> and all its
-              documents, folders, and chat history. This action cannot be undone.
+              This removes <span className="font-medium text-foreground">{workspace?.name}</span>{' '}
+              from Green Tea and clears its chat history. The workspace folder and all its files
+              stay on disk — nothing is deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={handleDelete}>
-              Delete
+              Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CreateWorkspaceDialog
+        open={showCreate}
+        onOpenChange={setShowCreate}
+        createWorkspace={createWorkspace}
+        onCreated={handleCreated}
+      />
     </div>
+  )
+}
+
+/**
+ * Mirror of the main-process sanitizeWorkspaceName (agent/paths.ts) so the
+ * "Use default" preview path matches the folder the handler will actually
+ * resolve. Kept in sync by hand — the rules are simple and stable.
+ */
+function sanitizeWorkspaceName(name: string): string {
+  return (
+    name
+      .replace(/[<>:"/\\|?*]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim() || 'default'
+  )
+}
+
+/** Last path segment of an absolute folder path (POSIX or Windows separators). */
+function basename(path: string): string {
+  const parts = path.split(/[\\/]+/).filter(Boolean)
+  return parts[parts.length - 1] ?? ''
+}
+
+/** Join a parent dir and a leaf segment with a single separator. */
+function joinPath(parent: string, leaf: string): string {
+  return `${parent.replace(/[\\/]+$/, '')}/${leaf}`
+}
+
+/** Display label for the default base; the handler expands it server-side. */
+const DEFAULT_BASE = '~/Documents/Green Tea'
+
+/**
+ * Obsidian-style add-workspace dialog. Starts on a two-action chooser
+ * (create a new workspace folder, or open an existing folder of notes);
+ * "Create" drills into a name + location step, "Open" goes straight to the
+ * native folder picker. The backend create handler resolves the default
+ * location when `path` is omitted and throws on overlap/duplicate.
+ */
+function CreateWorkspaceDialog({
+  open,
+  onOpenChange,
+  createWorkspace,
+  onCreated
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  createWorkspace: (data: {
+    name: string
+    path?: string
+    mode?: 'new' | 'open'
+  }) => Promise<{ id: string }>
+  onCreated: (id: string) => void
+}) {
+  const [view, setView] = useState<'choose' | 'create'>('choose')
+  const [name, setName] = useState('')
+  // null parent => default base; the handler resolves it server-side.
+  const [parent, setParent] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  // Reset whenever the dialog opens.
+  useEffect(() => {
+    if (open) {
+      setView('choose')
+      setName('')
+      setParent(null)
+      setError(null)
+      setBusy(false)
+    }
+  }, [open])
+
+  const leaf = sanitizeWorkspaceName(name || 'workspace')
+  const targetFolder = joinPath(parent ?? DEFAULT_BASE, leaf)
+  const canCreate = name.trim().length > 0 && !busy
+
+  const handleChooseParent = async () => {
+    const picked = await window.api.dialog.pickFolder()
+    if (!picked) return
+    setParent(picked)
+    setError(null)
+  }
+
+  const handleCreate = async () => {
+    if (!canCreate) return
+    setBusy(true)
+    setError(null)
+    try {
+      const ws = await createWorkspace({
+        name: name.trim(),
+        // Omit `path` for the default base so the handler resolves it.
+        path: parent ? joinPath(parent, leaf) : undefined,
+        mode: 'new'
+      })
+      onCreated(ws.id)
+    } catch (e) {
+      // The create handler throws on overlap/duplicate; surface its message inline.
+      setError(e instanceof Error ? e.message : 'Could not create workspace.')
+      setBusy(false)
+    }
+  }
+
+  const handleOpenExisting = async () => {
+    const picked = await window.api.dialog.pickFolder()
+    if (!picked) return
+    setBusy(true)
+    setError(null)
+    try {
+      const ws = await createWorkspace({ name: basename(picked), path: picked, mode: 'open' })
+      onCreated(ws.id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open folder.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {view === 'choose' ? (
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader className="items-center text-center">
+            <div className="mx-auto mb-1 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+              <Leaf className="h-7 w-7 text-primary" />
+            </div>
+            <DialogTitle>Add a workspace</DialogTitle>
+            <DialogDescription>A workspace is a folder of notes on disk.</DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-2 divide-y divide-border rounded-lg border border-border">
+            <div className="flex items-center justify-between gap-4 p-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Create new workspace</p>
+                <p className="text-sm text-muted-foreground">Create a new workspace folder.</p>
+              </div>
+              <Button onClick={() => setView('create')} disabled={busy}>
+                Create
+              </Button>
+            </div>
+            <div className="flex items-center justify-between gap-4 p-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Open existing folder</p>
+                <p className="text-sm text-muted-foreground">Choose an existing folder of notes.</p>
+              </div>
+              <Button variant="outline" onClick={handleOpenExisting} disabled={busy}>
+                Open
+              </Button>
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </DialogContent>
+      ) : (
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create new workspace</DialogTitle>
+            <DialogDescription>Name it and choose where the folder lives.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="ws-name">Name</Label>
+              <Input
+                id="ws-name"
+                autoFocus
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  setError(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && canCreate) handleCreate()
+                }}
+                placeholder="Workspace name"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Location</Label>
+              <div className="flex items-center gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-sm text-muted-foreground">
+                  <Folder className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate" title={targetFolder}>
+                    {targetFolder}
+                  </span>
+                </div>
+                {parent && (
+                  <Button type="button" variant="outline" size="sm" onClick={() => setParent(null)}>
+                    Default
+                  </Button>
+                )}
+                <Button type="button" variant="outline" size="sm" onClick={handleChooseParent}>
+                  Choose…
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                The workspace folder will be created here.
+              </p>
+            </div>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+
+          <DialogFooter className="sm:justify-between">
+            <Button variant="ghost" onClick={() => setView('choose')} disabled={busy}>
+              <ChevronLeft className="h-4 w-4" />
+              Back
+            </Button>
+            <Button onClick={handleCreate} disabled={!canCreate}>
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
   )
 }
 

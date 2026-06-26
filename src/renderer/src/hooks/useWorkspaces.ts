@@ -4,7 +4,11 @@ import type { Workspace } from '../../../main/database/types'
 interface UseWorkspacesResult {
   workspaces: Workspace[]
   loading: boolean
-  createWorkspace: (data: { name: string }) => Promise<Workspace>
+  createWorkspace: (data: {
+    name: string
+    path?: string
+    mode?: 'new' | 'open'
+  }) => Promise<Workspace>
   updateWorkspace: (id: string, data: { name?: string; description?: string }) => Promise<Workspace>
   deleteWorkspace: (id: string) => Promise<void>
   refresh: () => Promise<void>
@@ -33,7 +37,7 @@ export function useWorkspaces(): UseWorkspacesResult {
   }, [refresh])
 
   const createWorkspace = useCallback(
-    async (data: { name: string }) => {
+    async (data: { name: string; path?: string; mode?: 'new' | 'open' }) => {
       const workspace = await window.api.workspaces.create(data)
       await refresh()
       return workspace

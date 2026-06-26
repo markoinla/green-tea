@@ -43,7 +43,15 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
         conversationId?: string
         message?: {
           role: string
-          content: Array<{ type: string; text?: string; thinking?: string }>
+          content: Array<{
+            type: string
+            text?: string
+            thinking?: string
+            // tool-use blocks while the assistant message streams
+            id?: string
+            name?: string
+            arguments?: Record<string, unknown>
+          }>
         }
         toolCallId?: string
         toolName?: string
@@ -105,6 +113,22 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
               thinking: thinkingText || undefined
             })
 
+            // Surface tool calls as soon as the model starts writing them (during
+            // streaming), instead of waiting for execution to begin. Args fill in
+            // progressively as the streamed JSON is parsed.
+            for (const block of event.message.content) {
+              if (block.type === 'toolCall' && block.id && block.name) {
+                dispatchTo(convId, {
+                  type: 'upsert_tool_call',
+                  id: crypto.randomUUID(),
+                  timestamp: Date.now(),
+                  toolCallId: block.id,
+                  toolName: block.name,
+                  toolArgs: block.arguments
+                })
+              }
+            }
+
             // Persist assistant text message on message_end
             if (event.type === 'message_end' && fullText) {
               window.api.conversations.addMessage({
@@ -120,29 +144,45 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
 
         case 'tool_start': {
           if (event.toolName) {
+            const toolName = event.toolName
             // Track active subagent invocation for event routing
             if (event.toolName === 'subagent' && event.toolCallId) {
               activeSubagentToolCallId.current = event.toolCallId
               subagentEventsRef.current.set(event.toolCallId, [])
             }
 
+            // The card was likely already added while the tool call streamed (see
+            // message_update). Upsert reconciles with it by toolCallId so we update
+            // the existing pending card instead of adding a duplicate; if streaming
+            // never produced one, this adds it now.
+            //
             // flushSync forces React to render the activity group immediately,
             // preventing it from being batched with the upcoming tool_end event.
             // Without this, fast/synchronous tools would have tool_start and tool_end
             // batched into a single render — the user would never see the "running" state.
             flushSync(() => {
-              dispatchTo(convId, {
-                type: 'add_message',
-                message: {
+              if (event.toolCallId) {
+                dispatchTo(convId, {
+                  type: 'upsert_tool_call',
                   id: crypto.randomUUID(),
-                  role: 'assistant',
-                  content: '',
                   timestamp: Date.now(),
-                  toolName: event.toolName,
-                  toolArgs: event.args,
-                  toolCallId: event.toolCallId
-                }
-              })
+                  toolCallId: event.toolCallId,
+                  toolName,
+                  toolArgs: event.args
+                })
+              } else {
+                dispatchTo(convId, {
+                  type: 'add_message',
+                  message: {
+                    id: crypto.randomUUID(),
+                    role: 'assistant',
+                    content: '',
+                    timestamp: Date.now(),
+                    toolName,
+                    toolArgs: event.args
+                  }
+                })
+              }
             })
 
             // Persist tool message

@@ -1,19 +1,26 @@
-import { watch, existsSync, mkdirSync, readFileSync, type FSWatcher } from 'fs'
+import { watch, existsSync, readFileSync, type FSWatcher } from 'fs'
 import { join, basename, sep } from 'path'
 import type { BrowserWindow } from 'electron'
 import type Database from 'better-sqlite3'
-import { getVaultsRoot } from './paths'
+import { listWorkspaces } from '../database/repositories/workspaces'
+import { getWorkspaceVaultDir } from './paths'
 import { reindexFile, deleteIndexRowByPath, type ReindexResult } from './documents-service'
 import { consumeSelfWrite } from './self-write'
 import { kindForExt } from './artifact-kinds'
 
 /**
- * The vault watcher (Phase 5). Observes the vaults/ tree for external .md
- * changes (other editors, Obsidian, sync, the agent writing outside the app)
- * and broadcasts the SAME change events the renderer already understands
+ * The vault watcher. Observes every workspace folder for external `.md`/artifact
+ * changes (other editors, Obsidian, sync, the agent writing outside the app) and
+ * broadcasts the SAME change events the renderer already understands
  * (documents:content-changed / documents:changed), so the open note live-reloads
  * in place. The app's own atomic writes are recognized (and ignored) via the
  * self-write registry plus a content-diff in reindexFile — it never echo-loops.
+ *
+ * Workspaces are now arbitrary folders anywhere on disk (`ws.path`), so there is
+ * no single root to watch. We keep ONE recursive `FSWatcher` per existing
+ * workspace folder (keyed by its absolute, NFC-normalized root). A folder that
+ * doesn't exist (an "unavailable" workspace) is simply not watched; the watcher
+ * is re-aimed via restartVaultWatcher when a workspace is created/relocated.
  *
  * Mirrors theme-watcher's module-singleton + debounce + isDestroyed-guard shape.
  * Every change flows through the per-path, READ-ONLY reindexFile (it never
@@ -24,13 +31,22 @@ const DEBOUNCE_MS = 200
 const DELETE_SETTLE_MS = 120 // re-verify a deletion before pruning (handles delete+recreate flaps)
 const IGNORED_DIRS = new Set(['.git', '.obsidian', 'node_modules', 'attachments', '.trash'])
 
-let watcher: FSWatcher | null = null
+const watchers = new Map<string, FSWatcher>()
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 const settleTimers = new Set<ReturnType<typeof setTimeout>>()
 let stopped = true
-let watchedRoot: string | null = null
 let storedDb: Database.Database | null = null
 let storedWindow: BrowserWindow | null = null
+
+/** The set of absolute, NFC-normalized workspace folders that currently exist. */
+function currentRoots(db: Database.Database): string[] {
+  const roots = new Set<string>()
+  for (const ws of listWorkspaces(db)) {
+    const dir = getWorkspaceVaultDir(db, ws.id).normalize('NFC')
+    if (existsSync(dir)) roots.add(dir)
+  }
+  return [...roots]
+}
 
 function isIgnoredPath(relPath: string): boolean {
   for (const segment of relPath.split(sep)) {
@@ -112,11 +128,11 @@ function handlePath(abs: string): void {
   broadcast(result)
 }
 
-function onEvent(_eventType: string, filename: string | Buffer | null): void {
-  if (stopped || filename == null || !watchedRoot) return
+function onEvent(root: string, _eventType: string, filename: string | Buffer | null): void {
+  if (stopped || filename == null) return
   const rel = filename.toString()
   if (isIgnoredPath(rel)) return
-  const abs = join(watchedRoot, rel).normalize('NFC')
+  const abs = join(root, rel).normalize('NFC')
 
   // Per-path debounce: coalesces the temp+rename event pair (and rapid repeated
   // saves) into a single reconcile. Each fires as its own macrotask, so even a
@@ -132,40 +148,56 @@ function onEvent(_eventType: string, filename: string | Buffer | null): void {
   )
 }
 
-function startWatching(db: Database.Database, mainWindow: BrowserWindow): void {
-  stopVaultWatcher()
+/**
+ * Reconcile the set of live `FSWatcher`s with the workspaces on disk: open a
+ * recursive watcher for every existing workspace folder not already watched, and
+ * close watchers whose folder is gone (a deleted/relocated workspace). Idempotent
+ * — safe to call on create/relocate/delete or whenever the workspace set changes.
+ */
+function syncWatchers(db: Database.Database): void {
   if (process.platform !== 'darwin' && process.platform !== 'win32') {
     // Recursive fs.watch is only reliable on macOS/Windows. The primary build
     // target is macOS; elsewhere the watcher is simply disabled.
     console.info('[vault-watcher] recursive fs.watch unsupported on this platform; disabled')
     return
   }
-  const root = getVaultsRoot(db).normalize('NFC')
-  if (!existsSync(root)) mkdirSync(root, { recursive: true })
-  watchedRoot = root
-  storedDb = db
-  storedWindow = mainWindow
-  stopped = false
-  try {
-    watcher = watch(root, { recursive: true }, onEvent)
-  } catch (err) {
-    console.error('[vault-watcher] failed to start', err)
-    stopped = true
-    watchedRoot = null
+  const desired = new Set(currentRoots(db))
+
+  // Drop watchers whose folder is no longer a (present) workspace root.
+  for (const [root, w] of watchers) {
+    if (!desired.has(root)) {
+      w.close()
+      watchers.delete(root)
+    }
+  }
+
+  // Add a watcher for each newly-present root. A missing folder (an "unavailable"
+  // workspace) is intentionally skipped — we do NOT mkdir it back into existence.
+  for (const root of desired) {
+    if (watchers.has(root)) continue
+    try {
+      watchers.set(
+        root,
+        watch(root, { recursive: true }, (eventType, filename) => onEvent(root, eventType, filename))
+      )
+    } catch (err) {
+      console.error('[vault-watcher] failed to watch', root, err)
+    }
   }
 }
 
 export function startVaultWatcher(db: Database.Database, mainWindow: BrowserWindow): void {
+  stopVaultWatcher()
   storedDb = db
   storedWindow = mainWindow
-  startWatching(db, mainWindow)
+  stopped = false
+  syncWatchers(db)
 }
 
 export function restartVaultWatcher(): void {
   if (!storedDb || !storedWindow || storedWindow.isDestroyed()) return
-  const newRoot = getVaultsRoot(storedDb).normalize('NFC')
-  if (newRoot === watchedRoot && watcher) return
-  startWatching(storedDb, storedWindow)
+  stopped = false
+  syncWatchers(storedDb)
 }
 
 export function stopVaultWatcher(): void {
@@ -174,9 +206,6 @@ export function stopVaultWatcher(): void {
   timers.clear()
   for (const t of settleTimers) clearTimeout(t)
   settleTimers.clear()
-  if (watcher) {
-    watcher.close()
-    watcher = null
-  }
-  watchedRoot = null
+  for (const w of watchers.values()) w.close()
+  watchers.clear()
 }
