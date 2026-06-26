@@ -1,7 +1,9 @@
 import type { ComponentType } from 'react'
-import { FileCode, FileSpreadsheet, FileText, type LucideIcon } from 'lucide-react'
+import { FileCode, FileImage, FileSpreadsheet, FileText, type LucideIcon } from 'lucide-react'
 import { HtmlViewer } from '../editor/HtmlViewer'
 import { CsvViewer } from '../editor/CsvViewer'
+import { ImageViewer } from '../editor/ImageViewer'
+import { PdfViewer } from '../editor/PdfViewer'
 import type { Document, DocumentKind } from '../../../../main/database/types'
 
 /**
@@ -43,9 +45,26 @@ function CsvArtifactViewer({ doc }: { doc: Document; onQuoteSelection?: (text: s
   return <CsvViewer gtFileId={doc.id} fileName={doc.title} watchDocId={doc.id} />
 }
 
+/** Image: streamed by gt-file:// via <img>, live-reloading on rewrite. */
+function ImageArtifactViewer({
+  doc
+}: {
+  doc: Document
+  onQuoteSelection?: (text: string) => void
+}) {
+  return <ImageViewer gtFileId={doc.id} fileName={doc.title} watchDocId={doc.id} />
+}
+
+/** PDF: served by gt-file:// in a sandboxed iframe (native Chromium viewer). */
+function PdfArtifactViewer({ doc }: { doc: Document; onQuoteSelection?: (text: string) => void }) {
+  return <PdfViewer gtFileId={doc.id} fileName={doc.title} watchDocId={doc.id} />
+}
+
 const REGISTRY: Partial<Record<DocumentKind, ArtifactViewerEntry>> = {
   html: { Viewer: HtmlArtifactViewer, icon: FileCode, dataSource: 'gt-file' },
-  csv: { Viewer: CsvArtifactViewer, icon: FileSpreadsheet, dataSource: 'read' }
+  csv: { Viewer: CsvArtifactViewer, icon: FileSpreadsheet, dataSource: 'read' },
+  image: { Viewer: ImageArtifactViewer, icon: FileImage, dataSource: 'gt-file' },
+  pdf: { Viewer: PdfArtifactViewer, icon: FileText, dataSource: 'gt-file' }
 }
 
 /** The viewer for an artifact kind, or null for notes / unregistered kinds. */

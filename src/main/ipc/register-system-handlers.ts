@@ -197,7 +197,16 @@ export function registerSystemHandlers({ db, mainWindow }: IpcHandlerContext): v
       if (result.canceled || !result.filePath) return { saved: false }
 
       const body = await marked.parse(args.markdown)
-      const html = `<!doctype html><html><head><meta charset="utf-8" /><style>
+      // Escape the title for the <title> element — without it, Chrome's printToPDF
+      // falls back to the document URL (the `data:text/html,…` below) as the PDF's
+      // embedded title, which then shows in PDF viewers' toolbars.
+      const escapeHtml = (s: string): string =>
+        s
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+      const html = `<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(args.title || 'Untitled')}</title><style>
         html { -webkit-print-color-adjust: exact; }
         body {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;

@@ -83,6 +83,7 @@ const MIME_MAP: Record<string, string> = {
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  pdf: 'application/pdf',
   woff: 'font/woff',
   woff2: 'font/woff2',
   ttf: 'font/ttf',
@@ -256,7 +257,8 @@ export function createGtFileHandler(
     // intentionally differ from the bytes on disk; gt-file:// is a preview
     // surface consumed only by HtmlViewer. Sibling assets and non-html are
     // left untouched.
-    if (isEntry && contentTypeFor(absPath) === 'text/html') {
+    const contentType = contentTypeFor(absPath)
+    if (isEntry && contentType === 'text/html') {
       const html = data.toString('utf8')
       // Function replacer (not a `$&` string) so a `$` anywhere in the bootstrap
       // script is never reinterpreted as a replacement pattern.
@@ -266,11 +268,20 @@ export function createGtFileHandler(
       data = Buffer.from(injected, 'utf8')
     }
 
-    return new Response(new Uint8Array(data), {
-      headers: {
-        'Content-Type': contentTypeFor(absPath),
-        'Content-Security-Policy': buildGtFileCsp()
-      }
-    })
+    // Wrap the Node Buffer in a Uint8Array VIEW over the same memory (passing the
+    // buffer/byteOffset/byteLength), not a fresh copy — `new Uint8Array(data)`
+    // would duplicate the whole file, doubling the transient main-process
+    // allocation per request, which matters now that image/pdf artifacts can be up
+    // to MAX_BINARY_ARTIFACT_BYTES. This is still a full-file read (not a
+    // stream); acceptable for a desktop app with a single concurrent viewer, but
+    // it is NOT streaming.
+    const body = new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength)
+    // The strict CSP exists to constrain agent-authored HTML documents. Binary
+    // assets (images, PDFs, fonts) are not executable documents, and applying
+    // `default-src 'none'` to a PDF response blocks Chromium's internal PDF
+    // viewer (MimeHandlerView) from rendering it — so only HTML gets the CSP.
+    const headers: Record<string, string> = { 'Content-Type': contentType }
+    if (contentType === 'text/html') headers['Content-Security-Policy'] = buildGtFileCsp()
+    return new Response(body, { headers })
   }
 }

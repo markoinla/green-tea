@@ -85,7 +85,8 @@ function createWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegrationInSubFrames: false
+      nodeIntegrationInSubFrames: false,
+      plugins: true // enable Chromium's bundled PDF viewer for gt-file:// iframes
     }
   })
 

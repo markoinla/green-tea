@@ -17,7 +17,7 @@ import {
   titleFromFilename,
   uniqueNotePath,
   MAX_NOTE_BYTES,
-  MAX_ARTIFACT_BYTES
+  maxBytesForKind
 } from './note-store'
 import {
   deriveProperties,
@@ -1075,7 +1075,12 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
   // rewriting report.html (same path, new bytes) reports `updated` → the viewer
   // live-reloads, even though the index never reads the body.
   if (fileKind !== 'note') {
-    if (stat.size > MAX_ARTIFACT_BYTES) return { kind: 'ignored' }
+    const cap = maxBytesForKind(fileKind)
+    if (stat.size > cap) {
+      // Skipped for size — keep this greppable rather than silent.
+      console.warn(`[vault] skipping ${abs}: ${stat.size} bytes exceeds ${fileKind} cap ${cap}`)
+      return { kind: 'ignored' }
+    }
     const mtimeIso = stat.mtime.toISOString()
     const vaultDir = getWorkspaceVaultDir(db, workspaceId).normalize('NFC')
     const folderRel = toPosixRel(vaultDir, dirname(abs))

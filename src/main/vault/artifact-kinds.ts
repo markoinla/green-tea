@@ -21,7 +21,14 @@ const EXT_TO_KIND: Record<string, DocumentKind> = {
   md: 'note',
   html: 'html',
   htm: 'html',
-  csv: 'csv'
+  csv: 'csv',
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  gif: 'image',
+  webp: 'image',
+  svg: 'image',
+  pdf: 'pdf'
 }
 
 /** The kind for a file path, or `null` when its extension isn't indexed at all. */

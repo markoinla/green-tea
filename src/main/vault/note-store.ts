@@ -34,6 +34,30 @@ export const MAX_NOTE_BYTES = 2 * 1024 * 1024
 // never read at index time, so this only bounds what the tree will surface.
 export const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
 
+// Image and PDF artifacts are served to the renderer over gt-file:// (no text
+// read at index time), so a single high-resolution image or a large PDF can dwarf
+// the 25 MB text-artifact budget and gets a larger ceiling so it isn't silently
+// dropped from the tree. The ceiling is deliberately modest: the gt-file handler
+// reads the whole file into a Buffer in the (single-threaded) main process per
+// request — it does NOT stream — so this is the largest size we're willing to
+// transiently buffer. Raising it requires converting the handler to a real stream
+// (+ HTTP Range) first; see docs/plans/2026-06-26-pdf-image-artifact-viewers.md.
+export const MAX_BINARY_ARTIFACT_BYTES = 75 * 1024 * 1024
+
+/**
+ * The indexing size ceiling for a kind. Notes are text (small budget); image/pdf
+ * are served over gt-file:// and get the larger binary ceiling; every other artifact keeps
+ * the text-artifact budget. Used at the walk + reindex gating sites so the cap is
+ * uniform. NOTE: `documents:readArtifact` (text read for csv/html) intentionally
+ * keeps the 25 MB `MAX_ARTIFACT_BYTES` directly — image/pdf never route through it
+ * (they use the gt-file streaming path), so they are not affected by that cap.
+ */
+export function maxBytesForKind(kind: DocumentKind): number {
+  if (kind === 'note') return MAX_NOTE_BYTES
+  if (kind === 'image' || kind === 'pdf') return MAX_BINARY_ARTIFACT_BYTES
+  return MAX_ARTIFACT_BYTES
+}
+
 export interface VaultNote {
   /** Stable identity from frontmatter `id`. */
   id: string
@@ -230,8 +254,12 @@ export function listVaultNotes(vaultDir: string): VaultNoteSummary[] {
       if (!kind) continue
 
       const stat = statSync(full)
-      const cap = kind === 'note' ? MAX_NOTE_BYTES : MAX_ARTIFACT_BYTES
-      if (stat.size > cap) continue
+      const cap = maxBytesForKind(kind)
+      if (stat.size > cap) {
+        // Skipped for size — keep this greppable rather than silent.
+        console.warn(`[vault] skipping ${full}: ${stat.size} bytes exceeds ${kind} cap ${cap}`)
+        continue
+      }
       const mtimeIso = stat.mtime.toISOString()
       const folderRel = toPosix(relative(vaultDir, dirname(full)))
 
