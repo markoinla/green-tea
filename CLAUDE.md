@@ -49,7 +49,7 @@ All IPC channels follow a namespace pattern: `db:documents:*`, `db:blocks:*`, `d
 
 ### Agent system
 
-Uses `@mariozechner/pi-coding-agent` with custom tools in `src/main/agent/tools/`. The agent reads/writes documents via notes tools (`notes_list`, `notes_get_markdown`, `notes_search`, `notes_propose_patch`, etc.) and proposes changes as markdown patches. Patches go through an approval flow (stored in `agent_logs`, approved/rejected by user in UI). Other tools: `workspace_add_file`, `web_search`, `web_fetch`, `subagent`.
+Uses `@earendil-works/pi-coding-agent`, whose built-in filesystem tools (`read`, `write`, `edit`, `bash`, `ls`, `grep`, `find`) are active in the agent session alongside custom tools in `src/main/agent/tools/`. The agent navigates/reads notes via the built-ins plus the index-backed `notes_list`, `notes_get_markdown`, `notes_query`, and `notes_get_backlinks`, and writes via `notes_create` / `notes_propose_edit` / `notes_set_metadata`, which propose changes as markdown patches. Patches go through an approval flow (stored in `agent_logs`, approved/rejected by user in UI). Other tools: `workspace_add_file`, `web_search`, `web_fetch`, `subagent`.
 
 API key and model are read from the `settings` table (fallback to `.env`). Skills loaded from `~/Documents/Green Tea/skills/`.
 

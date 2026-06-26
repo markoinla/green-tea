@@ -103,7 +103,10 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
   return result
 }
 
-export function loadSandboxConfig(agentBaseDir: string): SandboxConfig {
+export function loadSandboxConfig(
+  agentBaseDir: string,
+  extraWritePaths: string[] = []
+): SandboxConfig {
   const globalConfigPath = join(homedir(), '.greentea', 'sandbox.json')
 
   let globalConfig: Partial<SandboxConfig> = {}
@@ -116,7 +119,20 @@ export function loadSandboxConfig(agentBaseDir: string): SandboxConfig {
     }
   }
 
-  return deepMerge(defaultConfig(agentBaseDir), globalConfig)
+  const merged = deepMerge(defaultConfig(agentBaseDir), globalConfig)
+
+  // Append extra writable paths (e.g. the active workspace vault dir) AFTER the
+  // merge so a global sandbox.json that overrides filesystem.allowWrite cannot
+  // drop them. Only allowWrite is touched — denyWrite/denyRead stay intact.
+  if (extraWritePaths.length > 0) {
+    const allowWrite = [...(merged.filesystem?.allowWrite ?? [])]
+    for (const path of extraWritePaths) {
+      if (path && !allowWrite.includes(path)) allowWrite.push(path)
+    }
+    merged.filesystem = { ...merged.filesystem, allowWrite }
+  }
+
+  return merged
 }
 
 export function createSandboxedBashOps(): BashOperations {

@@ -29,7 +29,7 @@ import { getWorkspace } from '../database/repositories/workspaces'
 import { markdownToTiptap } from '../markdown/tiptap-markdown'
 import { getSetting } from '../database/repositories/settings'
 import { getSkillsDir } from '../skills/manager'
-import { getAgentBaseDir, getAgentWorkDir } from './paths'
+import { getAgentBaseDir, getAgentWorkDir, getWorkspaceDir } from './paths'
 import { buildSystemPrompt } from './system-prompt'
 import { getMcpManager } from '../mcp'
 import { getEnabledServices } from '../google'
@@ -325,10 +325,12 @@ export async function createNotesAgentSession(
   const agentWorkDir = getAgentWorkDir(db, workspaceId)
   mkdirSync(agentWorkDir, { recursive: true })
 
-  // Initialize OS-level sandbox — scoped to agentBaseDir so agent can write
-  // to both the workspaces/ tree and skills/
+  // Initialize OS-level sandbox — scoped to agentBaseDir (for skills/ and
+  // default-location workspaces) plus the active workspace's vault dir so the
+  // agent can write into user-picked folders that live outside agentBaseDir.
   const agentBaseDir = getAgentBaseDir(db)
-  const sandboxConfig = loadSandboxConfig(agentBaseDir)
+  const workspaceVaultDir = getWorkspaceDir(db, workspaceId)
+  const sandboxConfig = loadSandboxConfig(agentBaseDir, [workspaceVaultDir])
   await initializeSandbox(sandboxConfig)
 
   // When the sandbox is active, supply a custom bash tool backed by sandboxed

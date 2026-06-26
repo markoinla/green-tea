@@ -7,8 +7,6 @@ import {
   notesListDocuments,
   notesListFolders,
   notesGetMarkdown,
-  notesSearch,
-  notesGetOutline,
   notesQuery,
   notesGetBacklinks
 } from './notes-read'
@@ -97,30 +95,6 @@ export function createNotesTools(
     }
   }
 
-  const notesSearchTool: ToolDefinition = {
-    name: 'notes_search',
-    label: 'Search Notes',
-    description:
-      'Search block content across all notes. Returns matching blocks with their note context.',
-    parameters: Type.Object({
-      query: Type.String({ description: 'Search query (matched with SQL LIKE)' })
-    }),
-    async execute(_toolCallId, params) {
-      const p = params as { query: string }
-      const result = notesSearch(db, p, workspaceId)
-      if (result.error) {
-        return {
-          content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
-          details: undefined
-        }
-      }
-      return {
-        content: [{ type: 'text' as const, text: result.content }],
-        details: undefined
-      }
-    }
-  }
-
   const notesQueryTool: ToolDefinition = {
     name: 'notes_query',
     label: 'Query Notes by Metadata',
@@ -135,30 +109,6 @@ export function createNotesTools(
     async execute(_toolCallId, params) {
       const p = params as { key: string; value: string }
       const result = notesQuery(db, p, workspaceId)
-      if (result.error) {
-        return {
-          content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
-          details: undefined
-        }
-      }
-      return {
-        content: [{ type: 'text' as const, text: result.content }],
-        details: undefined
-      }
-    }
-  }
-
-  const notesGetOutlineTool: ToolDefinition = {
-    name: 'notes_get_outline',
-    label: 'Get Outline',
-    description:
-      'Get an outline of a note showing headings and top-level blocks. Useful for understanding note structure without reading full content.',
-    parameters: Type.Object({
-      document_id: Type.String({ description: 'The note ID to outline' })
-    }),
-    async execute(_toolCallId, params) {
-      const p = params as { document_id: string }
-      const result = notesGetOutline(db, p, workspaceId)
       if (result.error) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
@@ -528,9 +478,7 @@ export function createNotesTools(
     notesListTool,
     notesListFoldersTool,
     notesGetMarkdownTool,
-    notesGetOutlineTool,
     notesGetBacklinksTool,
-    notesSearchTool,
     notesQueryTool,
     notesCreateTool,
     notesCreateFolderTool,

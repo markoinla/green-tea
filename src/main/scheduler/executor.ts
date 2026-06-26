@@ -11,7 +11,7 @@ import {
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { getModelConfig } from '../agent/session'
 import { createNotesTools } from '../agent/tools/notes-tools'
-import { getAgentBaseDir, getAgentWorkDir } from '../agent/paths'
+import { getAgentBaseDir, getAgentWorkDir, getWorkspaceDir } from '../agent/paths'
 import { getSkillsDir } from '../skills/manager'
 import { getSetting } from '../database/repositories/settings'
 import { getWorkspace } from '../database/repositories/workspaces'
@@ -52,7 +52,8 @@ export async function executeScheduledTask(
     mkdirSync(agentWorkDir, { recursive: true })
 
     const agentBaseDir = getAgentBaseDir(db)
-    const sandboxConfig = loadSandboxConfig(agentBaseDir)
+    const workspaceVaultDir = getWorkspaceDir(db, task.workspace_id)
+    const sandboxConfig = loadSandboxConfig(agentBaseDir, [workspaceVaultDir])
     await initializeSandbox(sandboxConfig)
 
     // Sandboxed bash shares the built-in tool name 'bash' so it overrides the built-in.
