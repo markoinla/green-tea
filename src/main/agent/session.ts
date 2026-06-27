@@ -506,11 +506,19 @@ export async function promptAgent(
     }
   }
 
-  // Add currently viewed document context
+  // Add currently viewed document context. Notes are addressed by id (the agent
+  // reads/edits them via the notes_* tools); artifacts (html/csv/pdf/image) are
+  // real files the agent acts on with read/edit/bash, so hand it the on-disk path
+  // and kind — otherwise it can't map "the file I'm looking at" to anything.
   if (documentId) {
     const doc = getDocument(db, documentId)
     if (doc) {
-      fullPrompt = `[Context: Currently viewing document "${doc.title}" (id: ${documentId})]\n\n${fullPrompt}`
+      const isNote = !doc.kind || doc.kind === 'note'
+      if (!isNote && doc.file_path) {
+        fullPrompt = `[Context: Currently viewing the ${doc.kind} file "${doc.title}" at path: ${doc.file_path} — use the read/edit/bash tools on this path to inspect or modify it.]\n\n${fullPrompt}`
+      } else {
+        fullPrompt = `[Context: Currently viewing document "${doc.title}" (id: ${documentId})]\n\n${fullPrompt}`
+      }
     }
   }
 
