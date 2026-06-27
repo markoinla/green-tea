@@ -1,6 +1,6 @@
-import { useState, useEffect, memo, type RefObject, type MutableRefObject } from 'react'
+import { useState, useEffect, useMemo, memo, type RefObject, type MutableRefObject } from 'react'
 import { MessageSquare } from 'lucide-react'
-import { ChatMessage } from '@renderer/components/chat/ChatMessage'
+import { ChatMessage, getToolDescription, getToolIcon } from '@renderer/components/chat/ChatMessage'
 import { AgentActivityGroup } from '@renderer/components/chat/AgentActivityGroup'
 import {
   SubagentActivityGroup,
@@ -8,7 +8,12 @@ import {
 } from '@renderer/components/chat/SubagentActivityGroup'
 import { PatchApproval } from '@renderer/components/diff/PatchApproval'
 import { MetadataApproval } from '@renderer/components/diff/MetadataApproval'
-import type { DisplayItem } from '@renderer/hooks/chat-types'
+import { formatTokenCount, type DisplayItem } from '@renderer/hooks/chat-types'
+
+interface ActiveTool {
+  toolName: string
+  toolArgs?: Record<string, unknown>
+}
 
 const EMPTY_STATE_FLAVOR = [
   'Edit your notes with AI assistance',
@@ -69,9 +74,15 @@ const AGENT_FLAVOR_TEXT = [
 ]
 
 const AgentThinkingIndicator = memo(function AgentThinkingIndicator({
-  startTime
+  startTime,
+  activeTool,
+  tokens,
+  resolveDocName
 }: {
   startTime: number
+  activeTool: ActiveTool | null
+  tokens?: { input: number; output: number; total: number }
+  resolveDocName: (id: string) => string
 }) {
   const [index, setIndex] = useState(() => Math.floor(Math.random() * AGENT_FLAVOR_TEXT.length))
   const [visible, setVisible] = useState(true)
@@ -101,8 +112,15 @@ const AgentThinkingIndicator = memo(function AgentThinkingIndicator({
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
   }
 
+  // When a tool is running, show the concrete action ("Reading q3-goals.md…").
+  // Otherwise fall back to the rotating flavor text for pure reasoning.
+  const ActionIcon = activeTool ? getToolIcon(activeTool.toolName) : null
+  const actionLabel = activeTool
+    ? getToolDescription(activeTool.toolName, activeTool.toolArgs, resolveDocName)
+    : null
+
   return (
-    <div className="flex items-center gap-3 py-2.5">
+    <div className="flex items-center gap-2.5 py-2.5">
       <div className="h-6 w-6 rounded-full bg-accent flex items-center justify-center flex-shrink-0">
         <div className="flex gap-0.5">
           <span
@@ -119,17 +137,31 @@ const AgentThinkingIndicator = memo(function AgentThinkingIndicator({
           />
         </div>
       </div>
-      <span
-        className="text-xs text-muted-foreground transition-opacity duration-300"
-        style={{ opacity: visible ? 1 : 0 }}
-      >
-        {AGENT_FLAVOR_TEXT[index]}
-      </span>
-      {elapsed >= 5 && (
-        <span className="text-xs text-muted-foreground/70 tabular-nums ml-auto animate-in fade-in duration-500 rounded-lg bg-muted/40 border border-border/50 px-2 py-0.5">
-          {formatTime(elapsed)}
+      {ActionIcon && actionLabel ? (
+        <>
+          <ActionIcon className="h-3.5 w-3.5 text-muted-foreground/70 flex-shrink-0" />
+          <span className="text-xs text-muted-foreground truncate min-w-0">{actionLabel}…</span>
+        </>
+      ) : (
+        <span
+          className="text-xs text-muted-foreground transition-opacity duration-300"
+          style={{ opacity: visible ? 1 : 0 }}
+        >
+          {AGENT_FLAVOR_TEXT[index]}
         </span>
       )}
+      <span className="ml-auto flex items-center gap-2 flex-shrink-0">
+        {tokens && tokens.total > 0 && (
+          <span className="text-xs text-muted-foreground/70 tabular-nums animate-in fade-in duration-500 rounded-lg bg-muted/40 border border-border/50 px-2 py-0.5">
+            {formatTokenCount(tokens.total)} tokens
+          </span>
+        )}
+        {elapsed >= 5 && (
+          <span className="text-xs text-muted-foreground/70 tabular-nums animate-in fade-in duration-500 rounded-lg bg-muted/40 border border-border/50 px-2 py-0.5">
+            {formatTime(elapsed)}
+          </span>
+        )}
+      </span>
     </div>
   )
 })
@@ -139,6 +171,7 @@ interface ChatMessageListProps {
   isStreaming: boolean
   activeConversationId: string | null
   streamingStartTime: number | undefined
+  tokens?: { input: number; output: number; total: number }
   subagentEventsRef: MutableRefObject<Map<string, SubagentEvent[]>>
   subagentEventVersion: number
   activeSubagentToolCallId: MutableRefObject<string | null>
@@ -156,6 +189,7 @@ export function ChatMessageList({
   isStreaming,
   activeConversationId,
   streamingStartTime,
+  tokens,
   subagentEventsRef,
   subagentEventVersion,
   activeSubagentToolCallId,
@@ -167,6 +201,21 @@ export function ChatMessageList({
   onRejectMetadata,
   messagesEndRef
 }: ChatMessageListProps) {
+  // The current in-flight tool — the last pending tool of the trailing activity
+  // group. Drives the ephemeral status line so it shows the concrete action.
+  const activeTool = useMemo<ActiveTool | null>(() => {
+    if (!isStreaming) return null
+    const last = displayItems[displayItems.length - 1]
+    if (last?.type !== 'activity-group') return null
+    for (let i = last.tools.length - 1; i >= 0; i--) {
+      const t = last.tools[i]
+      if (t.toolName && t.toolIsError === undefined) {
+        return { toolName: t.toolName, toolArgs: t.toolArgs }
+      }
+    }
+    return null
+  }, [displayItems, isStreaming])
+
   if (displayItems.length === 0 && !isStreaming) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] px-6 animate-in fade-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
@@ -256,6 +305,9 @@ export function ChatMessageList({
       {isStreaming && (
         <AgentThinkingIndicator
           startTime={(activeConversationId && streamingStartTime) || Date.now()}
+          activeTool={activeTool}
+          tokens={tokens}
+          resolveDocName={resolveDocName}
         />
       )}
       <div ref={messagesEndRef} />

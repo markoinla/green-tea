@@ -158,6 +158,85 @@ export function getToolIcon(toolName: string) {
   return TOOL_META[toolName]?.icon ?? Wrench
 }
 
+// --- Activity summary ---------------------------------------------------------
+// Collapses a batch of tool calls into compact, human counts like
+// "Read 3 notes" / "Edited 2 notes" / "1 web search" for the settled-turn view.
+
+/** Maps a tool name to the summary bucket it counts toward. */
+const SUMMARY_CATEGORY_OF: Record<string, string> = {
+  read: 'read-file',
+  notes_get_markdown: 'read-note',
+  notes_get_outline: 'read-note',
+  notes_list: 'browse',
+  ls: 'browse',
+  notes_search: 'search',
+  grep: 'search',
+  find: 'search',
+  web_search: 'web-search',
+  web_fetch: 'web-fetch',
+  notes_create: 'create',
+  notes_propose_edit: 'edit',
+  edit: 'edit-file',
+  write: 'write',
+  notes_set_metadata: 'metadata',
+  notes_update_workspace_description: 'workspace',
+  bash: 'bash'
+}
+
+const SUMMARY_CATEGORIES: Record<
+  string,
+  { icon: typeof FileText; order: number; build: (n: number) => string }
+> = {
+  'read-note': { icon: Eye, order: 1, build: (n) => `Read ${n} ${n === 1 ? 'note' : 'notes'}` },
+  'read-file': { icon: Eye, order: 2, build: (n) => `Read ${n} ${n === 1 ? 'file' : 'files'}` },
+  browse: { icon: FolderOpen, order: 3, build: (n) => `Browsed ${n}×` },
+  search: { icon: Search, order: 4, build: (n) => `${n} ${n === 1 ? 'search' : 'searches'}` },
+  'web-search': {
+    icon: Globe,
+    order: 5,
+    build: (n) => `${n} web ${n === 1 ? 'search' : 'searches'}`
+  },
+  'web-fetch': {
+    icon: Globe,
+    order: 6,
+    build: (n) => `Fetched ${n} ${n === 1 ? 'page' : 'pages'}`
+  },
+  create: { icon: FilePlus, order: 7, build: (n) => `Created ${n} ${n === 1 ? 'note' : 'notes'}` },
+  edit: { icon: FileEdit, order: 8, build: (n) => `Edited ${n} ${n === 1 ? 'note' : 'notes'}` },
+  'edit-file': {
+    icon: Pencil,
+    order: 9,
+    build: (n) => `Edited ${n} ${n === 1 ? 'file' : 'files'}`
+  },
+  write: { icon: FileOutput, order: 10, build: (n) => `Wrote ${n} ${n === 1 ? 'file' : 'files'}` },
+  metadata: {
+    icon: FileEdit,
+    order: 11,
+    build: (n) => `Updated metadata on ${n} ${n === 1 ? 'note' : 'notes'}`
+  },
+  workspace: { icon: FileEdit, order: 12, build: () => 'Updated workspace' },
+  bash: { icon: Terminal, order: 13, build: (n) => `Ran ${n} ${n === 1 ? 'command' : 'commands'}` },
+  other: { icon: Wrench, order: 99, build: (n) => `${n} ${n === 1 ? 'action' : 'actions'}` }
+}
+
+export interface ToolSummary {
+  icon: typeof FileText
+  label: string
+}
+
+/** Group tool calls into ordered count chips ("Read 3 notes", "1 web search"). */
+export function summarizeTools(tools: { toolName: string }[]): ToolSummary[] {
+  const counts = new Map<string, number>()
+  for (const t of tools) {
+    const cat = SUMMARY_CATEGORY_OF[t.toolName] ?? 'other'
+    counts.set(cat, (counts.get(cat) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([cat, n]) => ({ n, def: SUMMARY_CATEGORIES[cat] ?? SUMMARY_CATEGORIES.other }))
+    .sort((a, b) => a.def.order - b.def.order)
+    .map(({ n, def }) => ({ icon: def.icon, label: def.build(n) }))
+}
+
 interface ChatMessageProps {
   role: 'user' | 'assistant'
   content: string

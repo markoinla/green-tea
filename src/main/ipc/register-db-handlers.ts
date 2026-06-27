@@ -11,6 +11,8 @@ import * as conversations from '../database/repositories/conversations'
 import * as documentVersions from '../database/repositories/document-versions'
 import * as documents from '../vault/documents-service'
 import { MAX_ARTIFACT_BYTES } from '../vault/note-store'
+import { markSelfWrite } from '../vault/self-write'
+import { patchHtmlText } from '../protocol/html-text-patch'
 import { getWorkspaceVaultDir, ensureVaultDir } from '../vault/paths'
 import { deserializeMarkdown } from '../markdown/deserialize'
 import { tiptapToMarkdown, type TTDoc } from '../markdown/tiptap-markdown'
@@ -231,6 +233,38 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     }
     return readFile(doc.file_path, 'utf-8')
   })
+
+  // Inline text edit-and-save for HTML artifacts. The sandboxed viewer's picker
+  // bootstrap sends an edit-commit (child-index path + oldText + newHTML); we
+  // re-apply it to the source .html on disk via the pure patcher. The oldText
+  // guard inside patchHtmlText is the safety net against a wrong/drifted target —
+  // thrown Errors propagate to the renderer, which surfaces them.
+  //
+  // We deliberately do NOT broadcast documents:content-changed here: the viewer's
+  // live DOM already shows the edit (it was typed into a contenteditable), so a
+  // reload would only flash and lose scroll. markSelfWrite registers the bytes so
+  // the vault watcher recognizes its own write and stays silent too — a genuine
+  // external edit (agent rewrite, another app) still reloads via the watcher.
+  ipcMain.handle(
+    'db:documents:patchHtmlText',
+    async (
+      _event,
+      id: string,
+      patch: { path: number[]; oldText: string; newHTML: string }
+    ): Promise<void> => {
+      const doc = documents.getDocument(db, id)
+      if (!doc || !doc.file_path) throw new Error(`Document not found: ${id}`)
+      if (doc.kind !== 'html') throw new Error(`Not an HTML artifact: ${id}`)
+      const stat = statSync(doc.file_path)
+      if (stat.size > MAX_ARTIFACT_BYTES) {
+        throw new Error(`Artifact too large: ${stat.size} bytes (max ${MAX_ARTIFACT_BYTES})`)
+      }
+      const current = await readFile(doc.file_path, 'utf-8')
+      const next = patchHtmlText(current, patch)
+      markSelfWrite(doc.file_path, next)
+      writeFileSync(doc.file_path, next, 'utf-8')
+    }
+  )
 
   // Field-merge frontmatter write (the single reserved-key chokepoint). The
   // renderer never writes whole-blob frontmatter; it sends only changed keys.

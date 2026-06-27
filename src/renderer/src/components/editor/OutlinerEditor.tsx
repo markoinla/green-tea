@@ -27,9 +27,8 @@ import { TableContextMenu } from './TableContextMenu'
 import { SearchBar } from './SearchBar'
 import { renderSlashSuggestion } from './SlashCommandList'
 import { renderWikiLinkSuggestion } from './WikiLinkList'
-import { PropertiesBlock } from './properties/PropertiesBlock'
 import { DocumentTitle } from './DocumentTitle'
-import { LinkedReferencesPanel } from './LinkedReferencesPanel'
+import { NoteFacetBar } from './NoteFacetBar'
 import { cn } from '@renderer/lib/utils'
 import type { Document } from '../../../../main/database/types'
 
@@ -214,13 +213,15 @@ export function OutlinerEditor({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <SearchBar editor={editor} />
+      {document && editable && (
+        <NoteFacetBar document={document} onNavigateToDoc={onNavigateToDoc} />
+      )}
       <div
         className={cn('flex-1 min-h-0 overflow-auto', document && editable && 'note-has-header')}
       >
         {document && editable && (
           <div className="mx-auto w-full max-w-[56rem] px-16 pt-12">
             <DocumentTitle document={document} />
-            <PropertiesBlock document={document} />
           </div>
         )}
         <TableContextMenu editor={editor}>
@@ -228,9 +229,6 @@ export function OutlinerEditor({
         </TableContextMenu>
         <BubbleMenuBar editor={editor} onQuoteSelection={onQuoteSelection} />
         <TableCellDropdownMenu editor={editor} />
-        {document && editable && (
-          <LinkedReferencesPanel documentId={document.id} onNavigateToDoc={onNavigateToDoc} />
-        )}
       </div>
     </div>
   )

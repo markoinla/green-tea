@@ -104,6 +104,10 @@ interface GreenteaApi {
       id: string,
       changedKeys: Record<string, unknown>
     ): Promise<{ document: Document; rejectedKeys: string[] }>
+    patchHtmlText(
+      id: string,
+      patch: { path: number[]; oldText: string; newHTML: string }
+    ): Promise<void>
     delete(id: string): Promise<void>
   }
   metadata: {

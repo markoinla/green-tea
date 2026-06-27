@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { FileCode, MousePointerSquareDashed, RotateCcw } from 'lucide-react'
-import { formatPickedSelection } from './picker-selection'
+import { FileCode, MousePointerSquareDashed, Pencil, RotateCcw } from 'lucide-react'
+import { toast } from 'sonner'
+import { formatPickedSelection, parseEditCommit, isModeExitMessage } from './picker-selection'
 
 export interface HtmlViewerProps {
   /**
@@ -37,6 +38,7 @@ export interface HtmlViewerProps {
 export function HtmlViewer({ gtFileId, fileName, watchDocId, onQuoteSelection }: HtmlViewerProps) {
   const [reloadKey, setReloadKey] = useState(0)
   const [inspect, setInspect] = useState(false)
+  const [edit, setEdit] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
   useEffect(() => {
@@ -46,9 +48,10 @@ export function HtmlViewer({ gtFileId, fileName, watchDocId, onQuoteSelection }:
     })
   }, [watchDocId])
 
-  // Turn inspect off across a manual reload — the remounted frame reloads dormant.
+  // Turn inspect + edit off across a manual reload — the remounted frame reloads dormant.
   useEffect(() => {
     setInspect(false)
+    setEdit(false)
   }, [reloadKey])
 
   // Tell the (re)loaded frame the current inspect state. The frame is opaque-origin,
@@ -60,10 +63,29 @@ export function HtmlViewer({ gtFileId, fileName, watchDocId, onQuoteSelection }:
     )
   }
 
+  // Mirror of postInspect for edit mode (see the message protocol).
+  const postEdit = (on: boolean) => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { source: 'gt-element-picker', type: 'set-edit', on },
+      '*'
+    )
+  }
+
+  // Inspect and edit are mutually exclusive — turning one on turns the other off.
   const toggleInspect = () => {
     const next = !inspect
+    setEdit(false)
+    postEdit(false)
     setInspect(next)
     postInspect(next)
+  }
+
+  const toggleEdit = () => {
+    const next = !edit
+    setInspect(false)
+    postInspect(false)
+    setEdit(next)
+    postEdit(next)
   }
 
   // Every iframe message is UNTRUSTED — the artifact shares the frame's JS realm with
@@ -73,6 +95,26 @@ export function HtmlViewer({ gtFileId, fileName, watchDocId, onQuoteSelection }:
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.source !== iframeRef.current?.contentWindow) return
+      // The frame self-exited a mode (no-op edit, Escape, commit teardown). Mirror
+      // it so the toggle state can't desync — otherwise the next click looks dead.
+      if (isModeExitMessage(event.data)) {
+        setInspect(false)
+        setEdit(false)
+        return
+      }
+      const commit = parseEditCommit(event.data)
+      if (commit && watchDocId) {
+        window.api.documents.patchHtmlText(watchDocId, commit).catch((err) => {
+          console.error('HTML text edit failed', err)
+          toast.error(err instanceof Error ? err.message : 'Failed to save edit')
+          // Reload the frame so it reflects what's actually on disk — this also
+          // discards the unsaved live edit, so a retry starts from accurate text
+          // (a refused save would otherwise leave stale text that poisons oldText).
+          setReloadKey((k) => k + 1)
+        })
+        setEdit(false)
+        return
+      }
       const formatted = formatPickedSelection(event.data)
       if (!formatted) return
       onQuoteSelection?.(formatted)
@@ -80,7 +122,7 @@ export function HtmlViewer({ gtFileId, fileName, watchDocId, onQuoteSelection }:
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [onQuoteSelection])
+  }, [onQuoteSelection, watchDocId])
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -88,6 +130,20 @@ export function HtmlViewer({ gtFileId, fileName, watchDocId, onQuoteSelection }:
         <FileCode className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <span className="text-xs text-muted-foreground truncate">{fileName ?? 'HTML preview'}</span>
         <div className="flex-1" />
+        {watchDocId && (
+          <button
+            onClick={toggleEdit}
+            className={
+              edit
+                ? 'text-xs text-foreground transition-colors flex items-center gap-1'
+                : 'text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1'
+            }
+            title="Edit text"
+          >
+            <Pencil className="h-3 w-3" />
+            Edit
+          </button>
+        )}
         <button
           onClick={toggleInspect}
           className={
@@ -95,10 +151,10 @@ export function HtmlViewer({ gtFileId, fileName, watchDocId, onQuoteSelection }:
               ? 'text-xs text-foreground transition-colors flex items-center gap-1'
               : 'text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1'
           }
-          title="Inspect element"
+          title="Select element"
         >
           <MousePointerSquareDashed className="h-3 w-3" />
-          Inspect
+          Select
         </button>
         <button
           onClick={() => setReloadKey((k) => k + 1)}
@@ -117,7 +173,10 @@ export function HtmlViewer({ gtFileId, fileName, watchDocId, onQuoteSelection }:
           sandbox="allow-scripts"
           title={fileName ?? 'HTML preview'}
           className="w-full h-full border-0"
-          onLoad={() => postInspect(inspect)}
+          onLoad={() => {
+            postInspect(inspect)
+            postEdit(edit)
+          }}
         />
       </div>
     </div>

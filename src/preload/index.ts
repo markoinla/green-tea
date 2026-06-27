@@ -41,6 +41,10 @@ const greenteaApi = {
     ): Promise<unknown> => ipcRenderer.invoke('db:documents:update', id, data),
     updateFrontmatter: (id: string, changedKeys: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('db:documents:updateFrontmatter', id, changedKeys),
+    patchHtmlText: (
+      id: string,
+      patch: { path: number[]; oldText: string; newHTML: string }
+    ): Promise<void> => ipcRenderer.invoke('db:documents:patchHtmlText', id, patch),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('db:documents:delete', id)
   },
   metadata: {
@@ -308,8 +312,7 @@ const greenteaApi = {
       ipcRenderer.invoke('shell:open-path', filePath),
     showItemInFolder: (filePath: string): Promise<void> =>
       ipcRenderer.invoke('shell:show-item-in-folder', filePath),
-    openExternal: (url: string): Promise<void> =>
-      ipcRenderer.invoke('shell:open-external', url)
+    openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url)
   },
   export: {
     pdf: (args: {

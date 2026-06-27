@@ -403,16 +403,31 @@ export async function createNotesAgentSession(
           args: event.args
         })
         break
-      case 'tool_execution_end':
+      case 'tool_execution_end': {
+        // Surface running token usage as the turn progresses so the UI counter
+        // ticks live instead of snapping to a final value at agent_end.
+        let tokens: { input: number; output: number; total: number } | undefined
+        try {
+          const stats = session.getSessionStats()
+          tokens = {
+            input: stats.tokens.input,
+            output: stats.tokens.output,
+            total: stats.tokens.total
+          }
+        } catch {
+          // stats may not be available yet
+        }
         window.webContents.send('agent:event', {
           type: 'tool_end',
           conversationId,
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           result: event.result,
-          isError: event.isError
+          isError: event.isError,
+          tokens
         })
         break
+      }
       case 'agent_start':
         window.webContents.send('agent:event', { type: 'agent_start', conversationId })
         break

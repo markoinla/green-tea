@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronRight, AlertCircle, Loader2 } from 'lucide-react'
-import { getToolDescription, getToolIcon } from './ChatMessage'
+import { getToolDescription, getToolIcon, summarizeTools } from './ChatMessage'
 
 interface ToolMessage {
   id: string
@@ -27,19 +27,15 @@ export function AgentActivityGroup({
 
   const hasErrors = tools.some((t) => t.toolIsError)
   const hasPending = tools.some((t) => t.toolIsError === undefined)
-  const lastTool = tools[tools.length - 1]
-  let preview = ''
-  if (lastTool) {
-    const desc = getToolDescription(lastTool.toolName, lastTool.toolArgs, resolveDocName)
-    preview =
-      tools.length > 1
-        ? `${tools.length} actions — ${desc.length > 30 ? desc.slice(0, 30) + '...' : desc}`
-        : desc.length > 40
-          ? desc.slice(0, 40) + '...'
-          : desc
-  } else if (thinking) {
-    preview = thinking.length > 40 ? thinking.slice(0, 40) + '...' : thinking
-  }
+  // Only settled tools roll up into the summary. The in-flight one (if any) lives
+  // in the ephemeral status line at the bottom of the chat, so it doesn't show
+  // here twice.
+  const settled = tools.filter((t) => t.toolIsError !== undefined)
+  const summaries = summarizeTools(settled)
+
+  // A lone in-flight tool with nothing settled and no thinking is fully covered
+  // by the bottom status line — render nothing here yet.
+  if (summaries.length === 0 && !thinking) return null
 
   return (
     <div className="my-1 rounded-lg bg-muted/40 border border-border/50">
@@ -57,12 +53,22 @@ export function AgentActivityGroup({
               : 'Thinking'}
           </span>
         ) : (
-          <>
+          <span className="flex items-center gap-x-2.5 gap-y-0.5 min-w-0 flex-wrap">
+            {summaries.map((s, i) => {
+              const Icon = s.icon
+              return (
+                <span key={i} className="flex items-center gap-1 text-muted-foreground/80">
+                  <Icon className="h-3 w-3 flex-shrink-0" />
+                  {s.label}
+                </span>
+              )
+            })}
+            {summaries.length === 0 && thinking && <span>Thinking</span>}
+            {hasErrors && <AlertCircle className="h-3 w-3 text-destructive/70 flex-shrink-0" />}
             {hasPending && (
               <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/60 flex-shrink-0" />
             )}
-            <span className="truncate min-w-0">{preview}</span>
-          </>
+          </span>
         )}
       </button>
       {expanded && (

@@ -11,7 +11,7 @@ import {
   getVaultDirsByWorkspace,
   type ReindexResult
 } from './documents-service'
-import { consumeSelfWrite } from './self-write'
+import { consumeSelfWrite, hasSelfWrite } from './self-write'
 import { kindForExt } from './artifact-kinds'
 
 /**
@@ -131,10 +131,11 @@ function handlePath(abs: string): void {
   // Self-write short-circuit (optimization): if the bytes on disk match a write
   // we just made, drop the event. Content-hash keyed, so it survives any FS
   // latency. reindexFile's content-diff is the backstop if this ever misses.
-  // Notes only — the app NEVER writes artifacts (artifact reconcile is read-only,
-  // no echo loop), so there is nothing to suppress, and this avoids reading a
-  // multi-megabyte artifact as utf-8 on every event.
-  if (existsSync(abs) && kindForExt(abs) === 'note') {
+  // Gated on a pending registry entry (hasSelfWrite) so we only read the file —
+  // possibly a multi-megabyte artifact — when there's actually a self-write to
+  // confirm. Covers notes (every save) AND artifacts (inline HTML text edits,
+  // which write the .html directly); external edits have no entry and skip this.
+  if (existsSync(abs) && hasSelfWrite(abs)) {
     try {
       const raw = readFileSync(abs, 'utf-8')
       if (consumeSelfWrite(abs, raw)) return

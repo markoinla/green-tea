@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
-  ChevronRight,
   Plus,
   Trash2,
   Calendar,
@@ -11,10 +10,8 @@ import {
   ToggleLeft,
   Filter
 } from 'lucide-react'
-import type { Document } from '../../../../../main/database/types'
 import type { PropertyType } from '../../../../../main/vault/metadata'
 import { cn } from '@renderer/lib/utils'
-import { useMetadataFilter } from '@renderer/contexts/MetadataFilterContext'
 import { Input } from '@renderer/components/ui/input'
 import { Switch } from '@renderer/components/ui/switch'
 import { Button } from '@renderer/components/ui/button'
@@ -27,18 +24,17 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { TagChipInput } from './TagChipInput'
 import {
-  buildPropertyRows,
   valueToInputString,
   valueToBoolean,
   toStringArray,
   inputStringToValue,
   arrayToValue,
   validatePropertyName,
-  defaultValueForType,
   PROPERTY_TYPES,
   READONLY_RESERVED_KEYS,
   type PropertyRow
 } from './properties-model'
+import type { PropertyData } from './usePropertyData'
 
 const TYPE_ICON: Record<PropertyType, React.ComponentType<{ className?: string }>> = {
   text: Type,
@@ -49,152 +45,46 @@ const TYPE_ICON: Record<PropertyType, React.ComponentType<{ className?: string }
   tags: Tags
 }
 
-const COLLAPSE_SETTING_KEY = 'propertiesCollapsed'
-
-interface PropertiesBlockProps {
-  document: Document
-}
-
 /**
- * Inline, collapsible Properties editor rendered as a React SIBLING above the
- * editor content (NOT a TipTap node). All writes go through
- * `db:documents:updateFrontmatter` (field-merge). Collapse state is a GLOBAL UI
- * preference in `settings` (never written to the .md file, M7).
+ * The Properties editor body, rendered inside the note facet bar's inline panel.
+ * Holds no open/close state of its own — the bar owns that. All writes go
+ * through `db:documents:updateFrontmatter` (field-merge) via {@link PropertyData}.
  */
-export function PropertiesBlock({ document: doc }: PropertiesBlockProps) {
-  // Expanded by default (Obsidian-style); the global preference overrides this
-  // once the user toggles it.
-  const [collapsed, setCollapsed] = useState(false)
-  const [types, setTypes] = useState<{ key: string; type: PropertyType }[]>([])
-  const workspaceId = doc.workspace_id
-  const frontmatter = useMemo(() => doc.frontmatter ?? {}, [doc.frontmatter])
-  const { setFilter } = useMetadataFilter()
-
-  // Load + subscribe to the global collapse preference.
-  useEffect(() => {
-    let active = true
-    window.api.settings.get(COLLAPSE_SETTING_KEY).then((v) => {
-      if (active && v !== null) setCollapsed(v !== 'false')
-    })
-    const unsub = window.api.onSettingsChanged(() => {
-      window.api.settings.get(COLLAPSE_SETTING_KEY).then((v) => {
-        if (v !== null) setCollapsed(v !== 'false')
-      })
-    })
-    return () => {
-      active = false
-      unsub()
-    }
-  }, [])
-
-  const refreshTypes = useCallback(() => {
-    if (!workspaceId) return
-    window.api.metadata.getTypes(workspaceId).then(setTypes)
-  }, [workspaceId])
-
-  useEffect(() => {
-    refreshTypes()
-  }, [refreshTypes, doc.frontmatter])
-
-  const rows = useMemo(() => buildPropertyRows(frontmatter, types), [frontmatter, types])
-  const existingKeys = useMemo(() => rows.map((r) => r.key), [rows])
-
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev
-      window.api.settings.set(COLLAPSE_SETTING_KEY, String(next))
-      return next
-    })
-  }, [])
-
-  // Field-merge write: a single changed key (null clears it on the main side).
-  const writeKey = useCallback(
-    (key: string, value: unknown) => {
-      window.api.documents.updateFrontmatter(doc.id, { [key]: value })
-    },
-    [doc.id]
-  )
-
-  const setType = useCallback(
-    (key: string, type: PropertyType) => {
-      if (!workspaceId) return
-      window.api.metadata.setType(workspaceId, key, type).then(refreshTypes)
-    },
-    [workspaceId, refreshTypes]
-  )
-
-  const tagSuggest = useCallback(
-    (prefix: string) => window.api.metadata.tagSuggest(workspaceId, prefix),
-    [workspaceId]
-  )
-
-  // Click a tag chip / property value -> filter the note list (Phase 4). The
-  // value is passed as-typed; the main side folds it for the case-insensitive
-  // equality match on `value_fold`.
-  const filterByValue = useCallback(
-    (key: string, value: string) => {
-      if (!workspaceId || value.length === 0) return
-      setFilter({ workspaceId, key, value })
-    },
-    [workspaceId, setFilter]
-  )
+export function PropertiesPanel({ data }: { data: PropertyData }) {
+  const { rows, existingKeys, frontmatter, workspaceId, writeKey, setType, addProperty } = data
 
   return (
-    <div className="my-5 py-2">
-      <button
-        type="button"
-        onClick={toggleCollapsed}
-        className="group relative flex items-center gap-1.5 text-[0.95rem] font-semibold text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ChevronRight
-          className={cn(
-            'absolute -left-5 size-3.5 opacity-0 transition-[transform,opacity] group-hover:opacity-100',
-            !collapsed && 'rotate-90'
-          )}
-        />
-        <span>Properties</span>
-        {collapsed && rows.length > 0 && (
-          <span className="text-muted-foreground/60 font-normal">({rows.length})</span>
-        )}
-      </button>
-
-      {!collapsed && (
-        <div className="mt-2.5 flex flex-col gap-1.5">
-          {/* title is rendered as the heading above (DocumentTitle), not as a row. */}
-          {READONLY_RESERVED_KEYS.map((key) => {
-            const raw = frontmatter[key]
-            return (
-              <ReadonlyRow
-                key={key}
-                label={key}
-                icon={Calendar}
-                value={raw !== undefined ? formatReadonlyDate(String(raw)) : '—'}
-              />
-            )
-          })}
-
-          {rows.map((row) => (
-            <PropertyRowEditor
-              key={row.key}
-              row={row}
-              onChangeValue={(v) => writeKey(row.key, v)}
-              onRemove={() => writeKey(row.key, null)}
-              onSetType={(t) => setType(row.key, t)}
-              onFilter={(value) => filterByValue(row.key, value)}
-              tagSuggest={tagSuggest}
-            />
-          ))}
-
-          <AddPropertyControl
-            existingKeys={existingKeys}
-            workspaceId={workspaceId}
-            onAdd={(key, type) => {
-              if (type !== 'text') setType(key, type)
-              writeKey(key, defaultValueForType(type))
-            }}
+    <div className="flex flex-col gap-1.5">
+      {/* title is rendered as the heading above (DocumentTitle), not as a row. */}
+      {READONLY_RESERVED_KEYS.map((key) => {
+        const raw = frontmatter[key]
+        return (
+          <ReadonlyRow
+            key={key}
+            label={key}
+            icon={Calendar}
+            value={raw !== undefined ? formatReadonlyDate(String(raw)) : '—'}
           />
-        </div>
-      )}
+        )
+      })}
+
+      {rows.map((row) => (
+        <PropertyRowEditor
+          key={row.key}
+          row={row}
+          onChangeValue={(v) => writeKey(row.key, v)}
+          onRemove={() => writeKey(row.key, null)}
+          onSetType={(t) => setType(row.key, t)}
+          onFilter={(value) => data.filterByValue(row.key, value)}
+          tagSuggest={data.tagSuggest}
+        />
+      ))}
+
+      <AddPropertyControl
+        existingKeys={existingKeys}
+        workspaceId={workspaceId}
+        onAdd={addProperty}
+      />
     </div>
   )
 }
@@ -360,7 +250,7 @@ function PropertyWidget({
 /**
  * A scalar property input (text/number/date) with a click-to-filter affordance:
  * a small Filter button appears on hover when the field holds a value, setting
- * the note-list filter to that value (Phase 4).
+ * the note-list filter to that value.
  */
 function ScalarWidget({
   type,

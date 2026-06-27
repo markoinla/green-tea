@@ -226,6 +226,11 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
             })
           }
 
+          // Running token usage — keeps the live counter ticking mid-turn.
+          if (event.tokens) {
+            dispatchTo(convId, { type: 'set_tokens', tokens: event.tokens })
+          }
+
           // Edit approval UI
           if (event.toolName === 'notes_propose_edit' && !event.isError && event.result?.details) {
             const details = event.result.details

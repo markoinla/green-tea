@@ -52,6 +52,15 @@ export function consumeSelfWrite(absPath: string, currentContents: string): bool
   return false
 }
 
+/**
+ * Cheap existence check — does NOT consume the entry. Lets a caller skip an
+ * expensive read (e.g. a multi-megabyte artifact) when there is no pending
+ * self-write to verify, then call consumeSelfWrite only on a hit.
+ */
+export function hasSelfWrite(absPath: string): boolean {
+  return registry.has(normKey(absPath))
+}
+
 /** Test/lifecycle helper. */
 export function clearSelfWriteRegistry(): void {
   registry.clear()

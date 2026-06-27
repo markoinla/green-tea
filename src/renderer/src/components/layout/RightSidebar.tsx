@@ -407,6 +407,7 @@ export function RightSidebar({
                   ? streamingStartTimeRef.current.get(activeConversationId)
                   : undefined
               }
+              tokens={activeState.tokens}
               subagentEventsRef={subagentEventsRef}
               subagentEventVersion={subagentEventVersion}
               activeSubagentToolCallId={activeSubagentToolCallId}
