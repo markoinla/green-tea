@@ -248,6 +248,7 @@ interface GreenteaApi {
   shell: {
     openPath(filePath: string): Promise<string>
     showItemInFolder(filePath: string): Promise<void>
+    openExternal(url: string): Promise<void>
   }
   export: {
     pdf(args: { markdown: string; title: string }): Promise<{ saved: boolean; filePath?: string }>
@@ -260,9 +261,11 @@ interface GreenteaApi {
     }): Promise<{ success: boolean; issue_url?: string; error?: string }>
   }
   share: {
-    publish(documentId: string): Promise<{ url: string; slug: string }>
+    publish(documentId: string): Promise<{ url: string; slug: string; expiresAt: string }>
     unpublish(documentId: string): Promise<void>
-    status(documentId: string): Promise<{ shared: boolean; url?: string; slug?: string }>
+    status(
+      documentId: string
+    ): Promise<{ shared: boolean; url?: string; slug?: string; expiresAt?: string }>
   }
   workspaceFiles: {
     list(workspaceId: string): Promise<WorkspaceFile[]>

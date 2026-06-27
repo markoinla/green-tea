@@ -307,7 +307,9 @@ const greenteaApi = {
     openPath: (filePath: string): Promise<string> =>
       ipcRenderer.invoke('shell:open-path', filePath),
     showItemInFolder: (filePath: string): Promise<void> =>
-      ipcRenderer.invoke('shell:show-item-in-folder', filePath)
+      ipcRenderer.invoke('shell:show-item-in-folder', filePath),
+    openExternal: (url: string): Promise<void> =>
+      ipcRenderer.invoke('shell:open-external', url)
   },
   export: {
     pdf: (args: {
@@ -324,11 +326,13 @@ const greenteaApi = {
       ipcRenderer.invoke('bug-report:submit', data)
   },
   share: {
-    publish: (documentId: string): Promise<{ url: string; slug: string }> =>
+    publish: (documentId: string): Promise<{ url: string; slug: string; expiresAt: string }> =>
       ipcRenderer.invoke('share:publish', documentId),
     unpublish: (documentId: string): Promise<void> =>
       ipcRenderer.invoke('share:unpublish', documentId),
-    status: (documentId: string): Promise<{ shared: boolean; url?: string; slug?: string }> =>
+    status: (
+      documentId: string
+    ): Promise<{ shared: boolean; url?: string; slug?: string; expiresAt?: string }> =>
       ipcRenderer.invoke('share:status', documentId)
   },
   workspaceFiles: {

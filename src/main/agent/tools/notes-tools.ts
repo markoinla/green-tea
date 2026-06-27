@@ -27,6 +27,7 @@ import { createWebSearchTool } from './web-search'
 import { createWebFetchTool } from './web-fetch'
 import { createSubagentTool } from '../subagent/tool'
 import { createScheduledTaskTool } from './scheduled-task-tool'
+import { createUpdateShareTool } from './share-tool'
 import { createMcpProxyTool } from '../../mcp'
 import {
   createCalendarTools,
@@ -488,6 +489,7 @@ export function createNotesTools(
     notesUpdateWorkspaceDescTool,
     notesUpdateWorkspaceMemoryTool,
     workspaceAddFileTool,
+    createUpdateShareTool(db),
     webSearchTool,
     webFetchTool,
     subagentTool

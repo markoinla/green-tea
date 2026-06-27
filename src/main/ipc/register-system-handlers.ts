@@ -22,6 +22,13 @@ export function registerSystemHandlers({ db, mainWindow }: IpcHandlerContext): v
     shell.showItemInFolder(filePath)
   })
 
+  ipcMain.handle('shell:open-external', async (_event, url: string) => {
+    // Restrict to web URLs so a renderer can't drive the OS into opening
+    // arbitrary protocol handlers (file:, etc.).
+    if (!/^https?:\/\//i.test(url)) return
+    await shell.openExternal(url)
+  })
+
   ipcMain.handle('dialog:pick-folder', async () => {
     const window = getMainWindow(mainWindow)
     if (!window) return null

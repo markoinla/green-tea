@@ -22,14 +22,19 @@ export interface ShareRow {
   updated_at: string
 }
 
-/** The published share for a document's stable key, or null if not shared. */
+/**
+ * The published share for a document's stable key, or null if not shared.
+ * `updated_at` is the last publish/re-publish time, which the share handler uses
+ * to derive the expiry instant (the worker's R2 lifecycle deletes shares ~30
+ * days after their last write).
+ */
 export function getShareByDoc(
   db: Database.Database,
   docKey: string
-): { slug: string; url: string; type: ShareType } | null {
+): { slug: string; url: string; type: ShareType; updated_at: string } | null {
   const row = db
-    .prepare('SELECT slug, url, type FROM shares WHERE doc_key = ?')
-    .get(docKey) as { slug: string; url: string; type: ShareType } | undefined
+    .prepare('SELECT slug, url, type, updated_at FROM shares WHERE doc_key = ?')
+    .get(docKey) as { slug: string; url: string; type: ShareType; updated_at: string } | undefined
   return row ?? null
 }
 
