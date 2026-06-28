@@ -214,7 +214,7 @@ export function OutlinerEditor({
     <div className="flex flex-col flex-1 min-h-0">
       <SearchBar editor={editor} />
       {document && editable && (
-        <NoteFacetBar document={document} onNavigateToDoc={onNavigateToDoc} />
+        <NoteFacetBar document={document} editor={editor} onNavigateToDoc={onNavigateToDoc} />
       )}
       <div
         className={cn('flex-1 min-h-0 overflow-auto', document && editable && 'note-has-header')}

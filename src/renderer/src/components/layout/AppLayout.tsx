@@ -18,7 +18,7 @@ import { isFileTabId } from '@renderer/lib/tab-ids'
 import type { DocumentVersion } from '../../../../main/database/types'
 
 const MIN_SIDEBAR_WIDTH = 200
-const MAX_SIDEBAR_WIDTH = 480
+const MAX_SIDEBAR_WIDTH = 700
 const HOVER_LEAVE_DELAY = 300
 
 interface AppLayoutProps {

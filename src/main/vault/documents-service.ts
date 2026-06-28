@@ -294,6 +294,79 @@ export function getBacklinks(db: Database.Database, docId: string): Backlink[] {
   return out
 }
 
+/** An outgoing wiki-link: a note this note points at via `[[wiki-link]]`. */
+export interface OutgoingLink {
+  /** Resolved target document id, or null when the link is broken (no such note). */
+  id: string | null
+  /** The resolved note's title, or the authored label when unresolved. */
+  title: string
+  /** Plain text of the block that holds the link, truncated for display. */
+  snippet: string
+}
+
+/**
+ * Find every note `docId` links to via a `[[wiki-link]]`. Labels are resolved to
+ * titles case-insensitively against the workspace (same key as
+ * `resolveWikiLinks`), so a link still resolves even if the stored `docId` attr
+ * is stale. Unresolved labels are returned with `id: null` (a broken link).
+ * Deduped by label, keeping the first containing block as the snippet, sorted by
+ * title.
+ */
+export function getOutgoingLinks(db: Database.Database, docId: string): OutgoingLink[] {
+  const source = getRow(db, docId)
+  if (!source || !source.content) return []
+
+  let doc: TTDoc
+  try {
+    doc = JSON.parse(source.content) as TTDoc
+  } catch {
+    return []
+  }
+
+  // lower(title) -> resolved id + canonical title; first-writer-wins on collisions.
+  const titleMap = new Map<string, { id: string; title: string }>()
+  const rows = db
+    .prepare('SELECT id, title FROM documents WHERE workspace_id = ? AND id != ?')
+    .all(source.workspace_id, docId) as { id: string; title: string }[]
+  for (const r of rows) {
+    const k = r.title.trim().toLowerCase()
+    if (k && !titleMap.has(k)) titleMap.set(k, { id: r.id, title: r.title })
+  }
+
+  // Collect labels in document order, remembering the block each first appears in.
+  const order: string[] = []
+  const blockByKey = new Map<string, TTNode>()
+  for (const block of doc.content) {
+    const collect = (node: TTNode): void => {
+      if (node.type === 'wikiLink') {
+        const label = ((node.attrs?.label as string) ?? '').trim()
+        const key = label.toLowerCase()
+        if (key && !blockByKey.has(key)) {
+          blockByKey.set(key, block)
+          order.push(label)
+        }
+        return
+      }
+      if (node.content) for (const child of node.content) collect(child)
+    }
+    collect(block)
+  }
+
+  const out: OutgoingLink[] = []
+  for (const label of order) {
+    const key = label.toLowerCase()
+    const resolved = titleMap.get(key)
+    const block = blockByKey.get(key)!
+    const text = nodeText(block).trim().replace(/\s+/g, ' ')
+    const snippet =
+      text.length > BACKLINK_SNIPPET_MAX ? `${text.slice(0, BACKLINK_SNIPPET_MAX)}…` : text
+    out.push({ id: resolved?.id ?? null, title: resolved?.title ?? label, snippet })
+  }
+
+  out.sort((a, b) => a.title.localeCompare(b.title))
+  return out
+}
+
 export interface PropertyTypeEntry {
   key: string
   type: PropertyType

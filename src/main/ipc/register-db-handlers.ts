@@ -177,6 +177,10 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     return documents.getBacklinks(db, id)
   })
 
+  ipcMain.handle('db:documents:outgoingLinks', (_event, id: string) => {
+    return documents.getOutgoingLinks(db, id)
+  })
+
   ipcMain.handle(
     'db:documents:create',
     (

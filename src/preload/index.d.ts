@@ -12,7 +12,7 @@ import type {
   ConversationMessage
 } from '../main/database/types'
 import type { PropertyType } from '../main/vault/metadata'
-import type { PropertyTypeEntry, Backlink } from '../main/vault/documents-service'
+import type { PropertyTypeEntry, Backlink, OutgoingLink } from '../main/vault/documents-service'
 
 interface SkillInfo {
   name: string
@@ -90,6 +90,7 @@ interface GreenteaApi {
     search(query: string): Promise<(Document & { workspace_name: string })[]>
     get(id: string): Promise<Document | undefined>
     backlinks(id: string): Promise<Backlink[]>
+    outgoingLinks(id: string): Promise<OutgoingLink[]>
     create(data: {
       title: string
       workspace_id?: string

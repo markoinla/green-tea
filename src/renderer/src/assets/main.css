@@ -76,7 +76,7 @@
   margin-right: auto;
   font-size: var(--editor-font-size, 0.875rem);
   font-family: var(--editor-body-font, 'Inter', sans-serif);
-  line-height: 1.7;
+  line-height: 1.6;
   color: var(--foreground);
 }
 
@@ -104,29 +104,31 @@
   margin-top: 0;
 }
 
+/* Heading top-margins use a uniform-ish em multiplier so that, because em
+   scales with each heading's own font-size, the absolute space-above cascades
+   by rank (h1 breaks hardest, h4 softest). margin-top ≈ 2.5–3× margin-bottom
+   keeps each heading grouped with the content beneath it. */
 .ProseMirror h1 {
-  font-size: 2.25em;
-  margin-top: 0.8em;
-  margin-bottom: 0.4em;
+  font-size: 1.85em;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
 }
 
 .ProseMirror h2 {
-  font-size: 1.75em;
-  margin-top: 0.9em;
-  margin-bottom: 0.4em;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.3em;
+  font-size: 1.5em;
+  margin-top: 1.6em;
+  margin-bottom: 0.5em;
 }
 
 .ProseMirror h3 {
-  font-size: 1.375em;
-  margin-top: 1em;
+  font-size: 1.25em;
+  margin-top: 1.4em;
   margin-bottom: 0.4em;
 }
 
 .ProseMirror h4 {
-  font-size: 1.125em;
-  margin-top: 1.1em;
+  font-size: 1.05em;
+  margin-top: 1.3em;
   margin-bottom: 0.4em;
 }
 

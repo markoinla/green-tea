@@ -56,7 +56,7 @@ export function DocumentTitle({ document: doc }: DocumentTitleProps) {
           e.currentTarget.blur()
         }
       }}
-      className="w-full resize-none overflow-hidden border-none bg-transparent p-0 font-bold tracking-tight text-foreground outline-none placeholder:text-muted-foreground/40"
+      className="w-full resize-none overflow-hidden border-none bg-transparent p-0 font-extrabold tracking-tight text-foreground opacity-60 outline-none placeholder:text-muted-foreground/40"
       style={{
         fontSize: '2.1rem',
         lineHeight: 1.15,

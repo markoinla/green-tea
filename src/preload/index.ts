@@ -29,6 +29,8 @@ const greenteaApi = {
     search: (query: string): Promise<unknown[]> => ipcRenderer.invoke('db:documents:search', query),
     get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:documents:get', id),
     backlinks: (id: string): Promise<unknown[]> => ipcRenderer.invoke('db:documents:backlinks', id),
+    outgoingLinks: (id: string): Promise<unknown[]> =>
+      ipcRenderer.invoke('db:documents:outgoingLinks', id),
     create: (data: {
       title: string
       workspace_id?: string

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { SlidersHorizontal, Link2 } from 'lucide-react'
+import type { Editor } from '@tiptap/react'
 import type { Document } from '../../../../main/database/types'
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 import { usePropertyData } from './properties/usePropertyData'
 import { PropertiesPanel } from './properties/PropertiesPanel'
 import { useBacklinks } from './backlinks/useBacklinks'
+import { useOutgoingLinks } from './backlinks/useOutgoingLinks'
 import { BacklinksPanel } from './backlinks/BacklinksPanel'
 
 // Which facet tab is selected lives in the global `settings` table (a UI
@@ -17,6 +19,8 @@ type OpenFacet = Facet | ''
 
 interface NoteFacetBarProps {
   document: Document
+  /** The note's editor, used to derive the live word count. */
+  editor: Editor | null
   /** Navigate to a document when a backlink is clicked. */
   onNavigateToDoc?: (docId: string) => void
 }
@@ -26,51 +30,56 @@ interface NoteFacetBarProps {
  * below it (Properties, Linked references); the tabs carry counts so you can see
  * what a note has at a glance, the panel holds the actual content.
  */
-export function NoteFacetBar({ document: doc, onNavigateToDoc }: NoteFacetBarProps) {
+export function NoteFacetBar({ document: doc, editor, onNavigateToDoc }: NoteFacetBarProps) {
   const propertyData = usePropertyData(doc)
   const backlinks = useBacklinks(doc.id)
-  const hasBacklinks = backlinks.length > 0
+  const outgoingLinks = useOutgoingLinks(doc.id)
+  const linkCount = backlinks.length + outgoingLinks.length
+  const wordCount = useWordCount(editor, doc.id)
 
   const [active, setActive] = useFacetPreference(ACTIVE_FACET_KEY, 'properties')
-
-  // The Links tab only exists when there are backlinks; collapse if it was the
-  // persisted choice but this note has none.
-  const effectiveActive: OpenFacet = active === 'links' && !hasBacklinks ? '' : active
 
   // We drive open/close entirely from onClick (clicking the active tab collapses
   // everything) and neutralize Radix's own activation with a no-op onValueChange,
   // so its click handling can't reopen what we just closed.
-  const toggle = (facet: Facet) => setActive(effectiveActive === facet ? '' : facet)
+  const toggle = (facet: Facet) => setActive(active === facet ? '' : facet)
 
   return (
     <div className="shrink-0 border-b border-border/60 bg-background">
       {/* Left-aligned to the editor pane (not the centered note column). */}
       <div className="px-3">
-        <Tabs value={effectiveActive} onValueChange={() => {}} className="gap-0">
-          <TabsList variant="line" className="h-9 gap-3">
-            <TabsTrigger value="properties" onClick={() => toggle('properties')}>
-              <SlidersHorizontal />
-              Properties
-              {propertyData.rows.length > 0 && <FacetCount n={propertyData.rows.length} />}
-            </TabsTrigger>
-            {/* Hidden until the note has references, keeping clean notes uncluttered. */}
-            {hasBacklinks && (
+        {/* Tabs on the left, word count pinned to the right of the same row. */}
+        <div className="flex items-center justify-between">
+          <Tabs value={active} onValueChange={() => {}} className="gap-0">
+            <TabsList variant="line" className="h-9 gap-3">
+              <TabsTrigger value="properties" onClick={() => toggle('properties')}>
+                <SlidersHorizontal />
+                Properties
+                {propertyData.rows.length > 0 && <FacetCount n={propertyData.rows.length} />}
+              </TabsTrigger>
               <TabsTrigger value="links" onClick={() => toggle('links')}>
                 <Link2 />
                 Links
-                <FacetCount n={backlinks.length} />
+                {linkCount > 0 && <FacetCount n={linkCount} />}
               </TabsTrigger>
-            )}
-          </TabsList>
-        </Tabs>
+            </TabsList>
+          </Tabs>
+          <span className="text-xs text-muted-foreground/70 tabular-nums">
+            {wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}
+          </span>
+        </div>
 
         {/* The open panel pushes the editor down (inline) but is capped so a long
             list scrolls within the bar instead of swallowing the editor. */}
-        {effectiveActive !== '' && (
+        {active !== '' && (
           <div className="max-h-[40vh] overflow-auto pb-3 pt-2">
-            {effectiveActive === 'properties' && <PropertiesPanel data={propertyData} />}
-            {effectiveActive === 'links' && (
-              <BacklinksPanel backlinks={backlinks} onNavigateToDoc={onNavigateToDoc} />
+            {active === 'properties' && <PropertiesPanel data={propertyData} />}
+            {active === 'links' && (
+              <BacklinksPanel
+                backlinks={backlinks}
+                outgoingLinks={outgoingLinks}
+                onNavigateToDoc={onNavigateToDoc}
+              />
             )}
           </div>
         )}
@@ -81,6 +90,36 @@ export function NoteFacetBar({ document: doc, onNavigateToDoc }: NoteFacetBarPro
 
 function FacetCount({ n }: { n: number }) {
   return <span className="text-muted-foreground/70 tabular-nums font-normal">{n}</span>
+}
+
+/** Count whitespace-separated tokens in the editor's plain text. */
+function countWords(text: string): number {
+  const tokens = text.trim().match(/\S+/g)
+  return tokens ? tokens.length : 0
+}
+
+/**
+ * Live word count for the editor's text. Recomputes on every edit, and on
+ * document switch — the editor swaps content with `emitUpdate: false`, so the
+ * `docId` dependency is what re-reads the new note's text.
+ */
+function useWordCount(editor: Editor | null, docId: string): number {
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    if (!editor) {
+      setCount(0)
+      return
+    }
+    const update = () => setCount(countWords(editor.getText()))
+    update()
+    editor.on('update', update)
+    return () => {
+      editor.off('update', update)
+    }
+  }, [editor, docId])
+
+  return count
 }
 
 /**

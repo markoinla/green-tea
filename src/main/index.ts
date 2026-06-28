@@ -243,7 +243,14 @@ app.whenReady().then(() => {
     if (isQuitting) return
     if (process.platform !== 'darwin') return
     event.preventDefault()
-    mainWindow.hide()
+    // Hiding a window that's in its own macOS fullscreen Space leaves a black
+    // screen — exit fullscreen first, then hide once the transition finishes.
+    if (mainWindow.isFullScreen()) {
+      mainWindow.once('leave-full-screen', () => mainWindow.hide())
+      mainWindow.setFullScreen(false)
+    } else {
+      mainWindow.hide()
+    }
     if (countEnabledScheduledTasks(db) > 0) ensureResident()
   })
 
