@@ -346,6 +346,7 @@ interface GreenteaApi {
   onTaskCompleted(
     callback: (data: { taskId: string; name: string; status: string; error?: string }) => void
   ): () => void
+  onSchedulerOpenRun(callback: (data: { taskId: string }) => void): () => void
   theme: {
     get(): Promise<ThemeData>
     save(data: Partial<ThemeData>): Promise<void>

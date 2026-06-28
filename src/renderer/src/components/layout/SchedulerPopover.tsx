@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactElement } from 'react'
+import { useState, useEffect, useMemo, useRef, type ReactElement } from 'react'
 import { Clock, Play, Pencil, Trash2, Check, Loader2 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -47,12 +47,33 @@ export function SchedulerPopover({ workspaceId }: SchedulerPopoverProps): ReactE
 
   const [now, setNow] = useState(Date.now)
   const [editingTask, setEditingTask] = useState<ScheduledTaskView | null>(null)
+  const [open, setOpen] = useState(false)
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
 
   // Refresh relative timestamps every 30 seconds
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000)
     return (): void => clearInterval(id)
   }, [])
+
+  // Clicking a background task notification makes main send 'scheduler:open-run'.
+  // Open this panel and highlight the run's task. Only tasks in the currently
+  // selected workspace are listed here, so a task from another workspace just
+  // opens the panel without a highlight (see notes — no cross-workspace nav yet).
+  useEffect(() => {
+    const unsub = window.api.onSchedulerOpenRun(({ taskId }) => {
+      setOpen(true)
+      setFocusedTaskId(taskId)
+    })
+    return unsub
+  }, [])
+
+  // Clear the highlight shortly after focusing so it reads as a transient cue.
+  useEffect(() => {
+    if (!focusedTaskId) return
+    const id = setTimeout(() => setFocusedTaskId(null), 3000)
+    return (): void => clearTimeout(id)
+  }, [focusedTaskId])
 
   const hasRecentRun = useMemo(
     () =>
@@ -69,7 +90,7 @@ export function SchedulerPopover({ workspaceId }: SchedulerPopoverProps): ReactE
   return (
     <>
       <Tooltip delayDuration={500}>
-        <Popover>
+        <Popover open={open} onOpenChange={setOpen}>
           <TooltipTrigger asChild>
             <PopoverTrigger asChild>
               <SidebarMenuButton size="sm">
@@ -116,6 +137,7 @@ export function SchedulerPopover({ workspaceId }: SchedulerPopoverProps): ReactE
                       task={task}
                       now={now}
                       isRunning={runningIds.has(task.id)}
+                      isFocused={focusedTaskId === task.id}
                       onToggle={toggle}
                       onEdit={setEditingTask}
                       onDelete={remove}
@@ -140,6 +162,7 @@ function TaskItem({
   task,
   now,
   isRunning,
+  isFocused,
   onToggle,
   onEdit,
   onDelete,
@@ -148,12 +171,19 @@ function TaskItem({
   task: ScheduledTaskView
   now: number
   isRunning: boolean
+  isFocused: boolean
   onToggle: (id: string, enabled: boolean) => Promise<void>
   onEdit: (task: ScheduledTaskView) => void
   onDelete: (id: string) => Promise<void>
   onRunNow: (id: string) => Promise<void>
 }): ReactElement {
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Scroll into view when this task is the target of a background-run notification.
+  useEffect(() => {
+    if (isFocused) ref.current?.scrollIntoView({ block: 'nearest' })
+  }, [isFocused])
 
   const isEnabled = task.enabled === 1
 
@@ -167,7 +197,10 @@ function TaskItem({
   }
 
   return (
-    <div className="rounded-md hover:bg-accent/50 p-2 m-1 group/task">
+    <div
+      ref={ref}
+      className={`rounded-md hover:bg-accent/50 p-2 m-1 group/task ${isFocused ? 'ring-1 ring-ring bg-accent/50' : ''}`}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">

@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import { execSync } from 'child_process'
-import { app, shell, BrowserWindow, protocol, screen, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, protocol, screen, ipcMain, Notification } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { getDatabase } from './database/connection'
@@ -18,6 +18,9 @@ import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
 import { getMcpManager } from './mcp'
 import { pruneVersions } from './database/repositories/document-versions'
+import { countEnabledScheduledTasks } from './database/repositories/scheduled-tasks'
+import { getSetting, setSetting } from './database/repositories/settings'
+import { createTray } from './tray'
 import {
   ensureThemeFile,
   migrateAppearanceToTheme,
@@ -69,6 +72,10 @@ protocol.registerSchemesAsPrivileged([
   },
   GT_FILE_PRIVILEGE
 ])
+
+// Set true on a genuine quit (Cmd-Q / tray Quit / app-menu Quit) so the
+// close interceptor allows teardown instead of hiding the window.
+let isQuitting = false
 
 function createWindow(): BrowserWindow {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize
@@ -203,12 +210,51 @@ app.whenReady().then(() => {
   registerIpcHandlers(db, mainWindow)
   initAutoUpdater(mainWindow)
 
+  // Go resident in the menu bar: create the tray (lazily, on first hide) and,
+  // the first time only, post a one-time notice so the user knows the app is
+  // still running in the background.
+  const ensureResident = (): void => {
+    createTray(
+      () => mainWindow.show(),
+      () => {
+        isQuitting = true
+        app.quit()
+      }
+    )
+    if (getSetting(db, 'residentNoticeShown') !== 'true') {
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Green Tea is still running',
+          body: 'Scheduled tasks keep working in the background. Quit anytime from the menu-bar icon.'
+        }).show()
+      }
+      setSetting(db, 'residentNoticeShown', 'true')
+    }
+  }
+
+  // Close interceptor: on macOS, when we're not really quitting, always hide the
+  // window instead of closing it so the single window is never destroyed (a
+  // recreated window would be orphaned — no close interceptor, IPC, menu, or
+  // scheduler wiring). We only go resident (tray + one-time notice) when there
+  // is ≥1 enabled scheduled task that needs the app to keep running in the
+  // background; with 0 tasks the window simply hides and a dock-click re-shows
+  // it. createWindow lacks `db`, so this lives here.
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return
+    if (process.platform !== 'darwin') return
+    event.preventDefault()
+    mainWindow.hide()
+    if (countEnabledScheduledTasks(db) > 0) ensureResident()
+  })
+
   // Quit-flush handshake: on an explicit quit (Cmd-Q), give the renderer a bounded
   // chance to flush pending autosaves + tab state before we exit. This is the
   // guarantee that the renderer `beforeunload` (best-effort, can't await) is not.
   // Window-close on macOS leaves the window destroyed here, so we just quit.
   let flushedBeforeQuit = false
   app.on('before-quit', (event) => {
+    // Safety net: a genuine quit must never be blocked by the close interceptor.
+    isQuitting = true
     if (flushedBeforeQuit) return
     if (mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
     event.preventDefault()
@@ -237,9 +283,12 @@ app.whenReady().then(() => {
   setInterval(() => pruneVersions(db), 60 * 60 * 1000)
 
   app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    // On macOS, dock-click fires `activate`. The close interceptor hides rather
+    // than destroys the window, so it is always still around — just re-show it.
+    // We deliberately do NOT recreate via createWindow() here: a fresh window
+    // would be orphaned (no close interceptor, IPC handlers, menu, or scheduler
+    // window ref), so showing nothing is safer than a non-functional window.
+    if (!mainWindow.isDestroyed()) mainWindow.show()
   })
 })
 

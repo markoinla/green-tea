@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { BrowserWindow } from 'electron'
+import { Notification } from 'electron'
 import { mkdirSync } from 'fs'
 import {
   createAgentSession,
@@ -29,6 +30,30 @@ import {
   isSandboxInitialized
 } from '../agent/sandbox'
 import { buildSystemPrompt } from '../agent/system-prompt'
+
+function notifyBackground(
+  window: BrowserWindow,
+  task: ScheduledTask,
+  ok: boolean,
+  error?: string
+): void {
+  // The window can be destroyed mid-run (e.g. Cmd-Q during a long prompt). Bail
+  // before touching it — isVisible()/webContents would throw on a destroyed window.
+  if (window.isDestroyed()) return
+  if (window.isVisible()) return // in-app toast already covers this
+  if (!Notification.isSupported()) return
+  const n = new Notification({
+    title: ok ? `✓ ${task.name}` : `⚠︎ ${task.name} failed`,
+    body: ok ? 'Scheduled task completed.' : (error ?? 'Scheduled task failed.')
+  })
+  n.on('click', () => {
+    if (!window.isDestroyed()) {
+      window.show()
+      window.webContents.send('scheduler:open-run', { taskId: task.id })
+    }
+  })
+  n.show()
+}
 
 export async function executeScheduledTask(
   db: Database.Database,
@@ -150,6 +175,8 @@ export async function executeScheduledTask(
       })
     }
 
+    notifyBackground(window, task, true)
+
     session.dispose()
   } catch (err) {
     const finishedAt = new Date().toISOString()
@@ -178,6 +205,8 @@ export async function executeScheduledTask(
         error: errorMessage
       })
     }
+
+    notifyBackground(window, task, false, errorMessage)
   }
 
   // Notify renderer that task is no longer running

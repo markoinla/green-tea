@@ -13,6 +13,10 @@ export function listScheduledTasks(db: Database.Database, workspaceId?: string):
     .all() as ScheduledTask[]
 }
 
+export function countEnabledScheduledTasks(db: Database.Database): number {
+  return listScheduledTasks(db).filter((t) => t.enabled).length
+}
+
 export function getScheduledTask(db: Database.Database, id: string): ScheduledTask | undefined {
   return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as
     | ScheduledTask

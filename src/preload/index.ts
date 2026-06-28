@@ -455,6 +455,13 @@ const greenteaApi = {
       ipcRenderer.removeListener('scheduler:task-completed', sub)
     }
   },
+  onSchedulerOpenRun: (callback: (data: { taskId: string }) => void): (() => void) => {
+    const sub = (_event: unknown, data: { taskId: string }): void => callback(data)
+    ipcRenderer.on('scheduler:open-run', sub)
+    return () => {
+      ipcRenderer.removeListener('scheduler:open-run', sub)
+    }
+  },
   theme: {
     get: (): Promise<unknown> => ipcRenderer.invoke('theme:get'),
     save: (data: Record<string, unknown>): Promise<void> => ipcRenderer.invoke('theme:save', data)
