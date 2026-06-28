@@ -82,5 +82,12 @@
     "author": "Green Tea",
     "version": "1.0.0",
     "path": "skills/apollo-io-search"
+  },
+  {
+    "name": "excalidraw-diagram-generator",
+    "description": "Generate Excalidraw diagrams from natural language — flowcharts, mind maps, architecture, ER, sequence, and class diagrams as .excalidraw files",
+    "author": "GitHub",
+    "version": "1.0.0",
+    "path": "skills/excalidraw-diagram-generator"
   }
 ]
