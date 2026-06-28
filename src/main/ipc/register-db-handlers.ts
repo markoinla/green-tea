@@ -10,8 +10,9 @@ import * as settings from '../database/repositories/settings'
 import * as conversations from '../database/repositories/conversations'
 import * as documentVersions from '../database/repositories/document-versions'
 import * as documents from '../vault/documents-service'
-import { MAX_ARTIFACT_BYTES } from '../vault/note-store'
+import { MAX_ARTIFACT_BYTES, atomicWriteFile } from '../vault/note-store'
 import { markSelfWrite } from '../vault/self-write'
+import type { DocumentKind } from '../database/types'
 import { patchHtmlText } from '../protocol/html-text-patch'
 import { getWorkspaceVaultDir, ensureVaultDir } from '../vault/paths'
 import { deserializeMarkdown } from '../markdown/deserialize'
@@ -193,6 +194,27 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     }
   )
 
+  // Create a standalone artifact (e.g. a `.excalidraw` canvas). Kept separate
+  // from db:documents:create because artifacts carry no frontmatter/body — the
+  // seed template + extension are resolved per-kind in createArtifact. Broadcasts
+  // documents:changed so the tree picks up the new file.
+  ipcMain.handle(
+    'db:documents:createArtifact',
+    (
+      _event,
+      data: {
+        title: string
+        kind: DocumentKind
+        workspace_id?: string
+        folder_id?: string | null
+      }
+    ) => {
+      const doc = documents.createArtifact(db, data)
+      mainWindow?.webContents.send('documents:changed')
+      return doc
+    }
+  )
+
   ipcMain.handle(
     'db:documents:update',
     (
@@ -237,6 +259,33 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     }
     return readFile(doc.file_path, 'utf-8')
   })
+
+  // Generic artifact write-back: persist editor-authored bytes for an EDITABLE
+  // artifact (v1: the canvas). Modeled on patchHtmlText but generic — the
+  // editable-spreadsheet kind will reuse this same channel.
+  //
+  // Notes are rejected (the markdown editor owns those). The write is ATOMIC
+  // (temp file + rename) rather than a bare writeFileSync: autosave is frequent,
+  // and a crash mid-write would otherwise corrupt the whole single-file scene.
+  // markSelfWrite registers the exact bytes BEFORE the write so the vault watcher
+  // recognizes its own save and stays silent. We deliberately do NOT broadcast
+  // documents:content-changed — the writing viewer already holds the scene, so a
+  // reload would be pointless (a genuine external edit still reloads via the
+  // watcher).
+  ipcMain.handle(
+    'documents:writeArtifact',
+    async (_event, id: string, contents: string): Promise<void> => {
+      const doc = documents.getDocument(db, id)
+      if (!doc || !doc.file_path) throw new Error(`Document not found: ${id}`)
+      if (doc.kind === 'note') throw new Error(`Not an artifact: ${id}`)
+      const bytes = Buffer.byteLength(contents, 'utf-8')
+      if (bytes > MAX_ARTIFACT_BYTES) {
+        throw new Error(`Artifact too large: ${bytes} bytes (max ${MAX_ARTIFACT_BYTES})`)
+      }
+      markSelfWrite(doc.file_path, contents)
+      atomicWriteFile(doc.file_path, contents)
+    }
+  )
 
   // Inline text edit-and-save for HTML artifacts. The sandboxed viewer's picker
   // bootstrap sends an edit-commit (child-index path + oldText + newHTML); we

@@ -6,6 +6,9 @@ const greenteaApi = {
   // that cannot fetch gt-file:// because the renderer CSP blocks connect-src for it.
   readArtifactText: (id: string): Promise<string> =>
     ipcRenderer.invoke('documents:readArtifact', id),
+  // Write-back for an editable artifact (the canvas autosaves through this).
+  writeArtifact: (id: string, contents: string): Promise<void> =>
+    ipcRenderer.invoke('documents:writeArtifact', id, contents),
   workspaces: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('db:workspaces:list'),
     get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:workspaces:get', id),
@@ -37,6 +40,12 @@ const greenteaApi = {
       content?: string
       folder_id?: string | null
     }): Promise<unknown> => ipcRenderer.invoke('db:documents:create', data),
+    createArtifact: (data: {
+      title: string
+      kind: string
+      workspace_id?: string
+      folder_id?: string | null
+    }): Promise<unknown> => ipcRenderer.invoke('db:documents:createArtifact', data),
     update: (
       id: string,
       data: { title?: string; workspace_id?: string; content?: string; folder_id?: string | null }

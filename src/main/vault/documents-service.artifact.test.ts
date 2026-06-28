@@ -9,6 +9,7 @@ import { createWorkspace } from '../database/repositories/workspaces'
 import { getWorkspaceVaultDir } from './paths'
 import {
   getDocument,
+  createArtifact,
   updateDocument,
   updateFrontmatter,
   reindexFile,
@@ -120,6 +121,55 @@ describe('artifact reindexWorkspace', () => {
     expect(note.content).not.toBeNull()
     expect(art.kind).toBe('html')
     expect(art.content).toBeNull()
+  })
+})
+
+describe('createArtifact (canvas)', () => {
+  it('creates a .excalidraw file under the vault: kind=canvas, content=null, valid empty scene', () => {
+    const doc = createArtifact(db, { title: 'My Board', kind: 'canvas', workspace_id: workspaceId })
+
+    expect(doc.kind).toBe('canvas')
+    expect(doc.content).toBeNull()
+    expect(doc.title).toBe('My Board')
+    expect(doc.file_path!.endsWith('.excalidraw')).toBe(true)
+    expect(doc.file_path!.startsWith(vault)).toBe(true)
+
+    // The seed file is on disk, pretty-printed, and a valid empty Excalidraw scene.
+    const raw = readFileSync(doc.file_path!, 'utf-8')
+    expect(raw).toContain('\n  ') // pretty-printed (2-space indent)
+    const scene = JSON.parse(raw)
+    expect(scene.type).toBe('excalidraw')
+    expect(scene.elements).toEqual([])
+    expect(scene.files).toEqual({})
+
+    // Indexed like any artifact: getDocument round-trips it.
+    expect(getDocument(db, doc.id)!.kind).toBe('canvas')
+  })
+
+  it('picks a unique path when the title collides', () => {
+    const a = createArtifact(db, { title: 'Board', kind: 'canvas', workspace_id: workspaceId })
+    const b = createArtifact(db, { title: 'Board', kind: 'canvas', workspace_id: workspaceId })
+    expect(a.file_path).not.toBe(b.file_path)
+    expect(existsSync(a.file_path!)).toBe(true)
+    expect(existsSync(b.file_path!)).toBe(true)
+  })
+
+  it('a created canvas survives a full reindex with the same path identity', () => {
+    const doc = createArtifact(db, { title: 'Board', kind: 'canvas', workspace_id: workspaceId })
+    reindexWorkspace(db, workspaceId)
+    const again = listDocuments(db, workspaceId).find((d) => d.file_path === doc.file_path)!
+    expect(again).toBeDefined()
+    expect(again.kind).toBe('canvas')
+    expect(again.content).toBeNull()
+  })
+
+  it('rejects a kind with no artifact template', () => {
+    expect(() =>
+      createArtifact(db, { title: 'X', kind: 'html', workspace_id: workspaceId })
+    ).toThrow(/kind/i)
+    expect(() =>
+      createArtifact(db, { title: 'X', kind: 'note', workspace_id: workspaceId })
+    ).toThrow(/kind/i)
   })
 })
 

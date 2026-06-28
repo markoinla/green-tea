@@ -39,7 +39,7 @@ export function LeftSidebar({
   hoverExpanded,
   onHoverChange
 }: LeftSidebarProps) {
-  const { documents, loading, createDocument, updateDocument, deleteDocument } =
+  const { documents, loading, createDocument, createArtifact, updateDocument, deleteDocument } =
     useDocuments(selectedWorkspaceId)
   const { folders, createFolder, updateFolder, deleteFolder } = useFolders(selectedWorkspaceId)
   const {
@@ -125,6 +125,12 @@ export function LeftSidebar({
     onSelectDoc(doc.id, { newTab: true })
   }, [selectedWorkspaceId, createDocument, onSelectDoc])
 
+  const handleNewCanvas = useCallback(async () => {
+    if (!selectedWorkspaceId) return
+    const doc = await createArtifact({ title: 'Untitled', kind: 'canvas' })
+    onSelectDoc(doc.id, { newTab: true })
+  }, [selectedWorkspaceId, createArtifact, onSelectDoc])
+
   const handleNewFolder = useCallback(async () => {
     await createFolder({ name: uniqueFolderName(folders, '') })
   }, [createFolder, folders])
@@ -151,6 +157,17 @@ export function LeftSidebar({
       onSelectDoc(doc.id, { newTab: true })
     },
     [selectedWorkspaceId, folders, updateFolder, createDocument, onSelectDoc]
+  )
+
+  const handleNewCanvasInFolder = useCallback(
+    async (folderId: string) => {
+      if (!selectedWorkspaceId) return
+      const parent = folders.find((f) => f.id === folderId)
+      if (parent && parent.collapsed === 1) await updateFolder(folderId, { collapsed: 0 })
+      const doc = await createArtifact({ title: 'Untitled', kind: 'canvas', folder_id: folderId })
+      onSelectDoc(doc.id, { newTab: true })
+    },
+    [selectedWorkspaceId, folders, updateFolder, createArtifact, onSelectDoc]
   )
 
   const handleDeleteDoc = useCallback(
@@ -296,6 +313,7 @@ export function LeftSidebar({
         selectedDocId={selectedDocId}
         onSelectDoc={onSelectDoc}
         onNewDocument={handleNewDocument}
+        onNewCanvas={handleNewCanvas}
         onNewFolder={handleNewFolder}
         onRenameDoc={handleRenameDoc}
         onDeleteDoc={handleDeleteDoc}
@@ -304,6 +322,7 @@ export function LeftSidebar({
         onDeleteFolder={handleDeleteFolder}
         onToggleFolder={handleToggleFolder}
         onNewDocInFolder={handleNewDocInFolder}
+        onNewCanvasInFolder={handleNewCanvasInFolder}
         onNewSubfolder={handleNewSubfolder}
         onMoveDocument={handleMoveDocument}
         onRefresh={handleRefresh}

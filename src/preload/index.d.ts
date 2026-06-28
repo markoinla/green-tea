@@ -1,6 +1,7 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type {
   Document,
+  DocumentKind,
   DocumentVersion,
   Block,
   BlockNode,
@@ -75,6 +76,7 @@ type UpdateStatus =
 
 interface GreenteaApi {
   readArtifactText(id: string): Promise<string>
+  writeArtifact(id: string, contents: string): Promise<void>
   workspaces: {
     list(): Promise<Workspace[]>
     get(id: string): Promise<Workspace | undefined>
@@ -95,6 +97,12 @@ interface GreenteaApi {
       title: string
       workspace_id?: string
       content?: string
+      folder_id?: string | null
+    }): Promise<Document>
+    createArtifact(data: {
+      title: string
+      kind: DocumentKind
+      workspace_id?: string
       folder_id?: string | null
     }): Promise<Document>
     update(
