@@ -354,6 +354,10 @@ export default function App() {
             workspaceId={selectedWorkspaceId}
             onQuoteSelection={setSelectionContext}
             onNavigateToDoc={handleSelectDoc}
+            onNavigateBack={tabs.goBack}
+            onNavigateForward={tabs.goForward}
+            canNavigateBack={tabs.canGoBack}
+            canNavigateForward={tabs.canGoForward}
             fileNamesById={fileNamesById}
             previewVersion={activePreview}
             onExitPreview={() => setPreviewVersion(null)}

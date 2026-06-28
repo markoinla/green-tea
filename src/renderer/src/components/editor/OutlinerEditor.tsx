@@ -47,7 +47,12 @@ interface OutlinerEditorProps {
   /** The backing document; when present, the inline Properties editor is shown. */
   document?: Document | null
   /** Navigate to a document when a resolved wiki-link is clicked. */
-  onNavigateToDoc?: (docId: string) => void
+  onNavigateToDoc?: (docId: string, opts?: { newTab?: boolean }) => void
+  /** Back/forward through the global view history, surfaced in the facet bar. */
+  onNavigateBack?: () => void
+  onNavigateForward?: () => void
+  canNavigateBack?: boolean
+  canNavigateForward?: boolean
 }
 
 export function OutlinerEditor({
@@ -59,7 +64,11 @@ export function OutlinerEditor({
   externalContent,
   externalContentVersion = 0,
   document = null,
-  onNavigateToDoc
+  onNavigateToDoc,
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack,
+  canNavigateForward
 }: OutlinerEditorProps) {
   const prevExternalVersionRef = useRef(externalContentVersion)
 
@@ -153,11 +162,12 @@ export function OutlinerEditor({
       })
     ],
     editorProps: {
-      handleClickOn: (_view, _pos, node) => {
+      handleClickOn: (_view, _pos, node, _nodePos, event) => {
         if (node.type.name !== 'wikiLink') return false
         const docId = node.attrs.docId as string | null
         if (!docId) return false
-        onNavigateToDocRef.current?.(docId)
+        // Cmd/Ctrl-click opens the linked note in a new tab (matches the file tree).
+        onNavigateToDocRef.current?.(docId, { newTab: event.metaKey || event.ctrlKey })
         return true
       }
     },
@@ -214,7 +224,15 @@ export function OutlinerEditor({
     <div className="flex flex-col flex-1 min-h-0">
       <SearchBar editor={editor} />
       {document && editable && (
-        <NoteFacetBar document={document} editor={editor} onNavigateToDoc={onNavigateToDoc} />
+        <NoteFacetBar
+          document={document}
+          editor={editor}
+          onNavigateToDoc={onNavigateToDoc}
+          onNavigateBack={onNavigateBack}
+          onNavigateForward={onNavigateForward}
+          canNavigateBack={canNavigateBack}
+          canNavigateForward={canNavigateForward}
+        />
       )}
       <div
         className={cn('flex-1 min-h-0 overflow-auto', document && editable && 'note-has-header')}

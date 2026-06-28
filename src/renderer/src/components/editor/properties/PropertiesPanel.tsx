@@ -53,9 +53,31 @@ const TYPE_ICON: Record<PropertyType, React.ComponentType<{ className?: string }
 export function PropertiesPanel({ data }: { data: PropertyData }) {
   const { rows, existingKeys, frontmatter, workspaceId, writeKey, setType, addProperty } = data
 
+  // Tags are pinned to the top and always shown — even when the note has none —
+  // so adding the first tag is a single click away. Reuse the note's existing
+  // tags row (keeping its registered type) or synthesize an empty one. The
+  // synthetic row is render-only: `rows` is left untouched, so a blank tags row
+  // never inflates the facet count until a tag is actually written.
+  const tagsRow: PropertyRow = rows.find((r) => r.key === 'tags') ?? {
+    key: 'tags',
+    value: [],
+    type: 'tags'
+  }
+  const otherRows = rows.filter((r) => r.key !== 'tags')
+
   return (
     <div className="flex flex-col gap-1.5">
       {/* title is rendered as the heading above (DocumentTitle), not as a row. */}
+      <PropertyRowEditor
+        row={tagsRow}
+        onChangeValue={(v) => writeKey('tags', v)}
+        onRemove={() => writeKey('tags', null)}
+        onSetType={(t) => setType('tags', t)}
+        onFilter={(value) => data.filterByValue('tags', value)}
+        tagSuggest={data.tagSuggest}
+        hideRemove
+      />
+
       {READONLY_RESERVED_KEYS.map((key) => {
         const raw = frontmatter[key]
         return (
@@ -68,7 +90,7 @@ export function PropertiesPanel({ data }: { data: PropertyData }) {
         )
       })}
 
-      {rows.map((row) => (
+      {otherRows.map((row) => (
         <PropertyRowEditor
           key={row.key}
           row={row}
@@ -123,7 +145,8 @@ function PropertyRowEditor({
   onRemove,
   onSetType,
   onFilter,
-  tagSuggest
+  tagSuggest,
+  hideRemove = false
 }: {
   row: PropertyRow
   onChangeValue: (value: unknown) => void
@@ -131,6 +154,8 @@ function PropertyRowEditor({
   onSetType: (type: PropertyType) => void
   onFilter: (value: string) => void
   tagSuggest: (prefix: string) => Promise<string[]>
+  /** Pinned rows (e.g. the always-present tags row) have no "delete property". */
+  hideRemove?: boolean
 }) {
   return (
     <div className="flex items-center gap-2 text-sm group min-h-7">
@@ -148,14 +173,16 @@ function PropertyRowEditor({
           tagSuggest={tagSuggest}
         />
       </div>
-      <button
-        type="button"
-        aria-label={`Remove ${row.key}`}
-        className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity shrink-0"
-        onClick={onRemove}
-      >
-        <Trash2 className="size-3.5 text-muted-foreground" />
-      </button>
+      {!hideRemove && (
+        <button
+          type="button"
+          aria-label={`Remove ${row.key}`}
+          className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity shrink-0"
+          onClick={onRemove}
+        >
+          <Trash2 className="size-3.5 text-muted-foreground" />
+        </button>
+      )}
     </div>
   )
 }

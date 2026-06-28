@@ -45,12 +45,20 @@ function DocumentEditor({
   documentId,
   isActive,
   onQuoteSelection,
-  onNavigateToDoc
+  onNavigateToDoc,
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack,
+  canNavigateForward
 }: {
   documentId: string
   isActive: boolean
   onQuoteSelection?: (text: string) => void
-  onNavigateToDoc?: (docId: string) => void
+  onNavigateToDoc?: (docId: string, opts?: { newTab?: boolean }) => void
+  onNavigateBack?: () => void
+  onNavigateForward?: () => void
+  canNavigateBack?: boolean
+  canNavigateForward?: boolean
 }) {
   const { document, loading, externalContentVersion, externalContent, conflict, resolveConflict } =
     useDocument(documentId, isActive)
@@ -81,6 +89,10 @@ function DocumentEditor({
         onUpdate={save}
         onQuoteSelection={onQuoteSelection}
         onNavigateToDoc={onNavigateToDoc}
+        onNavigateBack={onNavigateBack}
+        onNavigateForward={onNavigateForward}
+        canNavigateBack={canNavigateBack}
+        canNavigateForward={canNavigateForward}
         externalContent={externalContent}
         externalContentVersion={externalContentVersion}
         document={document}
@@ -102,7 +114,12 @@ export interface TabbedEditorHostProps {
   workspaceId: string | null
   onQuoteSelection?: (text: string) => void
   /** Navigate to a document when a wiki-link is clicked. */
-  onNavigateToDoc?: (docId: string) => void
+  onNavigateToDoc?: (docId: string, opts?: { newTab?: boolean }) => void
+  /** Back/forward through the global view history (shown in the note facet bar). */
+  onNavigateBack?: () => void
+  onNavigateForward?: () => void
+  canNavigateBack?: boolean
+  canNavigateForward?: boolean
   /** LRU keep-mounted cap. */
   liveCap?: number
   /** workspace-file id → display name, for HTML artifact (`file:`) tabs. */
@@ -129,6 +146,10 @@ export function TabbedEditorHost({
   workspaceId,
   onQuoteSelection,
   onNavigateToDoc,
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack,
+  canNavigateForward,
   liveCap = 8,
   fileNamesById,
   previewVersion,
@@ -199,6 +220,10 @@ export function TabbedEditorHost({
                   isActive={id === activeDocId && !activePreview}
                   onQuoteSelection={onQuoteSelection}
                   onNavigateToDoc={onNavigateToDoc}
+                  onNavigateBack={onNavigateBack}
+                  onNavigateForward={onNavigateForward}
+                  canNavigateBack={canNavigateBack}
+                  canNavigateForward={canNavigateForward}
                 />
               )}
             </ErrorBoundary>

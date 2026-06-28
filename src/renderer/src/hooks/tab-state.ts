@@ -162,6 +162,87 @@ function pickReconcileActive(
   return survivors[0]
 }
 
+// ── Navigation history (global view trail) ──────────────────────────────────
+// A browser-style back/forward trail over which note was active, layered ON TOP
+// of the tab system: any change to `activeDocId` is a "navigation". It lives
+// ONLY in memory (never persisted) and is reset per workspace. `index` points at
+// the current entry; entries after it are the "forward" stack.
+
+export interface NavHistory {
+  stack: string[]
+  index: number
+}
+
+export const EMPTY_HISTORY: NavHistory = { stack: [], index: -1 }
+
+/**
+ * Record a navigation to `id`. De-dupes a no-op re-visit of the current entry,
+ * and truncates any forward entries (navigating after going Back forks the trail
+ * and discards what was ahead).
+ */
+export function recordNav(h: NavHistory, id: string): NavHistory {
+  if (h.index >= 0 && h.stack[h.index] === id) return h
+  const stack = h.stack.slice(0, h.index + 1)
+  stack.push(id)
+  return { stack, index: stack.length - 1 }
+}
+
+export function canNavBack(h: NavHistory): boolean {
+  return h.index > 0
+}
+
+export function canNavForward(h: NavHistory): boolean {
+  return h.index >= 0 && h.index < h.stack.length - 1
+}
+
+/**
+ * Drop history entries whose note no longer exists (delete / move-out) so
+ * Back/Forward never lands on a dead note. `keep(id)` returns true for ids that
+ * still exist (`file:` artifact tabs are always kept — they live in
+ * workspace_files, not the documents list). Consecutive duplicates created by
+ * the removal are collapsed (else Back/Forward could step between two identical
+ * ids, a no-op that strands the trail). `index` shifts to stay on the same entry
+ * (or the nearest survivor if that entry was itself removed). Returns the same
+ * reference when nothing changed.
+ */
+export function pruneNavHistory(h: NavHistory, keep: (id: string) => boolean): NavHistory {
+  const stack: string[] = []
+  let index = h.index
+  for (let i = 0; i < h.stack.length; i++) {
+    const id = h.stack[i]
+    const drop = !keep(id) || (stack.length > 0 && stack[stack.length - 1] === id)
+    if (drop) {
+      if (i <= h.index) index--
+    } else {
+      stack.push(id)
+    }
+  }
+  if (stack.length === h.stack.length) return h
+  if (index < -1) index = -1
+  if (index > stack.length - 1) index = stack.length - 1
+  return { stack, index }
+}
+
+/**
+ * Reconcile the trail against a deletion. Prunes dead entries AND parks the cursor
+ * on `nextActive` — the survivor the tab reducer chose to activate — when it's in
+ * the trail. The two reducers pick survivors by different orders (tab order vs
+ * trail order), so without this the follow-up navigation recording would see a
+ * cursor that disagrees with the new active and truncate still-valid forward
+ * entries. Falls back to the plain prune when `nextActive` isn't in the trail (it
+ * is then recorded as a fresh navigation).
+ */
+export function reconcileNavHistory(
+  h: NavHistory,
+  keep: (id: string) => boolean,
+  nextActive: string | null
+): NavHistory {
+  const pruned = pruneNavHistory(h, keep)
+  if (!nextActive) return pruned
+  const i = pruned.stack.indexOf(nextActive)
+  return i === -1 || i === pruned.index ? pruned : { stack: pruned.stack, index: i }
+}
+
 /**
  * Decide which tabs stay mounted (keep-mounted LRU). `prev` is the prior mounted
  * set in MRU order. The active tab is always mounted and moved to the front.

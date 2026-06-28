@@ -5,8 +5,8 @@ interface BacklinksPanelProps {
   backlinks: Backlink[]
   /** Notes the current note links out to. */
   outgoingLinks: OutgoingLink[]
-  /** Open a note when one of its rows is clicked. */
-  onNavigateToDoc?: (docId: string) => void
+  /** Open a note when one of its rows is clicked (Cmd/Ctrl-click → new tab). */
+  onNavigateToDoc?: (docId: string, opts?: { newTab?: boolean }) => void
 }
 
 /**
@@ -78,7 +78,7 @@ interface LinkRowProps {
   snippet: string
   /** null for a broken outgoing link — rendered as non-clickable. */
   docId: string | null
-  onNavigateToDoc?: (docId: string) => void
+  onNavigateToDoc?: (docId: string, opts?: { newTab?: boolean }) => void
 }
 
 function LinkRow({ title, snippet, docId, onNavigateToDoc }: LinkRowProps) {
@@ -98,7 +98,7 @@ function LinkRow({ title, snippet, docId, onNavigateToDoc }: LinkRowProps) {
     <li>
       <button
         type="button"
-        onClick={() => onNavigateToDoc?.(docId)}
+        onClick={(e) => onNavigateToDoc?.(docId, { newTab: e.metaKey || e.ctrlKey })}
         className="w-full rounded-md px-2 py-1.5 text-left hover:bg-accent"
       >
         <div className="text-sm font-medium text-foreground">{title}</div>

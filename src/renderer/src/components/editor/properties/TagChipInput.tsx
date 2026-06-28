@@ -37,6 +37,11 @@ export function TagChipInput({
   const [open, setOpen] = useState(false)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
+  // Whether the user has arrowed into the suggestion list. Enter only picks a
+  // suggestion once they have; otherwise it commits the typed text. Without this,
+  // a freshly-focused empty input (which shows every existing tag) would hijack
+  // Enter and add an existing tag instead of the new one the user typed.
+  const [navigated, setNavigated] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Debounced suggestion fetch. Filters out already-selected tags.
@@ -50,6 +55,7 @@ export function TagChipInput({
       const filtered = raw.filter((s) => !selected.has(s.toLowerCase())).slice(0, 8)
       setSuggestions(filtered)
       setActiveIndex(0)
+      setNavigated(false)
     }, 120)
     return () => {
       cancelled = true
@@ -72,16 +78,18 @@ export function TagChipInput({
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault()
-      if (open && suggestions[activeIndex]) commit(suggestions[activeIndex])
+      if (open && navigated && suggestions[activeIndex]) commit(suggestions[activeIndex])
       else commit(input)
     } else if (e.key === 'Backspace' && input.length === 0 && values.length > 0) {
       removeAt(values.length - 1)
     } else if (e.key === 'ArrowDown' && suggestions.length > 0) {
       e.preventDefault()
       setOpen(true)
+      setNavigated(true)
       setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1))
     } else if (e.key === 'ArrowUp' && suggestions.length > 0) {
       e.preventDefault()
+      setNavigated(true)
       setActiveIndex((i) => Math.max(i - 1, 0))
     } else if (e.key === 'Escape') {
       setOpen(false)

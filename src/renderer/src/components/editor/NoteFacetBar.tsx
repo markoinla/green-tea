@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { SlidersHorizontal, Link2 } from 'lucide-react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { SlidersHorizontal, Link2, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Editor } from '@tiptap/react'
 import type { Document } from '../../../../main/database/types'
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
@@ -22,7 +22,12 @@ interface NoteFacetBarProps {
   /** The note's editor, used to derive the live word count. */
   editor: Editor | null
   /** Navigate to a document when a backlink is clicked. */
-  onNavigateToDoc?: (docId: string) => void
+  onNavigateToDoc?: (docId: string, opts?: { newTab?: boolean }) => void
+  /** Step back/forward through the notes viewed in this pane (global view trail). */
+  onNavigateBack?: () => void
+  onNavigateForward?: () => void
+  canNavigateBack?: boolean
+  canNavigateForward?: boolean
 }
 
 /**
@@ -30,7 +35,15 @@ interface NoteFacetBarProps {
  * below it (Properties, Linked references); the tabs carry counts so you can see
  * what a note has at a glance, the panel holds the actual content.
  */
-export function NoteFacetBar({ document: doc, editor, onNavigateToDoc }: NoteFacetBarProps) {
+export function NoteFacetBar({
+  document: doc,
+  editor,
+  onNavigateToDoc,
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack = false,
+  canNavigateForward = false
+}: NoteFacetBarProps) {
   const propertyData = usePropertyData(doc)
   const backlinks = useBacklinks(doc.id)
   const outgoingLinks = useOutgoingLinks(doc.id)
@@ -48,22 +61,30 @@ export function NoteFacetBar({ document: doc, editor, onNavigateToDoc }: NoteFac
     <div className="shrink-0 border-b border-border/60 bg-background">
       {/* Left-aligned to the editor pane (not the centered note column). */}
       <div className="px-3">
-        {/* Tabs on the left, word count pinned to the right of the same row. */}
+        {/* Back/forward + tabs on the left, word count pinned to the right. */}
         <div className="flex items-center justify-between">
-          <Tabs value={active} onValueChange={() => {}} className="gap-0">
-            <TabsList variant="line" className="h-9 gap-3">
-              <TabsTrigger value="properties" onClick={() => toggle('properties')}>
-                <SlidersHorizontal />
-                Properties
-                {propertyData.rows.length > 0 && <FacetCount n={propertyData.rows.length} />}
-              </TabsTrigger>
-              <TabsTrigger value="links" onClick={() => toggle('links')}>
-                <Link2 />
-                Links
-                {linkCount > 0 && <FacetCount n={linkCount} />}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center gap-1">
+            <NavButtons
+              onBack={onNavigateBack}
+              onForward={onNavigateForward}
+              canBack={canNavigateBack}
+              canForward={canNavigateForward}
+            />
+            <Tabs value={active} onValueChange={() => {}} className="gap-0">
+              <TabsList variant="line" className="h-9 gap-3">
+                <TabsTrigger value="properties" onClick={() => toggle('properties')}>
+                  <SlidersHorizontal />
+                  Properties
+                  {propertyData.rows.length > 0 && <FacetCount n={propertyData.rows.length} />}
+                </TabsTrigger>
+                <TabsTrigger value="links" onClick={() => toggle('links')}>
+                  <Link2 />
+                  Links
+                  {linkCount > 0 && <FacetCount n={linkCount} />}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
           <span className="text-xs text-muted-foreground/70 tabular-nums">
             {wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}
           </span>
@@ -90,6 +111,58 @@ export function NoteFacetBar({ document: doc, editor, onNavigateToDoc }: NoteFac
 
 function FacetCount({ n }: { n: number }) {
   return <span className="text-muted-foreground/70 tabular-nums font-normal">{n}</span>
+}
+
+/**
+ * Browser-style back/forward buttons for the notes viewed in this pane. Both are
+ * always rendered (no layout shift); the one with nowhere to go is disabled.
+ */
+function NavButtons({
+  onBack,
+  onForward,
+  canBack,
+  canForward
+}: {
+  onBack?: () => void
+  onForward?: () => void
+  canBack: boolean
+  canForward: boolean
+}) {
+  return (
+    <div className="flex items-center -ml-1">
+      <NavButton label="Back" onClick={onBack} disabled={!canBack}>
+        <ChevronLeft className="h-4 w-4" />
+      </NavButton>
+      <NavButton label="Forward" onClick={onForward} disabled={!canForward}>
+        <ChevronRight className="h-4 w-4" />
+      </NavButton>
+    </div>
+  )
+}
+
+function NavButton({
+  label,
+  onClick,
+  disabled,
+  children
+}: {
+  label: string
+  onClick?: () => void
+  disabled: boolean
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+    >
+      {children}
+    </button>
+  )
 }
 
 /** Count whitespace-separated tokens in the editor's plain text. */

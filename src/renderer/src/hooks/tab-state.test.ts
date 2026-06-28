@@ -12,7 +12,14 @@ import {
   reorderTab,
   reconcileDeletions,
   computeMountedIds,
-  type TabState
+  EMPTY_HISTORY,
+  recordNav,
+  canNavBack,
+  canNavForward,
+  pruneNavHistory,
+  reconcileNavHistory,
+  type TabState,
+  type NavHistory
 } from './tab-state'
 
 const state = (openDocIds: string[], activeDocId: string | null): TabState => ({
@@ -159,6 +166,120 @@ describe('reconcileDeletions', () => {
   it('keeps an active file: tab even when every doc tab is deleted', () => {
     const s = state(['a', 'file:abc', 'b'], 'file:abc')
     expect(reconcileDeletions(s, new Set(['z']))).toEqual(state(['file:abc'], 'file:abc'))
+  })
+})
+
+describe('navigation history', () => {
+  const hist = (stack: string[], index: number): NavHistory => ({ stack, index })
+
+  describe('recordNav', () => {
+    it('records the first navigation as the only entry', () => {
+      expect(recordNav(EMPTY_HISTORY, 'a')).toEqual(hist(['a'], 0))
+    })
+
+    it('appends and advances the index', () => {
+      expect(recordNav(hist(['a'], 0), 'b')).toEqual(hist(['a', 'b'], 1))
+    })
+
+    it('de-dupes a re-visit of the current entry (returns same reference)', () => {
+      const h = hist(['a', 'b'], 1)
+      expect(recordNav(h, 'b')).toBe(h)
+    })
+
+    it('records a revisit that is not the current entry (e.g. A→B→A)', () => {
+      expect(recordNav(hist(['a', 'b'], 1), 'a')).toEqual(hist(['a', 'b', 'a'], 2))
+    })
+
+    it('truncates the forward stack when navigating after going back', () => {
+      // Trail [a,b,c] sitting back at b, then navigate to x → forward (c) is dropped.
+      expect(recordNav(hist(['a', 'b', 'c'], 1), 'x')).toEqual(hist(['a', 'b', 'x'], 2))
+    })
+  })
+
+  describe('canNavBack / canNavForward', () => {
+    it('cannot move from an empty trail', () => {
+      expect(canNavBack(EMPTY_HISTORY)).toBe(false)
+      expect(canNavForward(EMPTY_HISTORY)).toBe(false)
+    })
+
+    it('cannot go back from the first entry', () => {
+      expect(canNavBack(hist(['a'], 0))).toBe(false)
+    })
+
+    it('can go back but not forward at the end of the trail', () => {
+      expect(canNavBack(hist(['a', 'b'], 1))).toBe(true)
+      expect(canNavForward(hist(['a', 'b'], 1))).toBe(false)
+    })
+
+    it('can go forward when sitting before the end', () => {
+      expect(canNavForward(hist(['a', 'b'], 0))).toBe(true)
+    })
+  })
+
+  describe('pruneNavHistory', () => {
+    const keepAll = (): boolean => true
+
+    it('returns the same reference when nothing is removed', () => {
+      const h = hist(['a', 'b', 'c'], 2)
+      expect(pruneNavHistory(h, keepAll)).toBe(h)
+    })
+
+    it('drops a deleted background entry and shifts the index back', () => {
+      // Remove `a` (before the cursor); cursor stays on `c`.
+      expect(pruneNavHistory(hist(['a', 'b', 'c'], 2), (id) => id !== 'a')).toEqual(
+        hist(['b', 'c'], 1)
+      )
+    })
+
+    it('does not shift the index for an entry removed after the cursor', () => {
+      expect(pruneNavHistory(hist(['a', 'b', 'c'], 0), (id) => id !== 'c')).toEqual(
+        hist(['a', 'b'], 0)
+      )
+    })
+
+    it('clamps the cursor onto a survivor when the current entry is removed', () => {
+      expect(pruneNavHistory(hist(['a', 'b', 'c'], 1), (id) => id !== 'b')).toEqual(
+        hist(['a', 'c'], 0)
+      )
+    })
+
+    it('collapses consecutive duplicates created by a removal', () => {
+      // Removing `b` from [a,b,a] would leave [a,a]; collapse to [a].
+      expect(pruneNavHistory(hist(['a', 'b', 'a'], 2), (id) => id !== 'b')).toEqual(hist(['a'], 0))
+    })
+
+    it('empties the trail when every entry is removed', () => {
+      expect(pruneNavHistory(hist(['a', 'b'], 1), () => false)).toEqual(hist([], -1))
+    })
+  })
+
+  describe('reconcileNavHistory', () => {
+    const keepAll = (): boolean => true
+
+    it('parks the cursor on the survivor that becomes active, preserving forward', () => {
+      // Repro: trail [a,b,c,d] sitting back at b; note b is deleted and the tab
+      // reducer re-activates c (its right neighbour). The cursor must land on c so
+      // d stays Forward-reachable instead of being truncated.
+      const h = hist(['a', 'b', 'c', 'd'], 1)
+      const out = reconcileNavHistory(h, (id) => id !== 'b', 'c')
+      expect(out).toEqual(hist(['a', 'c', 'd'], 1))
+      expect(canNavForward(out)).toBe(true)
+    })
+
+    it('falls back to the plain prune when the new active is not in the trail', () => {
+      const h = hist(['a', 'b', 'c'], 2)
+      // `x` was never a recorded navigation — leave the clamped prune as-is.
+      expect(reconcileNavHistory(h, (id) => id !== 'b', 'x')).toEqual(hist(['a', 'c'], 1))
+    })
+
+    it('leaves the cursor put when the new active is already the current entry', () => {
+      const h = hist(['a', 'b', 'c'], 2)
+      expect(reconcileNavHistory(h, keepAll, 'c')).toBe(h)
+    })
+
+    it('handles a null active (no tabs left) as a plain prune', () => {
+      expect(reconcileNavHistory(hist(['a', 'b'], 1), () => false, null)).toEqual(hist([], -1))
+    })
   })
 })
 

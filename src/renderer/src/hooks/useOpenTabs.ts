@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { flush as flushAutosave, flushAll } from './useAutosave'
 import { isFileTabId } from '../lib/tab-ids'
 import {
+  EMPTY_HISTORY,
   EMPTY_TAB_STATE,
   activateByIndex as reduceActivateByIndex,
   activateTab as reduceActivate,
+  canNavBack,
+  canNavForward,
   closeAll as reduceCloseAll,
   closeOthers as reduceCloseOthers,
   closeTab as reduceClose,
@@ -12,7 +15,10 @@ import {
   cycle as reduceCycle,
   openTab as reduceOpen,
   reconcileDeletions as reduceReconcile,
+  reconcileNavHistory,
+  recordNav,
   reorderTab as reduceReorder,
+  type NavHistory,
   type OpenOpts,
   type TabState
 } from './tab-state'
@@ -34,6 +40,14 @@ export interface UseOpenTabsResult {
   cycle: (dir: 1 | -1) => void
   reorderTab: (from: number, to: number) => void
   reconcileDeletions: (existingIds: Set<string>) => void
+  /** Re-activate the previously-viewed note (reopening it if its tab was closed). */
+  goBack: () => void
+  /** Redo a Back — re-activate the note ahead in the trail. */
+  goForward: () => void
+  /** Whether there's an earlier note to go Back to. */
+  canGoBack: boolean
+  /** Whether there's a later note to go Forward to. */
+  canGoForward: boolean
   /** Immediate, non-debounced tab-state write (quit hook); awaitable. */
   flushNow: () => Promise<void>
 }
@@ -41,6 +55,16 @@ export interface UseOpenTabsResult {
 export function useOpenTabs(workspaceId: string | null): UseOpenTabsResult {
   const [tabState, setTabState] = useState<TabState>(EMPTY_TAB_STATE)
   const [hydrated, setHydrated] = useState(false)
+
+  // Browser-style back/forward trail over the active note. In-memory only (never
+  // persisted) and reset on workspace switch — see the workspace-switch effect.
+  const [history, setHistory] = useState<NavHistory>(EMPTY_HISTORY)
+  const historyRef = useRef(history)
+  historyRef.current = history
+  // When Back/Forward drives the active doc, the resulting `activeDocId` change
+  // must NOT be recorded as a new navigation. Holds the id we're navigating to so
+  // the recording effect can recognise and skip exactly that change.
+  const suppressNavRef = useRef<string | null>(null)
 
   // Refs so the workspace-switch sequence and quit hook can read the live values
   // without re-subscribing.
@@ -70,6 +94,9 @@ export function useOpenTabs(workspaceId: string | null): UseOpenTabsResult {
 
     setTabState(EMPTY_TAB_STATE)
     setHydrated(false)
+    // History is per-workspace; drop the previous workspace's trail.
+    setHistory(EMPTY_HISTORY)
+    suppressNavRef.current = null
 
     let cancelled = false
     const isStale = (): boolean => cancelled || loadedWorkspaceRef.current !== workspaceId
@@ -146,6 +173,43 @@ export function useOpenTabs(workspaceId: string | null): UseOpenTabsResult {
     }
   }, [tabState, hydrated, workspaceId])
 
+  // Record every change to the active note as a navigation. `activeDocId` is the
+  // single chokepoint, so this captures wiki-links, sidebar/palette opens, tab
+  // clicks and Ctrl-Tab cycling alike — de-duped, and excluding the Back/Forward
+  // moves themselves (flagged via suppressNavRef).
+  useEffect(() => {
+    const id = tabState.activeDocId
+    if (!id) return
+    const suppressed = suppressNavRef.current
+    suppressNavRef.current = null
+    if (suppressed === id) return
+    setHistory((h) => recordNav(h, id))
+  }, [tabState.activeDocId])
+
+  // Re-activate `targetId` (already known to exist in the trail): focus its tab
+  // if still open, else reopen it by reusing the active slot — matching the app's
+  // default in-place navigation. Flag the move so it isn't recorded as new.
+  const navigateTo = useCallback((targetId: string) => {
+    suppressNavRef.current = targetId
+    setTabState((s) => reduceOpen(s, targetId))
+  }, [])
+
+  const goBack = useCallback(() => {
+    const h = historyRef.current
+    if (!canNavBack(h)) return
+    const target = h.stack[h.index - 1]
+    setHistory({ stack: h.stack, index: h.index - 1 })
+    navigateTo(target)
+  }, [navigateTo])
+
+  const goForward = useCallback(() => {
+    const h = historyRef.current
+    if (!canNavForward(h)) return
+    const target = h.stack[h.index + 1]
+    setHistory({ stack: h.stack, index: h.index + 1 })
+    navigateTo(target)
+  }, [navigateTo])
+
   const flushNow = useCallback((): Promise<void> => {
     const wsId = loadedWorkspaceRef.current
     if (!wsId || !hydratedRef.current) return Promise.resolve()
@@ -192,7 +256,15 @@ export function useOpenTabs(workspaceId: string | null): UseOpenTabsResult {
   }, [])
 
   const reconcileDeletions = useCallback((existingIds: Set<string>) => {
+    // Drop deleted notes from the trail too, so Back/Forward never lands on one.
+    // Park the cursor on whatever survivor the tab reducer re-activates, so the
+    // recording effect's follow-up no-ops instead of truncating the forward trail.
+    const keep = (id: string): boolean => isFileTabId(id) || existingIds.has(id)
+    const nextActive = reduceReconcile(stateRef.current, existingIds).activeDocId
     setTabState((s) => reduceReconcile(s, existingIds))
+    if (existingIds.size > 0) {
+      setHistory((h) => reconcileNavHistory(h, keep, nextActive))
+    }
   }, [])
 
   return {
@@ -209,6 +281,10 @@ export function useOpenTabs(workspaceId: string | null): UseOpenTabsResult {
     cycle,
     reorderTab,
     reconcileDeletions,
+    goBack,
+    goForward,
+    canGoBack: canNavBack(history),
+    canGoForward: canNavForward(history),
     flushNow
   }
 }
