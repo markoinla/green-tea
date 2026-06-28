@@ -88,6 +88,9 @@ export function CommandMenu({
       title="Search"
       description="Search documents across all workspaces"
       showCloseButton={false}
+      // Results are full-text searched + bm25-ranked server-side; don't let cmdk
+      // re-filter them by title (which would hide body-only matches).
+      shouldFilter={false}
     >
       <CommandInput placeholder="Search documents..." value={query} onValueChange={setQuery} />
       <CommandList>

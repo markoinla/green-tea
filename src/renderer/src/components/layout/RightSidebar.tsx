@@ -19,6 +19,10 @@ import { useChatState } from '@renderer/hooks/useChatState'
 import { useAgentEvents } from '@renderer/hooks/useAgentEvents'
 import { groupMessages } from '@renderer/hooks/chat-types'
 
+// Caps the readable content width when the chat is in full-width mode (no document open).
+// In docked mode the panel is far narrower than this, so the cap is a no-op there.
+const FULL_WIDTH_CONTENT = 'mx-auto w-full max-w-[820px]'
+
 interface RightSidebarProps {
   documentId: string | null
   workspaceId: string | null
@@ -396,57 +400,61 @@ export function RightSidebar({
         <SidebarContent>
           <ScrollArea
             viewportRef={scrollViewportRef}
-            className={cn('flex-1', documentId ? 'px-4' : 'px-48')}
+            className={cn('flex-1', documentId ? 'px-4' : 'px-6')}
           >
-            <ChatMessageList
-              displayItems={displayItems}
-              isStreaming={activeState.isStreaming}
-              activeConversationId={activeConversationId}
-              streamingStartTime={
-                activeConversationId
-                  ? streamingStartTimeRef.current.get(activeConversationId)
-                  : undefined
-              }
-              tokens={activeState.tokens}
-              subagentEventsRef={subagentEventsRef}
-              subagentEventVersion={subagentEventVersion}
-              activeSubagentToolCallId={activeSubagentToolCallId}
-              resolveDocName={resolveDocName}
-              showToolResults={settings.showToolResults}
-              onApprovePatch={handleApproveEdit}
-              onRejectPatch={handleRejectEdit}
-              onApproveMetadata={handleApproveMetadata}
-              onRejectMetadata={handleRejectMetadata}
-              messagesEndRef={messagesEndRef}
-            />
+            <div className={cn(!documentId && FULL_WIDTH_CONTENT)}>
+              <ChatMessageList
+                displayItems={displayItems}
+                isStreaming={activeState.isStreaming}
+                activeConversationId={activeConversationId}
+                streamingStartTime={
+                  activeConversationId
+                    ? streamingStartTimeRef.current.get(activeConversationId)
+                    : undefined
+                }
+                tokens={activeState.tokens}
+                subagentEventsRef={subagentEventsRef}
+                subagentEventVersion={subagentEventVersion}
+                activeSubagentToolCallId={activeSubagentToolCallId}
+                resolveDocName={resolveDocName}
+                showToolResults={settings.showToolResults}
+                onApprovePatch={handleApproveEdit}
+                onRejectPatch={handleRejectEdit}
+                onApproveMetadata={handleApproveMetadata}
+                onRejectMetadata={handleRejectMetadata}
+                messagesEndRef={messagesEndRef}
+              />
+            </div>
           </ScrollArea>
         </SidebarContent>
 
-        <SidebarFooter className={cn('pb-3 pt-0', documentId ? 'px-3' : 'px-48')}>
-          <ChatInput
-            ref={chatInputRef}
-            onSend={handleSend}
-            isStreaming={activeState.isStreaming}
-            documents={[
-              ...documents.map((d) => ({ id: d.id, title: d.title })),
-              ...workspaceFiles.map((f) => ({ id: `file:${f.file_path}`, title: f.file_name }))
-            ]}
-            showSlashCommands={!!workspaceId}
-            selectionContext={selectionContext}
-            onClearSelection={onClearSelection}
-            reasoningMode={settings.reasoningMode}
-            onToggleReasoning={() => {
-              const newMode = !settings.reasoningMode
-              updateSetting('reasoningMode', newMode)
-              if (activeConversationId) {
-                window.api.agent.resetSession(activeConversationId)
-              }
-            }}
-            autoApproveEdits={settings.autoApproveEdits}
-            onToggleAutoApprove={() => {
-              updateSetting('autoApproveEdits', !settings.autoApproveEdits)
-            }}
-          />
+        <SidebarFooter className={cn('pb-3 pt-0', documentId ? 'px-3' : 'px-6')}>
+          <div className={cn(!documentId && FULL_WIDTH_CONTENT)}>
+            <ChatInput
+              ref={chatInputRef}
+              onSend={handleSend}
+              isStreaming={activeState.isStreaming}
+              documents={[
+                ...documents.map((d) => ({ id: d.id, title: d.title })),
+                ...workspaceFiles.map((f) => ({ id: `file:${f.file_path}`, title: f.file_name }))
+              ]}
+              showSlashCommands={!!workspaceId}
+              selectionContext={selectionContext}
+              onClearSelection={onClearSelection}
+              reasoningMode={settings.reasoningMode}
+              onToggleReasoning={() => {
+                const newMode = !settings.reasoningMode
+                updateSetting('reasoningMode', newMode)
+                if (activeConversationId) {
+                  window.api.agent.resetSession(activeConversationId)
+                }
+              }}
+              autoApproveEdits={settings.autoApproveEdits}
+              onToggleAutoApprove={() => {
+                updateSetting('autoApproveEdits', !settings.autoApproveEdits)
+              }}
+            />
+          </div>
         </SidebarFooter>
       </div>
     </Sidebar>

@@ -3,7 +3,8 @@ import {
   listDocuments,
   getDocument,
   listByProperty,
-  getBacklinks
+  getBacklinks,
+  buildFtsMatch
 } from '../../vault/documents-service'
 import { listFolders } from '../../database/repositories/folders'
 import { fold } from '../../vault/metadata'
@@ -172,26 +173,34 @@ export function notesSearch(
     return { content: '', error: 'Query must not be empty' }
   }
 
-  // The index mirrors each note's content, so search it directly (title + body).
-  // Artifacts carry content=null and are not text-searchable — exclude them so a
-  // title-only match never surfaces a rendered artifact with an empty snippet.
-  const like = `%${params.query}%`
+  // Ranked full-text over the notes_fts index (title + body), bm25-weighted with
+  // the title far above the body. Notes only: artifacts carry content=null and are
+  // excluded so a title hit never surfaces a rendered artifact with an empty
+  // snippet. An unusable query (no word tokens) yields no results.
+  const match = buildFtsMatch(params.query)
+  if (!match) {
+    return { content: 'No results found.' }
+  }
   const rows = (
     workspaceId
       ? db
           .prepare(
-            `SELECT id, title, content FROM documents
-             WHERE workspace_id = ? AND content IS NOT NULL AND (title LIKE ? OR content LIKE ?)
-             ORDER BY updated_at DESC LIMIT 20`
+            `SELECT d.id AS id, d.title AS title, d.content AS content
+             FROM notes_fts f
+             JOIN documents d ON d.id = f.id
+             WHERE notes_fts MATCH ? AND d.workspace_id = ? AND d.content IS NOT NULL
+             ORDER BY bm25(notes_fts, 10.0, 1.0) LIMIT 20`
           )
-          .all(workspaceId, like, like)
+          .all(match, workspaceId)
       : db
           .prepare(
-            `SELECT id, title, content FROM documents
-             WHERE content IS NOT NULL AND (title LIKE ? OR content LIKE ?)
-             ORDER BY updated_at DESC LIMIT 20`
+            `SELECT d.id AS id, d.title AS title, d.content AS content
+             FROM notes_fts f
+             JOIN documents d ON d.id = f.id
+             WHERE notes_fts MATCH ? AND d.content IS NOT NULL
+             ORDER BY bm25(notes_fts, 10.0, 1.0) LIMIT 20`
           )
-          .all(like, like)
+          .all(match)
   ) as Array<{ id: string; title: string; content: string | null }>
 
   if (rows.length === 0) {

@@ -392,4 +392,48 @@ export function runMigrations(db: Database.Database): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_shares_doc_key ON shares(doc_key);
   `)
+
+  // Migration: full-text search + link graph (both derived indexes). No backfill —
+  // the unconditional startup reindexAllWorkspaces repopulates title_fold,
+  // note_links, and notes_fts from disk on first launch.
+
+  // documents.title_fold — fold(title) as the Unicode-correct title-join key for
+  // backlink/outgoing-link resolution (SQL lower() only folds ASCII).
+  const hasTitleFoldCol = db
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('documents') WHERE name = 'title_fold'")
+    .get() as { cnt: number }
+
+  if (hasTitleFoldCol.cnt === 0) {
+    db.exec('ALTER TABLE documents ADD COLUMN title_fold TEXT')
+  }
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_documents_ws_titlefold ON documents(workspace_id, title_fold)'
+  )
+
+  // note_links — persisted wiki-link edges (the knowledge-graph data layer). One
+  // row per (source_id, label_fold); notes only. No FK to documents (deliberate —
+  // rows are pruned by reindexDerived / deleteIndexRow, mirroring the rebuild model).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS note_links (
+      source_id    TEXT NOT NULL,
+      target_label TEXT NOT NULL,
+      label_fold   TEXT NOT NULL,
+      snippet      TEXT NOT NULL,
+      workspace_id TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_note_links_source ON note_links(source_id);
+    CREATE INDEX IF NOT EXISTS idx_note_links_lookup ON note_links(workspace_id, label_fold);
+  `)
+
+  // notes_fts — standalone FTS5 over note title + body (artifacts: title only,
+  // body=''). Maintained delete+insert per row by id.
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+      title,
+      body,
+      id UNINDEXED,
+      tokenize = 'unicode61 remove_diacritics 2',
+      prefix = '2 3 4'
+    )
+  `)
 }

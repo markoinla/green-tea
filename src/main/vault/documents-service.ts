@@ -125,13 +125,13 @@ function uniqueArtifactPath(dir: string, stem: string, ext: string): string {
 
 function upsertRow(db: Database.Database, row: IndexRow): void {
   db.prepare(
-    `INSERT INTO documents (id, title, content, workspace_id, folder_id, file_path, created_at, updated_at, frontmatter)
-     VALUES (@id, @title, @content, @workspace_id, @folder_id, @file_path, @created_at, @updated_at, @frontmatter)
+    `INSERT INTO documents (id, title, title_fold, content, workspace_id, folder_id, file_path, created_at, updated_at, frontmatter)
+     VALUES (@id, @title, @title_fold, @content, @workspace_id, @folder_id, @file_path, @created_at, @updated_at, @frontmatter)
      ON CONFLICT(id) DO UPDATE SET
-       title = @title, content = @content, workspace_id = @workspace_id,
+       title = @title, title_fold = @title_fold, content = @content, workspace_id = @workspace_id,
        folder_id = @folder_id, file_path = @file_path, updated_at = @updated_at,
        frontmatter = @frontmatter`
-  ).run(row)
+  ).run({ ...row, title_fold: fold(row.title) })
 }
 
 // ---------------------------------------------------------------------------
@@ -245,53 +245,121 @@ function nodeText(node: TTNode): string {
 }
 
 /**
- * Find every note that links to `docId` via a `[[wiki-link]]`. Matching is by
- * note title (case-insensitive, workspace-scoped) — the same key
- * `resolveWikiLinks` uses — so a backlink is found even if the source note's
- * mirrored `docId` was last resolved while the target did not yet exist. The
- * `content LIKE '%wikiLink%'` pre-filter keeps this cheap on large vaults; only
- * candidate rows are JSON-parsed. Returns the first matching block per source as
- * the snippet, sorted by title.
+ * Flatten the whole doc to a single plain-text string for the FTS `body` column.
+ * Generalizes `nodeText` but renders a wiki-link as its bare label (so the linked
+ * title is searchable) and joins top-level blocks with newlines.
  */
-export function getBacklinks(db: Database.Database, docId: string): Backlink[] {
-  const target = getRow(db, docId)
-  if (!target) return []
-  const key = target.title.trim().toLowerCase()
-  if (!key) return []
+function flattenPlainText(doc: TTDoc): string {
+  const bodyText = (node: TTNode): string => {
+    if (node.type === 'text') return (node.text as string) ?? ''
+    if (node.type === 'wikiLink') return (node.attrs?.label as string) ?? ''
+    if (!node.content) return ''
+    return node.content.map(bodyText).join('')
+  }
+  return doc.content.map(bodyText).join('\n')
+}
 
-  const rows = db
-    .prepare(
-      `SELECT id, title, content FROM documents
-       WHERE workspace_id = ? AND id != ? AND content LIKE '%wikiLink%'`
-    )
-    .all(target.workspace_id, docId) as { id: string; title: string; content: string | null }[]
-
-  const out: Backlink[] = []
-  for (const row of rows) {
-    if (!row.content) continue
-    let doc: TTDoc
-    try {
-      doc = JSON.parse(row.content) as TTDoc
-    } catch {
-      continue
-    }
-    // The first top-level block that contains a matching link supplies the snippet.
-    const linksTo = (node: TTNode): boolean => {
+/**
+ * Collect the outgoing wiki-link edges of a doc: one `{ label, snippet }` per
+ * distinct folded label (first-writer-wins on collisions, document order), with
+ * the snippet being the first block containing that link. Mirrors the
+ * label/first-block logic used by `getOutgoingLinks`.
+ */
+function collectEdges(doc: TTDoc): Array<{ label: string; snippet: string }> {
+  const order: string[] = []
+  const blockByKey = new Map<string, TTNode>()
+  for (const block of doc.content) {
+    const collect = (node: TTNode): void => {
       if (node.type === 'wikiLink') {
-        return ((node.attrs?.label as string) ?? '').trim().toLowerCase() === key
+        const label = ((node.attrs?.label as string) ?? '').trim()
+        const key = fold(label)
+        if (key && !blockByKey.has(key)) {
+          blockByKey.set(key, block)
+          order.push(label)
+        }
+        return
       }
-      return node.content ? node.content.some(linksTo) : false
+      if (node.content) for (const child of node.content) collect(child)
     }
-    const block = doc.content.find(linksTo)
-    if (!block) continue
+    collect(block)
+  }
+
+  return order.map((label) => {
+    const block = blockByKey.get(fold(label))!
     const text = nodeText(block).trim().replace(/\s+/g, ' ')
     const snippet =
       text.length > BACKLINK_SNIPPET_MAX ? `${text.slice(0, BACKLINK_SNIPPET_MAX)}…` : text
-    out.push({ id: row.id, title: row.title, snippet })
-  }
+    return { label, snippet }
+  })
+}
 
-  out.sort((a, b) => a.title.localeCompare(b.title))
-  return out
+/**
+ * Rebuild the derived FTS row and link edges for one document. FTS is delete+
+ * insert keyed by id (notes get a flattened body; artifacts get `body=''` so the
+ * command menu still finds them by title). Link edges are notes-only — artifacts
+ * (`doc === null`) produce none. Call inside the same db.transaction() as
+ * upsertRow on every content/title write path.
+ */
+function reindexDerived(
+  db: Database.Database,
+  row: { id: string; title: string; workspace_id: string },
+  doc: TTDoc | null
+): void {
+  db.prepare('DELETE FROM notes_fts WHERE id = ?').run(row.id)
+  db.prepare('INSERT INTO notes_fts (id, title, body) VALUES (?, ?, ?)').run(
+    row.id,
+    row.title,
+    doc ? flattenPlainText(doc) : ''
+  )
+
+  db.prepare('DELETE FROM note_links WHERE source_id = ?').run(row.id)
+  if (!doc) return
+  const insert = db.prepare(
+    `INSERT INTO note_links (source_id, target_label, label_fold, snippet, workspace_id)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+  for (const edge of collectEdges(doc)) {
+    insert.run(row.id, edge.label, fold(edge.label), edge.snippet, row.workspace_id)
+  }
+}
+
+/**
+ * Turn raw user input into a safe FTS5 MATCH expression: split on whitespace,
+ * drop tokens with no word character, escape internal double-quotes by doubling,
+ * wrap each token as a quoted prefix term (`"token"*`), and AND them together.
+ * Returns null when no usable token survives — callers MUST treat that as "no
+ * results" and never run `MATCH ''` / `MATCH '*'` (both error/misbehave).
+ */
+export function buildFtsMatch(userInput: string): string | null {
+  const tokens = userInput
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => /[\p{L}\p{N}_]/u.test(t))
+  if (tokens.length === 0) return null
+  return tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(' ')
+}
+
+/**
+ * Find every note that links to `docId` via a `[[wiki-link]]`, querying the
+ * persisted `note_links` edge table. Matching is by note title fold (the same key
+ * `collectEdges` stores), workspace-scoped, so a backlink resolves even if the
+ * source note's mirrored `docId` was last resolved while the target did not yet
+ * exist — the link auto-heals the moment the target is (re)named to match. Each
+ * source contributes the precomputed first-block snippet; self-links excluded.
+ */
+export function getBacklinks(db: Database.Database, docId: string): Backlink[] {
+  return db
+    .prepare(
+      `SELECT l.source_id AS id, s.title AS title, l.snippet AS snippet
+       FROM note_links l
+       JOIN documents s ON s.id = l.source_id
+       JOIN documents t ON t.id = ?
+       WHERE l.label_fold = t.title_fold
+         AND l.workspace_id = t.workspace_id
+         AND l.source_id != ?
+       ORDER BY s.title`
+    )
+    .all(docId, docId) as Backlink[]
 }
 
 /** An outgoing wiki-link: a note this note points at via `[[wiki-link]]`. */
@@ -305,66 +373,38 @@ export interface OutgoingLink {
 }
 
 /**
- * Find every note `docId` links to via a `[[wiki-link]]`. Labels are resolved to
- * titles case-insensitively against the workspace (same key as
- * `resolveWikiLinks`), so a link still resolves even if the stored `docId` attr
- * is stale. Unresolved labels are returned with `id: null` (a broken link).
- * Deduped by label, keeping the first containing block as the snippet, sorted by
- * title.
+ * Find every note `docId` links to via a `[[wiki-link]]`, querying the persisted
+ * `note_links` edge table. Each edge's label is resolved to a target by title
+ * fold (workspace-scoped, self excluded), so a link resolves even if the stored
+ * `docId` attr is stale; an unresolved label yields `id: null` (a broken link).
+ * One row per stored edge (deduped by fold at index time), with the precomputed
+ * first-block snippet, ordered by resolved title (falling back to the label).
  */
 export function getOutgoingLinks(db: Database.Database, docId: string): OutgoingLink[] {
-  const source = getRow(db, docId)
-  if (!source || !source.content) return []
-
-  let doc: TTDoc
-  try {
-    doc = JSON.parse(source.content) as TTDoc
-  } catch {
-    return []
-  }
-
-  // lower(title) -> resolved id + canonical title; first-writer-wins on collisions.
-  const titleMap = new Map<string, { id: string; title: string }>()
   const rows = db
-    .prepare('SELECT id, title FROM documents WHERE workspace_id = ? AND id != ?')
-    .all(source.workspace_id, docId) as { id: string; title: string }[]
-  for (const r of rows) {
-    const k = r.title.trim().toLowerCase()
-    if (k && !titleMap.has(k)) titleMap.set(k, { id: r.id, title: r.title })
-  }
+    .prepare(
+      `SELECT l.target_label AS target_label, l.snippet AS snippet,
+              t.id AS target_id, t.title AS target_title
+       FROM note_links l
+       LEFT JOIN documents t
+         ON t.workspace_id = l.workspace_id
+        AND t.title_fold = l.label_fold
+        AND t.id != l.source_id
+       WHERE l.source_id = ?
+       ORDER BY COALESCE(t.title, l.target_label)`
+    )
+    .all(docId) as {
+    target_label: string
+    snippet: string
+    target_id: string | null
+    target_title: string | null
+  }[]
 
-  // Collect labels in document order, remembering the block each first appears in.
-  const order: string[] = []
-  const blockByKey = new Map<string, TTNode>()
-  for (const block of doc.content) {
-    const collect = (node: TTNode): void => {
-      if (node.type === 'wikiLink') {
-        const label = ((node.attrs?.label as string) ?? '').trim()
-        const key = label.toLowerCase()
-        if (key && !blockByKey.has(key)) {
-          blockByKey.set(key, block)
-          order.push(label)
-        }
-        return
-      }
-      if (node.content) for (const child of node.content) collect(child)
-    }
-    collect(block)
-  }
-
-  const out: OutgoingLink[] = []
-  for (const label of order) {
-    const key = label.toLowerCase()
-    const resolved = titleMap.get(key)
-    const block = blockByKey.get(key)!
-    const text = nodeText(block).trim().replace(/\s+/g, ' ')
-    const snippet =
-      text.length > BACKLINK_SNIPPET_MAX ? `${text.slice(0, BACKLINK_SNIPPET_MAX)}…` : text
-    out.push({ id: resolved?.id ?? null, title: resolved?.title ?? label, snippet })
-  }
-
-  out.sort((a, b) => a.title.localeCompare(b.title))
-  return out
+  return rows.map((r) => ({
+    id: r.target_id ?? null,
+    title: r.target_title ?? r.target_label,
+    snippet: r.snippet
+  }))
 }
 
 export interface PropertyTypeEntry {
@@ -608,9 +648,10 @@ export function getDocument(db: Database.Database, id: string): Document | undef
   if (changed) {
     db.transaction(() => {
       db.prepare(
-        'UPDATE documents SET title = ?, content = ?, updated_at = ?, frontmatter = ? WHERE id = ?'
-      ).run(note.title, content, note.updated, frontmatterJson, id)
+        'UPDATE documents SET title = ?, title_fold = ?, content = ?, updated_at = ?, frontmatter = ? WHERE id = ?'
+      ).run(note.title, fold(note.title), content, note.updated, frontmatterJson, id)
       deriveMetadata(db, id, row.workspace_id, note.frontmatter)
+      reindexDerived(db, { id, title: note.title, workspace_id: row.workspace_id }, note.doc)
     })()
   }
   return rowToDocument(refreshed)
@@ -620,15 +661,37 @@ export function searchDocuments(
   db: Database.Database,
   query: string
 ): (Document & { workspace_name: string })[] {
+  // Ranked full-text over title + body (artifacts indexed by title, body=''), so
+  // the command menu finds notes AND artifacts cross-workspace. bm25 weights the
+  // title far above the body. An EMPTY query (the menu's open state) shows the most
+  // recent documents — like the old title-LIKE behavior — while a non-empty but
+  // unusable query (e.g. only punctuation) yields no results.
+  if (!query.trim()) {
+    const recent = db
+      .prepare(
+        `SELECT d.*, w.name AS workspace_name
+         FROM documents d
+         JOIN workspaces w ON d.workspace_id = w.id
+         ORDER BY d.updated_at DESC
+         LIMIT 50`
+      )
+      .all() as (IndexRow & { workspace_name: string })[]
+    return recent.map((r) => ({ ...rowToDocument(r), workspace_name: r.workspace_name }))
+  }
+  const match = buildFtsMatch(query)
+  if (!match) return []
   const rows = db
     .prepare(
-      `SELECT d.*, w.name as workspace_name
-       FROM documents d JOIN workspaces w ON d.workspace_id = w.id
-       WHERE d.title LIKE ? ORDER BY d.updated_at DESC`
+      `SELECT d.*, w.name AS workspace_name
+       FROM documents d
+       JOIN workspaces w ON d.workspace_id = w.id
+       JOIN notes_fts f ON f.id = d.id
+       WHERE notes_fts MATCH ?
+       ORDER BY bm25(notes_fts, 10.0, 1.0)
+       LIMIT 50`
     )
-    .all(`%${query}%`) as (IndexRow & { workspace_name: string })[]
-  // Map through rowToDocument so artifacts carry `kind` (title-only match — their
-  // content is null and never searched).
+    .all(match) as (IndexRow & { workspace_name: string })[]
+  // Map through rowToDocument so artifacts carry `kind` (their content is null).
   return rows.map((r) => ({ ...rowToDocument(r), workspace_name: r.workspace_name }))
 }
 
@@ -688,6 +751,7 @@ export function createDocument(
       frontmatter: JSON.stringify(frontmatter)
     })
     deriveMetadata(db, id, workspaceId, frontmatter)
+    reindexDerived(db, { id, title: data.title, workspace_id: workspaceId }, doc)
   })()
   return rowToDocument(getRow(db, id)!)
 }
@@ -721,19 +785,23 @@ function updateArtifact(
   }
 
   const updated = nowIso()
-  upsertRow(db, {
-    id: row.id,
-    // Display title tracks the filename (artifacts can't carry a title override),
-    // so it matches what a reindex would derive — no flap.
-    title: titleFromFilename(filePath),
-    content: null,
-    workspace_id: workspaceId,
-    folder_id: folder,
-    file_path: filePath,
-    created_at: row.created_at,
-    updated_at: updated,
-    frontmatter: null
-  })
+  // Display title tracks the filename (artifacts can't carry a title override), so
+  // it matches what a reindex would derive — no flap.
+  const title = titleFromFilename(filePath)
+  db.transaction(() => {
+    upsertRow(db, {
+      id: row.id,
+      title,
+      content: null,
+      workspace_id: workspaceId,
+      folder_id: folder,
+      file_path: filePath,
+      created_at: row.created_at,
+      updated_at: updated,
+      frontmatter: null
+    })
+    reindexDerived(db, { id: row.id, title, workspace_id: workspaceId }, null)
+  })()
   return rowToDocument(getRow(db, row.id)!)
 }
 
@@ -806,6 +874,7 @@ export function updateDocument(
       frontmatter: JSON.stringify(frontmatter)
     })
     deriveMetadata(db, id, workspaceId, frontmatter)
+    reindexDerived(db, { id, title, workspace_id: workspaceId }, doc)
   })()
   return rowToDocument(getRow(db, id)!)
 }
@@ -893,6 +962,8 @@ export async function deleteDocument(db: Database.Database, id: string): Promise
 
 function deleteIndexRow(db: Database.Database, id: string): void {
   db.prepare('DELETE FROM agent_logs WHERE document_id = ?').run(id)
+  db.prepare('DELETE FROM notes_fts WHERE id = ?').run(id)
+  db.prepare('DELETE FROM note_links WHERE source_id = ?').run(id)
   db.prepare('DELETE FROM documents WHERE id = ?').run(id)
 }
 
@@ -962,17 +1033,20 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
       const absPath = summary.path.normalize('NFC')
       const docId = idForArtifact(db, absPath)
       const existing = getRow(db, docId)
-      upsertRow(db, {
-        id: docId,
-        title: summary.title,
-        content: null,
-        workspace_id: workspaceId,
-        folder_id: fId,
-        file_path: absPath,
-        created_at: existing?.created_at ?? summary.updated,
-        updated_at: summary.updated,
-        frontmatter: null
-      })
+      db.transaction(() => {
+        upsertRow(db, {
+          id: docId,
+          title: summary.title,
+          content: null,
+          workspace_id: workspaceId,
+          folder_id: fId,
+          file_path: absPath,
+          created_at: existing?.created_at ?? summary.updated,
+          updated_at: summary.updated,
+          frontmatter: null
+        })
+        reindexDerived(db, { id: docId, title: summary.title, workspace_id: workspaceId }, null)
+      })()
       seen.add(docId)
       continue
     }
@@ -992,6 +1066,7 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
         frontmatter: JSON.stringify(note.frontmatter)
       })
       deriveMetadata(db, note.id, workspaceId, note.frontmatter)
+      reindexDerived(db, { id: note.id, title: note.title, workspace_id: workspaceId }, note.doc)
     })()
     seen.add(note.id)
   }
@@ -1211,17 +1286,20 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
     const docId = existing?.id ?? randomUUID()
     const structuralChanged =
       !existing || existing.title !== title || existing.folder_id !== folderId
-    upsertRow(db, {
-      id: docId,
-      title,
-      content: null,
-      workspace_id: workspaceId,
-      folder_id: folderId,
-      file_path: abs,
-      created_at: existing?.created_at ?? mtimeIso,
-      updated_at: mtimeIso,
-      frontmatter: null
-    })
+    db.transaction(() => {
+      upsertRow(db, {
+        id: docId,
+        title,
+        content: null,
+        workspace_id: workspaceId,
+        folder_id: folderId,
+        file_path: abs,
+        created_at: existing?.created_at ?? mtimeIso,
+        updated_at: mtimeIso,
+        frontmatter: null
+      })
+      reindexDerived(db, { id: docId, title, workspace_id: workspaceId }, null)
+    })()
     return existing
       ? { kind: 'updated', docId, structuralChanged }
       : { kind: 'created', docId, structuralChanged: true }
@@ -1294,6 +1372,7 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
       frontmatter: frontmatterJson
     })
     deriveMetadata(db, docId, workspaceId, note.frontmatter)
+    reindexDerived(db, { id: docId, title: note.title, workspace_id: workspaceId }, note.doc)
   })()
   return row
     ? { kind: 'updated', docId, structuralChanged }
