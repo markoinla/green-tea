@@ -1,0 +1,10 @@
+[
+  {
+    "id": "mermaid",
+    "name": "Mermaid Diagrams",
+    "description": "Render and edit Mermaid diagrams from .mmd files",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "resources/default-plugins/mermaid"
+  }
+]

@@ -11,6 +11,7 @@ import { GeneralTab } from './GeneralTab'
 import { AppearanceTab } from './AppearanceTab'
 import { ModelsTab } from './ModelsTab'
 import { SkillsTab } from './SkillsTab'
+import { PluginsTab } from './PluginsTab'
 import { AccountsTab } from './AccountsTab'
 import { McpServersTab } from './McpServersTab'
 import { ShareTab } from './ShareTab'
@@ -51,6 +52,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab }: SettingsDialo
               <TabsTrigger value="appearance">Appearance</TabsTrigger>
               <TabsTrigger value="models">Models</TabsTrigger>
               <TabsTrigger value="skills">Skills</TabsTrigger>
+              <TabsTrigger value="plugins">Plugins</TabsTrigger>
               <TabsTrigger value="accounts">Accounts</TabsTrigger>
               <TabsTrigger value="share">Share</TabsTrigger>
               <TabsTrigger value="mcp">MCP Servers</TabsTrigger>
@@ -82,6 +84,10 @@ export function SettingsDialog({ open, onOpenChange, defaultTab }: SettingsDialo
 
           <TabsContent value="skills" className="min-h-[480px] p-6 overflow-y-auto max-h-[70vh]">
             <SkillsTab />
+          </TabsContent>
+
+          <TabsContent value="plugins" className="min-h-[480px] p-6 overflow-y-auto max-h-[70vh]">
+            <PluginsTab />
           </TabsContent>
 
           <TabsContent value="accounts" className="min-h-[480px] p-6 overflow-y-auto max-h-[70vh]">

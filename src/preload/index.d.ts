@@ -14,6 +14,24 @@ import type {
 } from '../main/database/types'
 import type { PropertyType } from '../main/vault/metadata'
 import type { PropertyTypeEntry, Backlink, OutgoingLink } from '../main/vault/documents-service'
+import type { InstalledPlugin, ViewerContribution } from '../main/plugins/types'
+
+interface PluginListItem extends InstalledPlugin {
+  name: string
+  description?: string
+  version?: string
+  author?: string
+}
+
+interface MarketplacePluginInfo {
+  id: string
+  name: string
+  description: string
+  author: string
+  version: string
+  path: string
+  url?: string
+}
 
 interface SkillInfo {
   name: string
@@ -220,6 +238,16 @@ interface GreenteaApi {
     marketplaceRefresh(): Promise<MarketplaceSkillInfo[]>
   }
   onSkillsChanged(callback: () => void): () => void
+  plugins: {
+    list(): Promise<PluginListItem[]>
+    install(url: string): Promise<PluginListItem>
+    remove(id: string): Promise<void>
+    toggle(id: string, enabled: boolean): Promise<void>
+    marketplaceList(): Promise<MarketplacePluginInfo[]>
+    marketplaceRefresh(): Promise<MarketplacePluginInfo[]>
+    viewers(): Promise<ViewerContribution[]>
+  }
+  onPluginsChanged(callback: () => void): () => void
   mcp: {
     getConfig(): Promise<McpConfig>
     saveConfig(config: McpConfig): Promise<void>

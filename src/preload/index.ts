@@ -254,6 +254,23 @@ const greenteaApi = {
       ipcRenderer.removeListener('skills:changed', sub)
     }
   },
+  plugins: {
+    list: (): Promise<unknown[]> => ipcRenderer.invoke('plugins:list'),
+    install: (url: string): Promise<unknown> => ipcRenderer.invoke('plugins:install', url),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('plugins:remove', id),
+    toggle: (id: string, enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke('plugins:toggle', id, enabled),
+    marketplaceList: (): Promise<unknown[]> => ipcRenderer.invoke('plugins:marketplace:list'),
+    marketplaceRefresh: (): Promise<unknown[]> => ipcRenderer.invoke('plugins:marketplace:refresh'),
+    viewers: (): Promise<unknown[]> => ipcRenderer.invoke('plugins:viewers')
+  },
+  onPluginsChanged: (callback: () => void): (() => void) => {
+    const sub = (): void => callback()
+    ipcRenderer.on('plugins:changed', sub)
+    return () => {
+      ipcRenderer.removeListener('plugins:changed', sub)
+    }
+  },
   mcp: {
     getConfig: (): Promise<unknown> => ipcRenderer.invoke('mcp:get-config'),
     saveConfig: (config: unknown): Promise<void> => ipcRenderer.invoke('mcp:save-config', config),

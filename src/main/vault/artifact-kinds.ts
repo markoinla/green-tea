@@ -1,5 +1,5 @@
 import { extname } from 'path'
-import type { DocumentKind } from '../database/types'
+import type { BuiltinDocumentKind, DocumentKind } from '../database/types'
 
 export type { DocumentKind }
 
@@ -16,8 +16,8 @@ export type { DocumentKind }
  * in the renderer. An unmapped extension is intentionally NOT indexed.
  */
 
-/** Extension (lowercased, no dot) → kind. The only place extensions are listed. */
-const EXT_TO_KIND: Record<string, DocumentKind> = {
+/** Extension (lowercased, no dot) → builtin kind. The only place builtins are listed. */
+const EXT_TO_KIND: Record<string, BuiltinDocumentKind> = {
   md: 'note',
   html: 'html',
   htm: 'html',
@@ -32,10 +32,22 @@ const EXT_TO_KIND: Record<string, DocumentKind> = {
   excalidraw: 'canvas'
 }
 
+/**
+ * Plugin-contributed extension → namespaced kind (`plugin:<id>:<kind>`). Populated
+ * by the plugin registry via `setPluginExtMap` whenever enabled plugins change.
+ * Consulted only after builtins, so a builtin extension can never be overridden.
+ */
+let pluginExtMap: Record<string, string> = {}
+
+/** Replace the plugin extension map (ext, no dot, lowercase → namespaced kind). */
+export function setPluginExtMap(map: Record<string, string>): void {
+  pluginExtMap = map
+}
+
 /** The kind for a file path, or `null` when its extension isn't indexed at all. */
 export function kindForExt(filePath: string): DocumentKind | null {
   const ext = extname(filePath).slice(1).toLowerCase()
-  return EXT_TO_KIND[ext] ?? null
+  return EXT_TO_KIND[ext] ?? pluginExtMap[ext] ?? null
 }
 
 /** True for the genuine markdown-note path; false for every artifact kind. */

@@ -29,6 +29,9 @@ import {
 } from './theme-watcher'
 import { getPythonBinDir } from './python'
 import { GT_FILE_SCHEME, GT_FILE_PRIVILEGE, createGtFileHandler } from './protocol/gt-file'
+import { GT_PLUGIN_SCHEME, GT_PLUGIN_PRIVILEGE, createGtPluginHandler } from './protocol/gt-plugin'
+import { seedDefaultPlugins } from './plugins/manager'
+import { reloadPluginRegistry } from './plugins/registry'
 
 // Fix PATH for macOS/Linux — Electron launched from the dock gets a minimal
 // PATH that excludes nvm, homebrew, etc. Fetch the real shell PATH so spawned
@@ -70,7 +73,8 @@ protocol.registerSchemesAsPrivileged([
       secure: true
     }
   },
-  GT_FILE_PRIVILEGE
+  GT_FILE_PRIVILEGE,
+  GT_PLUGIN_PRIVILEGE
 ])
 
 // Set true on a genuine quit (Cmd-Q / tray Quit / app-menu Quit) so the
@@ -174,6 +178,10 @@ app.whenReady().then(() => {
   // Traversal-guarded + CSP-headed; see src/main/protocol/gt-file.ts.
   protocol.handle(GT_FILE_SCHEME, createGtFileHandler(db))
 
+  // Serve plugin viewer assets via gt-plugin://<id>/ protocol.
+  // Traversal-guarded + CSP-headed; see src/main/protocol/gt-plugin.ts.
+  protocol.handle(GT_PLUGIN_SCHEME, createGtPluginHandler(db))
+
   // One-time: move notes from the old `vaults/` tree into the unified
   // `workspaces/` tree. Runs before ensureUserDirs so it can rename the whole
   // tree when the target doesn't exist yet. Guarded so a filesystem error
@@ -187,6 +195,12 @@ app.whenReady().then(() => {
 
   // Ensure base user directories exist (re-creates if deleted)
   ensureUserDirs(db)
+
+  // Seed bundled default plugins (re-seeds if deleted) and build the plugin
+  // registry (ext map + viewer cache). Must run BEFORE reindexAllWorkspaces so
+  // the plugin extension map is populated when the index walk classifies files.
+  seedDefaultPlugins(db)
+  reloadPluginRegistry(db)
 
   // Rebuild the derived documents index from the markdown files on disk
   // (files are the source of truth; the SQLite rows are a disposable cache).

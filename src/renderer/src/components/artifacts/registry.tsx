@@ -1,11 +1,22 @@
 import type { ComponentType } from 'react'
-import { FileCode, FileImage, FileText, Shapes, Table2, type LucideIcon } from 'lucide-react'
+import * as Icons from 'lucide-react'
+import {
+  FileCode,
+  FileImage,
+  FileText,
+  Puzzle,
+  Shapes,
+  Table2,
+  type LucideIcon
+} from 'lucide-react'
 import { HtmlViewer } from '../editor/HtmlViewer'
 import { TableViewer } from '../editor/TableViewer'
 import { ImageViewer } from '../editor/ImageViewer'
 import { PdfViewer } from '../editor/PdfViewer'
 import { CanvasViewer } from '../editor/CanvasViewer'
-import type { Document, DocumentKind } from '../../../../main/database/types'
+import { PluginViewer } from '../editor/PluginViewer'
+import type { BuiltinDocumentKind, Document, DocumentKind } from '../../../../main/database/types'
+import type { ViewerContribution } from '../../../../main/plugins/types'
 
 /**
  * The renderer-side artifact viewer registry (v2) — the SECOND of the two
@@ -76,7 +87,7 @@ function CanvasArtifactViewer({
   return <CanvasViewer gtFileId={doc.id} fileName={doc.title} watchDocId={doc.id} />
 }
 
-const REGISTRY: Partial<Record<DocumentKind, ArtifactViewerEntry>> = {
+const REGISTRY: Partial<Record<BuiltinDocumentKind, ArtifactViewerEntry>> = {
   html: { Viewer: HtmlArtifactViewer, icon: FileCode, dataSource: 'gt-file' },
   csv: { Viewer: TableArtifactViewer, icon: Table2, dataSource: 'read' },
   image: { Viewer: ImageArtifactViewer, icon: FileImage, dataSource: 'gt-file' },
@@ -84,16 +95,68 @@ const REGISTRY: Partial<Record<DocumentKind, ArtifactViewerEntry>> = {
   canvas: { Viewer: CanvasArtifactViewer, icon: Shapes, dataSource: 'read' }
 }
 
+/**
+ * The plugin-viewer store: the flat `ViewerContribution[]` of every enabled
+ * plugin, keyed by namespaced kind (`plugin:<id>:<kind>`). Populated by main via
+ * the IPC bridge (`window.api.plugins.viewers()` → `setPluginViewers`) and kept in
+ * sync on `plugins:changed`. Built-in REGISTRY never holds plugin kinds; they're
+ * routed through here instead.
+ */
+let PLUGIN_VIEWERS: Record<string, ViewerContribution> = {}
+const pluginViewerSubscribers = new Set<() => void>()
+
+/** Replace the plugin-viewer store and notify subscribers (re-renders trees/tabs). */
+export function setPluginViewers(contributions: ViewerContribution[]): void {
+  const next: Record<string, ViewerContribution> = {}
+  for (const c of contributions) next[c.kind] = c
+  PLUGIN_VIEWERS = next
+  for (const cb of pluginViewerSubscribers) cb()
+}
+
+/** Subscribe to plugin-viewer store changes; returns an unsubscribe fn. */
+export function subscribePluginViewers(cb: () => void): () => void {
+  pluginViewerSubscribers.add(cb)
+  return () => {
+    pluginViewerSubscribers.delete(cb)
+  }
+}
+
+/**
+ * Resolve a lucide icon name (as declared in a plugin manifest, e.g. `'Network'`)
+ * to its component, falling back to the generic plugin icon for an unknown name.
+ */
+function resolveLucideIcon(name: string): LucideIcon {
+  const icon = (Icons as unknown as Record<string, unknown>)[name]
+  return typeof icon === 'function' ? (icon as LucideIcon) : Puzzle
+}
+
+/** The viewer entry for a plugin kind, or null when no enabled plugin provides it. */
+function pluginViewerForKind(kind: string): ArtifactViewerEntry | null {
+  const contribution = PLUGIN_VIEWERS[kind]
+  if (!contribution) return null
+  return {
+    Viewer: (props) => <PluginViewer contribution={contribution} {...props} />,
+    icon: resolveLucideIcon(contribution.icon),
+    dataSource: 'read'
+  }
+}
+
 /** The viewer for an artifact kind, or null for notes / unregistered kinds. */
 export function viewerForKind(kind: DocumentKind | undefined): ArtifactViewerEntry | null {
   if (!kind || kind === 'note') return null
-  return REGISTRY[kind] ?? null
+  if (kind.startsWith('plugin:')) return pluginViewerForKind(kind)
+  return REGISTRY[kind as BuiltinDocumentKind] ?? null
 }
 
 /** The tree icon for a kind — the registry icon for artifacts, else the note icon. */
 export function iconForKind(kind: DocumentKind | undefined): LucideIcon {
   if (kind && kind !== 'note') {
-    const entry = REGISTRY[kind]
+    if (kind.startsWith('plugin:')) {
+      const contribution = PLUGIN_VIEWERS[kind]
+      if (contribution) return resolveLucideIcon(contribution.icon)
+      return Puzzle
+    }
+    const entry = REGISTRY[kind as BuiltinDocumentKind]
     if (entry) return entry.icon
   }
   return FileText

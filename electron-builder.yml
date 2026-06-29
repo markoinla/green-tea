@@ -24,6 +24,8 @@ files:
 extraResources:
   - from: resources/default-skills
     to: default-skills
+  - from: resources/default-plugins
+    to: default-plugins
   - from: resources/python
     to: python
 asarUnpack:
