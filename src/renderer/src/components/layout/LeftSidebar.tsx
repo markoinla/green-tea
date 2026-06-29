@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Search, X } from 'lucide-react'
+import { Search, X, Files } from 'lucide-react'
 import { toast } from 'sonner'
 import { Sidebar, SidebarHeader } from '@renderer/components/ui/sidebar'
 import { useMetadataFilter } from '@renderer/contexts/MetadataFilterContext'
@@ -297,6 +297,13 @@ export function LeftSidebar({
       hoverExpanded={hoverExpanded}
       onHoverChange={onHoverChange}
     >
+      {/* Collapsed indicator — only visible in icon mode */}
+      <div className="hidden group-data-[collapsible=icon]:flex flex-col items-center pt-3 gap-2">
+        <Files className="h-4 w-4 text-muted-foreground" />
+      </div>
+
+      {/* Full content — hidden in icon mode, shown when expanded or hover-expanded */}
+      <div className="flex flex-col min-h-0 flex-1 w-full group-data-[collapsible=icon]:hidden">
       <SidebarHeader className="px-3 py-2">
         <WorkspaceSwitcher
           selectedWorkspaceId={selectedWorkspaceId}
@@ -378,6 +385,7 @@ export function LeftSidebar({
       />
 
       <SidebarFooterSection selectedWorkspaceId={selectedWorkspaceId} />
+      </div>
 
       <ConfirmDeleteDialog
         open={pendingTrash !== null}

@@ -117,6 +117,17 @@ export function AppLayout({
   const hasDoc = activeDocId !== null
   const chatWidth = hasDoc ? rightWidth : windowWidth - leftWidth
 
+  // Closing the last tab leaves an empty inset. If the sidebars are collapsed,
+  // re-open them so the chat sidebar expands to fill the area — matching the
+  // normal no-tabs layout instead of leaving a blank screen behind icon strips.
+  const prevHasDoc = useRef(hasDoc)
+  useEffect(() => {
+    if (prevHasDoc.current && !hasDoc && !sidebarOpen) {
+      setSidebarOpen(true)
+    }
+    prevHasDoc.current = hasDoc
+  }, [hasDoc, sidebarOpen])
+
   const { documents } = useDocuments(selectedWorkspaceId)
   const activeDoc = activeDocId ? documents.find((d) => d.id === activeDocId) : undefined
   // Export actions only apply to note docs — not file: tabs or csv/html artifacts.
