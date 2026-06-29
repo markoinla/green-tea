@@ -26,6 +26,7 @@ import { updateAgentLogStatus } from '../database/repositories/agent-logs'
 import { getDocument, updateDocument, updateFrontmatter } from '../vault/documents-service'
 import { createVersion } from '../database/repositories/document-versions'
 import { getWorkspace } from '../database/repositories/workspaces'
+import { readWorkspaceDoc } from '../vault/workspace-docs'
 import { markdownToTiptap } from '../markdown/tiptap-markdown'
 import { getSetting } from '../database/repositories/settings'
 import { getSkillsDir } from '../skills/manager'
@@ -498,11 +499,13 @@ export async function promptAgent(
   // Add workspace context
   if (workspaceId) {
     const workspace = getWorkspace(db, workspaceId)
-    if (workspace && workspace.memory) {
-      fullPrompt = `[Workspace Memory:\n${workspace.memory}]\n\n${fullPrompt}`
+    const memory = readWorkspaceDoc(db, workspaceId, 'memory')
+    const description = readWorkspaceDoc(db, workspaceId, 'description')
+    if (memory) {
+      fullPrompt = `[Workspace Memory:\n${memory}]\n\n${fullPrompt}`
     }
-    if (workspace && workspace.description) {
-      fullPrompt = `[Workspace Context — "${workspace.name}":\n${workspace.description}]\n\n${fullPrompt}`
+    if (workspace && description) {
+      fullPrompt = `[Workspace Context — "${workspace.name}":\n${description}]\n\n${fullPrompt}`
     }
   }
 

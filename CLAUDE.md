@@ -51,6 +51,8 @@ All IPC channels follow a namespace pattern: `db:documents:*`, `db:blocks:*`, `d
 
 Uses `@earendil-works/pi-coding-agent`, whose built-in filesystem tools (`read`, `write`, `edit`, `bash`, `ls`, `grep`, `find`) are active in the agent session alongside custom tools in `src/main/agent/tools/`. The agent navigates/reads notes via the built-ins plus the index-backed `notes_list`, `notes_get_markdown`, `notes_query`, and `notes_get_backlinks`, and writes via `notes_create` / `notes_propose_edit` / `notes_set_metadata`, which propose changes as markdown patches. Patches go through an approval flow (stored in `agent_logs`, approved/rejected by user in UI). Other tools: `workspace_add_file`, `web_search`, `web_fetch`, `subagent`.
 
+Workspace description and memory are on-disk markdown files at the workspace root — `README.md` (stable, human-authored project context; the conventional name, so an existing folder's README is adopted as-is) and `memory.md` (agent-managed notebook of facts/preferences/decisions). Both are indexed like normal notes (the vault watcher picks them up, they appear in the tree and live-reload on external edits). They are read fresh from disk at prompt-injection time and prepended to every agent prompt, and written via `notes_update_workspace_description` / `notes_update_workspace_memory` (memory is a full overwrite) through the atomic-write + self-write machinery in `src/main/vault/workspace-docs.ts`. If deleted, they are recreated empty on restart — never restored from old content, so deleting memory is a legitimate "forget" gesture.
+
 API key and model are read from the `settings` table (fallback to `.env`). Skills loaded from `~/Documents/Green Tea/skills/`.
 
 ### Editor

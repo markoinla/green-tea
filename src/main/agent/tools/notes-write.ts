@@ -8,10 +8,12 @@ import {
   createDocument,
   getDocument,
   updateDocument,
-  createFolder
+  createFolder,
+  reindexFile
 } from '../../vault/documents-service'
 import { getFolder } from '../../database/repositories/folders'
-import { updateWorkspace, getWorkspace } from '../../database/repositories/workspaces'
+import { getWorkspace } from '../../database/repositories/workspaces'
+import { writeWorkspaceDoc, workspaceDocPath } from '../../vault/workspace-docs'
 import { createMarkdownDiff } from '../../markdown/diff'
 import { markdownToTiptap, tiptapToMarkdown, type TTDoc } from '../../markdown/tiptap-markdown'
 import { RESERVED_KEYS } from '../../vault/metadata'
@@ -53,7 +55,7 @@ export function notesUpdateWorkspaceDescription(
   db: Database.Database,
   params: { description: string },
   workspaceId: string
-): ToolResult {
+): ToolResult & { docId?: string | null } {
   if (!workspaceId) {
     return { content: '', error: 'No workspace context available' }
   }
@@ -61,15 +63,20 @@ export function notesUpdateWorkspaceDescription(
   if (!workspace) {
     return { content: '', error: `Workspace not found: ${workspaceId}` }
   }
-  updateWorkspace(db, workspaceId, { description: params.description })
-  return { content: `Workspace description updated successfully.` }
+  writeWorkspaceDoc(db, workspaceId, 'description', params.description)
+  // These docs are indexed notes; the watcher's self-write guard skips the app's
+  // own bytes, so reindex here to keep the index (row / notes_fts / note_links)
+  // fresh and surface the docId for a content-changed live-reload broadcast.
+  const reindexed = reindexFile(db, workspaceDocPath(db, workspaceId, 'description'))
+  const docId = 'docId' in reindexed ? reindexed.docId : null
+  return { content: `Workspace description updated successfully.`, docId }
 }
 
 export function notesUpdateWorkspaceMemory(
   db: Database.Database,
   params: { memory: string },
   workspaceId: string
-): ToolResult {
+): ToolResult & { docId?: string | null } {
   if (!workspaceId) {
     return { content: '', error: 'No workspace context available' }
   }
@@ -77,8 +84,13 @@ export function notesUpdateWorkspaceMemory(
   if (!workspace) {
     return { content: '', error: `Workspace not found: ${workspaceId}` }
   }
-  updateWorkspace(db, workspaceId, { memory: params.memory })
-  return { content: 'Workspace memory updated successfully.' }
+  writeWorkspaceDoc(db, workspaceId, 'memory', params.memory)
+  // These docs are indexed notes; the watcher's self-write guard skips the app's
+  // own bytes, so reindex here to keep the index (row / notes_fts / note_links)
+  // fresh and surface the docId for a content-changed live-reload broadcast.
+  const reindexed = reindexFile(db, workspaceDocPath(db, workspaceId, 'memory'))
+  const docId = 'docId' in reindexed ? reindexed.docId : null
+  return { content: 'Workspace memory updated successfully.', docId }
 }
 
 export function notesCreateFolder(

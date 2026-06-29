@@ -25,7 +25,10 @@ export function reloadPluginRegistry(db: Database.Database): void {
     const artifacts = plugin.manifest.contributes?.artifacts ?? []
     for (const artifact of artifacts) {
       const kind = pluginKind(plugin.id, artifact.kind)
-      for (const ext of artifact.extensions) {
+      // Tolerate a malformed manifest: a missing/non-array `extensions` must not
+      // throw and break loading of every plugin (this runs over all enabled plugins).
+      const extensions = Array.isArray(artifact.extensions) ? artifact.extensions : []
+      for (const ext of extensions) {
         extMap[ext.replace(/^\./, '').toLowerCase()] = kind
       }
       viewers.push({
@@ -34,7 +37,13 @@ export function reloadPluginRegistry(db: Database.Database): void {
         entry: artifact.entry,
         icon: artifact.icon,
         editable: artifact.editable ?? false,
-        shareable: artifact.shareable ?? false
+        shareable: artifact.shareable ?? false,
+        extensions,
+        // A creatable kind needs an extension to mint a file; without one it can't
+        // be created, so don't advertise it as creatable.
+        creatable: (artifact.creatable ?? false) && extensions.length > 0,
+        newLabel: artifact.newLabel,
+        templateFile: artifact.templateFile
       })
     }
   }

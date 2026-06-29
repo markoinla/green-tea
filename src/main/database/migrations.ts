@@ -1,7 +1,14 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { getWorkspaceVaultDir } from '../vault/paths'
+import {
+  WORKSPACE_DESCRIPTION_FILE,
+  WORKSPACE_MEMORY_FILE,
+  writeWorkspaceDoc
+} from '../vault/workspace-docs'
 
 /**
  * Default base dir for workspace folders, mirrored from `agent/paths.ts`
@@ -436,4 +443,53 @@ export function runMigrations(db: Database.Database): void {
       prefix = '2 3 4'
     )
   `)
+
+}
+
+/**
+ * One-time backfill of the on-disk workspace docs (`README.md` / `memory.md`)
+ * from the legacy `workspaces.description` /
+ * `workspaces.memory` columns. Files are now the source of truth (see
+ * `vault/workspace-docs.ts`); the columns are kept this release as a vestigial
+ * safety net and dropped in a follow-up. Guarded by a one-shot settings flag so
+ * the backfill runs AT MOST ONCE — running it on every startup would resurrect
+ * memory a user deliberately deleted (a file-absent check alone can't distinguish
+ * "never migrated" from "deleted to forget"). Per workspace: write a file only
+ * when its column is non-empty AND the workspace folder EXISTS AND the file is
+ * ABSENT — never overwrite, never mkdir a missing/unavailable workspace folder
+ * back. writeWorkspaceDoc routes through markSelfWrite + atomicWriteFile so the
+ * vault watcher never echoes.
+ *
+ * IMPORTANT: this MUST run AFTER the legacy `vaults/` -> `workspaces/` layout
+ * move and ensureUserDirs (so path-derived workspace folders are already at their
+ * final location), otherwise `existsSync(dir)` would skip them while the one-shot
+ * flag is set, permanently stranding their description/memory. It is therefore
+ * invoked from the startup sequence, NOT from `runMigrations` (which runs inside
+ * getDatabase, before the layout move).
+ */
+export function backfillWorkspaceDocs(db: Database.Database): void {
+  const BACKFILL_FLAG = 'migration:workspace_docs_backfill_done'
+  const backfillDone = db.prepare('SELECT value FROM settings WHERE key = ?').get(BACKFILL_FLAG) as
+    | { value: string }
+    | undefined
+  if (backfillDone) return
+
+  const wsRows = db.prepare('SELECT id, description, memory FROM workspaces').all() as {
+    id: string
+    description: string | null
+    memory: string | null
+  }[]
+  for (const ws of wsRows) {
+    const dir = getWorkspaceVaultDir(db, ws.id)
+    if (!existsSync(dir)) continue
+    const description = ws.description ?? ''
+    const memory = ws.memory ?? ''
+    if (description && !existsSync(join(dir, WORKSPACE_DESCRIPTION_FILE))) {
+      writeWorkspaceDoc(db, ws.id, 'description', description)
+    }
+    if (memory && !existsSync(join(dir, WORKSPACE_MEMORY_FILE))) {
+      writeWorkspaceDoc(db, ws.id, 'memory', memory)
+    }
+  }
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(BACKFILL_FLAG, '1')
 }

@@ -14,6 +14,9 @@ import { ensureUserDirs } from './agent/paths'
 import { reindexAllWorkspaces } from './vault/documents-service'
 import { migrateLegacyVaultLayout } from './vault/paths'
 import { startVaultWatcher, stopVaultWatcher } from './vault/vault-watcher'
+import { ensureWorkspaceDocs } from './vault/workspace-docs'
+import { backfillWorkspaceDocs } from './database/migrations'
+import { listWorkspaces } from './database/repositories/workspaces'
 import { startPluginWatcher, stopPluginWatcher } from './plugins/watcher'
 import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
@@ -202,6 +205,26 @@ app.whenReady().then(() => {
   // the plugin extension map is populated when the index walk classifies files.
   seedDefaultPlugins(db)
   reloadPluginRegistry(db)
+
+  // One-time DB->file backfill of README.md / memory.md
+  // from the legacy `workspaces.description` / `workspaces.memory` columns. MUST
+  // run AFTER migrateLegacyVaultLayout + ensureUserDirs (so each workspace folder
+  // is already at its final location) and BEFORE reindexAllWorkspaces (so the
+  // backfilled files get indexed this session). One-shot-guarded internally.
+  backfillWorkspaceDocs(db)
+
+  // Ensure each workspace has its README.md / memory.md
+  // present at the workspace root, recreating them EMPTY if deleted (create-only;
+  // never restores old content). Runs BEFORE reindexAllWorkspaces so a recreated
+  // file is indexed/visible this session (not only after the next restart).
+  // Defensive per-workspace so a single bad folder never blocks startup.
+  for (const ws of listWorkspaces(db)) {
+    try {
+      ensureWorkspaceDocs(db, ws.id)
+    } catch (err) {
+      console.error('[workspace-docs] ensure failed for workspace', ws.id, err)
+    }
+  }
 
   // Rebuild the derived documents index from the markdown files on disk
   // (files are the source of truth; the SQLite rows are a disposable cache).

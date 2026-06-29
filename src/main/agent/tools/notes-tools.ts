@@ -284,6 +284,13 @@ export function createNotesTools(
       }
       if (!window.isDestroyed()) {
         window.webContents.send('workspaces:changed')
+        // The file is an indexed note: refresh the tree and live-reload an
+        // already-open editor (writeWorkspaceDoc reindexed it; the watcher's
+        // self-write guard would otherwise suppress this).
+        window.webContents.send('documents:changed')
+        if (result.docId) {
+          window.webContents.send('documents:content-changed', { id: result.docId })
+        }
       }
       return {
         content: [{ type: 'text' as const, text: result.content }],
@@ -317,6 +324,13 @@ export function createNotesTools(
       }
       if (!window.isDestroyed()) {
         window.webContents.send('workspaces:changed')
+        // The file is an indexed note: refresh the tree and live-reload an
+        // already-open editor (writeWorkspaceDoc reindexed it; the watcher's
+        // self-write guard would otherwise suppress this).
+        window.webContents.send('documents:changed')
+        if (result.docId) {
+          window.webContents.send('documents:content-changed', { id: result.docId })
+        }
       }
       return {
         content: [{ type: 'text' as const, text: result.content }],

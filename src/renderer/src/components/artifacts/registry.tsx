@@ -140,6 +140,24 @@ export function isShareablePluginKind(kind: DocumentKind | undefined): boolean {
 }
 
 /**
+ * The plugin artifact kinds that opt into in-app creation (`creatable === true`),
+ * as ready-to-render "New <label>" menu entries. The label is the manifest's
+ * `newLabel` or a derived `New <kind segment>`; the icon resolves the
+ * contribution's Lucide icon. Consumers must subscribe via
+ * {@link subscribePluginViewers}/{@link getPluginViewersVersion} to re-read after
+ * the store is populated asynchronously on `plugins:changed`.
+ */
+export function creatablePluginKinds(): { kind: DocumentKind; label: string; icon: LucideIcon }[] {
+  return Object.values(PLUGIN_VIEWERS)
+    .filter((c) => c.creatable)
+    .map((c) => ({
+      kind: c.kind as DocumentKind,
+      label: c.newLabel ?? `New ${c.kind.split(':').pop()}`,
+      icon: resolveLucideIcon(c.icon)
+    }))
+}
+
+/**
  * Snapshot-provider registry, keyed by doc id. A mounted {@link PluginViewer}
  * registers a function that asks its live iframe for a self-contained, read-only
  * HTML snapshot (the `gt:render-static` → `gt:static` round-trip); the share UI

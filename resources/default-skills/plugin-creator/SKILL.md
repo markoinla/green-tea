@@ -32,10 +32,14 @@ tools — a plugin is sandboxed and only ever sees its own file's bytes.
    source isn't found, write the two files by hand from the manifest + viewer examples below.)
 
 2. Edit `manifest.json` — set `id`, `name`, the `contributes.artifacts[0].kind`, the
-   `extensions` your plugin claims, and `editable`.
-3. Edit `viewer.html` — replace the `render()` function with your rendering logic. Keep the
+   `extensions` your plugin claims, and `editable`. If you want the user to be able to create new
+   files of this kind from inside the app, also set `creatable: true` (and optionally `newLabel`
+   + `templateFile`).
+3. If `creatable: true` and you set a `templateFile`, write that seed file next to `viewer.html`
+   (e.g. `new.<ext>`) containing minimal valid starter content for your extension.
+4. Edit `viewer.html` — replace the `render()` function with your rendering logic. Keep the
    bridge wiring (the `message` listener and the `gt:ready` post) exactly as-is.
-4. Open (or refresh) an artifact whose extension your plugin claims. **No app restart needed** —
+5. Open (or refresh) an artifact whose extension your plugin claims. **No app restart needed** —
    see HOT-RELOAD below.
 
 The template (`template/viewer.html` + `template/manifest.json`) already implements the
@@ -87,7 +91,8 @@ so **restart the app** once after creating or changing a plugin.)
         "entry": "viewer.html",
         "icon": "FileText",
         "editable": true,
-        "shareable": false
+        "shareable": false,
+        "creatable": false
       }
     ]
   }
@@ -133,6 +138,20 @@ Each entry in `contributes.artifacts[]`:
 - `shareable` — optional, defaults to `false`. Opt-in: set `true` to let the **user** publish a
   public, frozen, read-only snapshot of this artifact (see [Sharing](#sharing-optional)). Leave
   `false` (or omit) for artifacts that should never be shared.
+- `creatable` — optional, defaults to `false`. Opt-in: set `true` to add a **"New &lt;label&gt;"**
+  item to the root `+` menu and the folder right-click menu, so the **user** can create a fresh,
+  empty file of this kind from inside Green Tea (see [Making a kind user-creatable](#making-a-kind-user-creatable-optional)).
+  Leave `false` (or omit) for kinds that only ever appear when the agent or the user adds a file
+  with the matching extension by hand.
+- `newLabel` — optional. The label shown on the "New …" menu item when `creatable: true`, e.g.
+  `"New kanban board"`. When omitted, Green Tea derives a label from the kind id (`New <kind>`).
+- `templateFile` — optional, only meaningful when `creatable: true`. A filename **inside the
+  plugin folder** (next to `manifest.json`) whose bytes **seed** each newly created file. When
+  omitted, new files start **empty** (`""`). The path is clamped to the plugin folder — it cannot
+  point outside it — and a missing/unreadable file falls back to an empty seed. **You ship this
+  seed file** alongside `manifest.json` and the entry HTML. Because the seed can be absent or
+  empty, your viewer must still render empty/missing bytes defensively (see below) — the template
+  is a nicer starting state, not something the viewer may assume is present.
 
 ## Bridge protocol
 
@@ -236,6 +255,36 @@ Your `gt:render-static` handler must reply with `{ type: 'gt:static', html }` wh
 
 Keep your existing `gt:ready`/`gt:init`/`gt:save` handling intact; just add a branch for
 `gt:render-static` in the same `message` listener (see the template's `renderStatic()`).
+
+## Making a kind user-creatable (optional)
+
+By default a plugin only renders files that already exist — the agent (or the user) creates the
+file, and the plugin shows it. Set `"creatable": true` on the artifact entry to also let the
+**user** create a brand-new file of this kind from inside Green Tea: a **"New &lt;label&gt;"** item
+appears in both the root `+` menu and the folder right-click menu. Picking it writes a new file
+(using the first of your `extensions`) and opens it in your viewer.
+
+Three optional fields control this, all on the same `contributes.artifacts[]` entry:
+
+- `creatable` — set `true` to show the "New …" item (defaults `false`).
+- `newLabel` — the menu label, e.g. `"New kanban board"`. Omitted ⇒ derived from the kind id.
+- `templateFile` — a filename **inside your plugin folder** whose bytes seed each new file. When
+  omitted, new files start **empty** (`""`).
+
+**You ship the seed file.** Put it next to `manifest.json` and the entry HTML (the same folder),
+and name it in `templateFile`. The host reads it from the plugin folder only — the path is
+clamped, so it cannot reach files outside the plugin — and if it is missing or unreadable the new
+file simply starts empty.
+
+> **The viewer must tolerate empty/missing bytes.** Because the seed can be absent or empty, your
+> `render()` must never crash on `""` — `gt:init` already hands you `''` in that case (the
+> template's `render()` already guards this with `typeof msg.bytes === 'string' ? msg.bytes : ''`
+> and a `try/catch` around `JSON.parse`). The template is just a friendlier starting state, not
+> something `render()` is allowed to assume exists.
+
+The plugin/agent never creates these files behind the user's back — the "New …" item is a
+deliberate **user** action, exactly like sharing. Setting `creatable: true` only makes the menu
+item available.
 
 ## Capabilities and hard limits
 
@@ -350,12 +399,14 @@ and debounce-saves serialized CSV. Note the handshake order: listener first, `gt
 **3. Open a `.csv` file as an artifact.** The watcher has already registered the plugin; the
 table renders, edits save back to disk after ~500ms. Done — no restart.
 
-## Worked example: a shareable kanban board
+## Worked example: a shareable, creatable kanban board
 
-Goal: render a `.kanban` JSON file (`{ "columns": [{ "title", "cards": ["…"] }] }`) as a board
-and let the **user** publish a frozen, read-only snapshot of it.
+Goal: render a `.kanban` JSON file (`{ "columns": [{ "title", "cards": ["…"] }] }`) as a board,
+let the **user** create a fresh board from a starter template, and let the **user** publish a
+frozen, read-only snapshot of it.
 
-**1. Manifest** at `~/Documents/Green Tea/plugins/kanban/manifest.json` — note `shareable: true`:
+**1. Manifest** at `~/Documents/Green Tea/plugins/kanban/manifest.json` — note `shareable: true`
+and `creatable: true` with a `templateFile` that seeds new boards:
 
 ```json
 {
@@ -363,19 +414,39 @@ and let the **user** publish a frozen, read-only snapshot of it.
   "name": "Kanban Board",
   "version": "1.0.0",
   "minAppVersion": "6.2.0",
-  "description": "View a kanban board and publish a read-only snapshot",
+  "description": "View a kanban board, create one from a starter, and publish a read-only snapshot",
   "author": "Green Tea",
   "contributes": {
     "artifacts": [
-      { "kind": "kanban", "extensions": ["kanban"], "entry": "viewer.html", "icon": "SquareKanban", "editable": false, "shareable": true }
+      {
+        "kind": "kanban",
+        "extensions": ["kanban"],
+        "entry": "viewer.html",
+        "icon": "SquareKanban",
+        "editable": false,
+        "shareable": true,
+        "creatable": true,
+        "newLabel": "New kanban board",
+        "templateFile": "new.kanban"
+      }
     ]
   }
 }
 ```
 
-**2. `viewer.html`** — render the board, and add a `gt:render-static` branch that emits the
+**2. Starter template** at `~/Documents/Green Tea/plugins/kanban/new.kanban` — this file ships
+**alongside** `manifest.json` and `viewer.html` in the plugin folder; its bytes seed every board
+the user creates from the "New kanban board" menu item:
+
+```json
+{ "columns": [{ "title": "To Do", "cards": [] }, { "title": "Doing", "cards": [] }, { "title": "Done", "cards": [] }] }
+```
+
+**3. `viewer.html`** — render the board, and add a `gt:render-static` branch that emits the
 columns/cards as a self-contained, read-only HTML string. The same `boardHtml()` builder feeds
-both the live view and the snapshot, so the snapshot matches what the user sees:
+both the live view and the snapshot, so the snapshot matches what the user sees. Note that
+`render()` tolerates empty bytes (`board = { columns: [] }`), so a board created with no
+`templateFile` would still render — the starter just gives the user three columns to begin with:
 
 ```html
 <!doctype html>
@@ -442,10 +513,13 @@ both the live view and the snapshot, so the snapshot matches what the user sees:
 </html>
 ```
 
-**3.** Open a `.kanban` file. Because the manifest declares `shareable: true`, the user gets a
-publish action in the share control; clicking it triggers `gt:render-static`, your viewer replies
-with the inlined board HTML, and Green Tea publishes that frozen snapshot. The agent never
-publishes — it only provides the snapshot when asked.
+**4.** Open a `.kanban` file. Because the manifest declares `creatable: true`, the user now also
+gets a **"New kanban board"** item in the root `+` menu and folder right-click menu; picking it
+writes a new `.kanban` file seeded from `new.kanban` and opens it in the viewer. And because the
+manifest declares `shareable: true`, the user gets a publish action in the share control; clicking
+it triggers `gt:render-static`, your viewer replies with the inlined board HTML, and Green Tea
+publishes that frozen snapshot. The agent never creates or publishes on its own — both are the
+user's actions; the plugin only ships the starter and provides the snapshot when asked.
 
 ## Checklist before finishing
 
@@ -457,5 +531,8 @@ publishes — it only provides the snapshot when asked.
 - [ ] Saves are debounced (~500ms) and only sent when `editable: true`.
 - [ ] If `shareable: true`, a `gt:render-static` branch replies with `{ type: 'gt:static', html }`
       that is self-contained and read-only (inlined CSS/data, no host, no `gt:save`).
+- [ ] If the kind should be user-creatable, `creatable: true` is set and (if a `templateFile` is
+      named) that seed file exists in the plugin folder with valid starter content for the
+      claimed extension — and `render()` still tolerates empty/missing bytes without crashing.
 - [ ] No attempt to access other notes, settings, storage, or any app/system API, and no attempt
       to self-publish (publishing is always the user's action).

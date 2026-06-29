@@ -19,6 +19,20 @@ export interface ArtifactContribution {
    * so the renderer's UI gating alone is never trusted.
    */
   shareable?: boolean
+  /**
+   * Opt this artifact kind into being user-creatable. When true, the app shows a
+   * "New <label>" item in the root "+" and folder right-click menus that creates a
+   * fresh file of this kind. Defaults to false — a plugin must explicitly opt in.
+   */
+  creatable?: boolean
+  /** Menu label for the "New <kind>" item; when absent the renderer derives one. */
+  newLabel?: string
+  /**
+   * Filename, relative to the plugin directory, whose bytes seed each newly created
+   * artifact. When absent, new artifacts are seeded with an empty string. The main
+   * process clamps this read to the plugin dir and falls back to '' if unreadable.
+   */
+  templateFile?: string
 }
 
 /** The parsed `manifest.json` of an installed plugin. */
@@ -60,4 +74,12 @@ export interface ViewerContribution {
   editable: boolean
   /** Whether this kind may be published as a read-only share (manifest opt-in). */
   shareable: boolean
+  /** The file extensions that map to this kind (dot-optional, as authored). */
+  extensions: string[]
+  /** Whether the user may create a new artifact of this kind (manifest opt-in). */
+  creatable: boolean
+  /** Menu label for the "New <kind>" item; when absent the renderer derives one. */
+  newLabel?: string
+  /** Plugin-dir-relative filename whose bytes seed each newly created artifact. */
+  templateFile?: string
 }

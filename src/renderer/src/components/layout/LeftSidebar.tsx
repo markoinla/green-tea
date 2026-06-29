@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Sidebar, SidebarHeader } from '@renderer/components/ui/sidebar'
 import { useMetadataFilter } from '@renderer/contexts/MetadataFilterContext'
 import { useDocuments } from '@renderer/hooks/useDocuments'
-import type { Document } from '../../../../main/database/types'
+import type { Document, DocumentKind } from '../../../../main/database/types'
 import { useFolders } from '@renderer/hooks/useFolders'
 import { useWorkspaceFiles } from '@renderer/hooks/useWorkspaceFiles'
 import { WorkspaceSwitcher } from '@renderer/components/workspace/WorkspaceSwitcher'
@@ -136,6 +136,23 @@ export function LeftSidebar({
     const doc = await createArtifact({ title: 'Untitled', kind: 'csv' })
     onSelectDoc(doc.id, { newTab: true })
   }, [selectedWorkspaceId, createArtifact, onSelectDoc])
+
+  // The single generic create handler for plugin-contributed artifact kinds (data
+  // -driven "New <label>" menu items). Mirrors handleNewCanvas/handleNewTable but
+  // takes the kind, and an optional folder it expands first like the in-folder
+  // handlers below.
+  const handleNewArtifactKind = useCallback(
+    async (kind: DocumentKind, folderId?: string) => {
+      if (!selectedWorkspaceId) return
+      if (folderId) {
+        const parent = folders.find((f) => f.id === folderId)
+        if (parent && parent.collapsed === 1) await updateFolder(folderId, { collapsed: 0 })
+      }
+      const doc = await createArtifact({ title: 'Untitled', kind, folder_id: folderId ?? null })
+      onSelectDoc(doc.id, { newTab: true })
+    },
+    [selectedWorkspaceId, folders, updateFolder, createArtifact, onSelectDoc]
+  )
 
   const handleNewFolder = useCallback(async () => {
     await createFolder({ name: uniqueFolderName(folders, '') })
@@ -287,6 +304,7 @@ export function LeftSidebar({
           onNewDocument={handleNewDocument}
           onNewCanvas={handleNewCanvas}
           onNewTable={handleNewTable}
+          onNewArtifactKind={handleNewArtifactKind}
           onNewFolder={handleNewFolder}
         />
         <button
@@ -334,6 +352,7 @@ export function LeftSidebar({
         onNewDocument={handleNewDocument}
         onNewCanvas={handleNewCanvas}
         onNewTable={handleNewTable}
+        onNewArtifactKind={handleNewArtifactKind}
         onNewFolder={handleNewFolder}
         onRenameDoc={handleRenameDoc}
         onDeleteDoc={handleDeleteDoc}

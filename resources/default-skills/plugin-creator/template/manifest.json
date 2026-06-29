@@ -13,7 +13,8 @@
         "entry": "viewer.html",
         "icon": "FileText",
         "editable": true,
-        "shareable": false
+        "shareable": false,
+        "creatable": false
       }
     ]
   }
