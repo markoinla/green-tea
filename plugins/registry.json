@@ -6,5 +6,21 @@
     "author": "Green Tea",
     "version": "1.0.0",
     "path": "resources/default-plugins/mermaid"
+  },
+  {
+    "id": "kanban-board",
+    "name": "Kanban Board",
+    "description": "View and edit .kanban files (JSON) as an interactive Kanban board with drag-and-drop",
+    "author": "Green Tea",
+    "version": "1.1.0",
+    "path": "resources/default-plugins/kanban-board"
+  },
+  {
+    "id": "todo-list",
+    "name": "Todo List",
+    "description": "Vertical day-by-day todo list with drag and drop between days",
+    "author": "Green Tea",
+    "version": "1.0.0",
+    "path": "resources/default-plugins/todo-list"
   }
 ]

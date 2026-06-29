@@ -1,0 +1,955 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Todo List</title>
+    <script>
+      // Prevent theme flash: set initial theme from system preference before render
+      document.documentElement.setAttribute('data-theme',
+        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    </script>
+    <style>
+      :root {
+        --bg: #f4f4f5;
+        --card-bg: #ffffff;
+        --border: #e4e4e7;
+        --text: #18181b;
+        --muted: #a1a1aa;
+        --accent: #6366f1;
+        --accent-fg: #ffffff;
+        --accent-light: #eef2ff;
+        --danger: #ef4444;
+        --done-color: #a1a1aa;
+        --hover-bg: #f4f4f5;
+        --success-fg: #16a34a;
+        --success-bg: #dcfce7;
+        --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+        --radius: 10px;
+      }
+      :root[data-theme="dark"] {
+        --bg: #09090b;
+        --card-bg: #18181b;
+        --border: #27272a;
+        --text: #e4e4e7;
+        --muted: #71717a;
+        --accent: #818cf8;
+        --accent-fg: #18181b;
+        --accent-light: #1e1b4b;
+        --danger: #f87171;
+        --done-color: #52525b;
+        --hover-bg: #27272a;
+        --success-fg: #4ade80;
+        --success-bg: #14532d;
+        --shadow: 0 1px 3px rgba(0,0,0,0.4);
+      }
+
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        font-size: 14px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+
+      /* ── Header ── */
+      #header {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+        background: var(--card-bg);
+        border-bottom: 1px solid var(--border);
+        z-index: 10;
+      }
+      .header-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 20px;
+        gap: 12px;
+      }
+      .header-buttons {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #header h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .quick-add {
+        margin-bottom: 14px;
+      }
+      .quick-add-context {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--muted);
+        padding: 0 4px 6px;
+        line-height: 1.3;
+      }
+      .quick-add-input {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--card-bg);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 14px;
+        padding: 10px 14px;
+        border-radius: var(--radius);
+        outline: none;
+        box-shadow: var(--shadow);
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      .quick-add-input::placeholder { color: var(--muted); }
+      .quick-add-input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-light), var(--shadow);
+      }
+      #theme-btn {
+        font-size: 16px;
+        padding: 6px 8px;
+      }
+      .header-check {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px; height: 24px;
+        border-radius: 6px;
+        background: var(--accent);
+        color: var(--accent-fg);
+        flex-shrink: 0;
+      }
+
+      /* ── View ── */
+      #view {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 20px;
+      }
+      #view-inner {
+        max-width: 680px;
+        margin: 0 auto;
+      }
+
+      /* ── Day card ── */
+      .day-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        margin-bottom: 14px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        transition: box-shadow 0.15s, outline-offset 0.1s;
+      }
+      .day-card.drop-active {
+        outline: 2px dashed var(--accent);
+        outline-offset: -2px;
+      }
+
+      .day-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px 10px;
+        gap: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .day-date {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+        cursor: pointer;
+      }
+      .day-date:hover .day-label {
+        text-decoration: underline;
+        text-decoration-color: var(--muted);
+        text-underline-offset: 3px;
+      }
+      .day-label {
+        font-weight: 600;
+        font-size: 15px;
+        line-height: 1.3;
+      }
+      .day-label.today { color: var(--accent); }
+      .day-full-date {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .day-date-input {
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        padding: 2px 6px;
+        background: var(--card-bg);
+        color: var(--text);
+        outline: none;
+      }
+
+      .day-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .day-progress {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--muted);
+        background: var(--hover-bg);
+        padding: 2px 9px;
+        border-radius: 20px;
+        white-space: nowrap;
+      }
+      .day-progress.all-done {
+        color: var(--success-fg);
+        background: var(--success-bg);
+      }
+
+      /* ── Buttons ── */
+      .btn {
+        border: 1px solid var(--border);
+        background: var(--card-bg);
+        color: var(--text);
+        padding: 6px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        font-family: inherit;
+        transition: background 0.15s, opacity 0.15s;
+      }
+      .btn:hover { background: var(--hover-bg); }
+      .btn-primary {
+        background: var(--accent);
+        color: var(--accent-fg);
+        border-color: var(--accent);
+      }
+      .btn-primary:hover { opacity: 0.88; background: var(--accent); }
+
+      .btn-icon {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px 5px;
+        border-radius: 6px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s, color 0.15s, opacity 0.15s;
+      }
+      .btn-icon:hover { background: var(--hover-bg); color: var(--text); }
+      .btn-icon.danger:hover { color: var(--danger); }
+
+      /* ── Todo list ── */
+      .todo-list { padding: 6px 6px 6px; }
+
+      .todo-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        border-radius: 8px;
+        position: relative;
+        transition: background 0.1s;
+      }
+      .todo-row:hover { background: var(--hover-bg); }
+      .todo-row.done .todo-text {
+        text-decoration: line-through;
+        color: var(--done-color);
+      }
+      .todo-row.dragging { opacity: 0.3; }
+      .todo-row.drop-above::before,
+      .todo-row.drop-below::after {
+        content: '';
+        position: absolute;
+        left: 10px; right: 10px;
+        height: 2px;
+        background: var(--accent);
+        border-radius: 2px;
+        z-index: 1;
+      }
+      .todo-row.drop-above::before { top: -1px; }
+      .todo-row.drop-below::after { bottom: -1px; }
+
+      .drag-handle {
+        cursor: grab;
+        color: var(--muted);
+        opacity: 0;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        padding: 2px;
+        transition: opacity 0.15s;
+      }
+      .drag-handle:active { cursor: grabbing; }
+      .todo-row:hover .drag-handle { opacity: 0.4; }
+      .drag-handle:hover { opacity: 1 !important; color: var(--text); }
+
+      .checkbox {
+        width: 20px; height: 20px;
+        border: 2px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .checkbox:hover { border-color: var(--accent); }
+      .checkbox.checked {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .checkbox.checked svg { display: block; color: var(--accent-fg); }
+      .checkbox svg { display: none; }
+
+      .todo-text {
+        flex: 1;
+        min-width: 0;
+        outline: none;
+        padding: 2px 4px;
+        border-radius: 4px;
+        word-break: break-word;
+        line-height: 1.4;
+      }
+      .todo-text[contenteditable="true"]:focus {
+        background: var(--accent-light);
+      }
+      .todo-text[contenteditable="true"]:empty::before {
+        content: 'Empty todo…';
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      .delete-todo {
+        opacity: 0;
+        flex-shrink: 0;
+        font-size: 15px;
+      }
+      .todo-row:hover .delete-todo { opacity: 1; }
+
+      /* ── Add todo ── */
+      .add-todo { padding: 2px 8px 4px; }
+      .add-todo-input {
+        width: 100%;
+        border: none;
+        background: transparent;
+        color: var(--text);
+        font-family: inherit;
+        font-size: 14px;
+        padding: 6px 8px;
+        outline: none;
+        border-radius: 6px;
+      }
+      .add-todo-input::placeholder { color: var(--muted); }
+      .add-todo-input:focus { background: var(--hover-bg); }
+
+      /* ── Drop zone for empty day ── */
+      .todo-list.drop-end {
+        background: var(--accent-light);
+        border-radius: 8px;
+        min-height: 40px;
+      }
+
+      /* ── Empty / error states ── */
+      .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--muted);
+      }
+      .empty-state-icon { font-size: 36px; margin-bottom: 14px; }
+      .empty-state-text { font-size: 14px; margin-bottom: 16px; }
+
+      .day-empty {
+        padding: 10px 16px 6px;
+        color: var(--muted);
+        font-size: 13px;
+        font-style: italic;
+      }
+
+      .error-state {
+        padding: 40px 20px;
+        text-align: center;
+        color: var(--danger);
+      }
+      .error-state pre {
+        text-align: left;
+        background: var(--hover-bg);
+        padding: 12px;
+        border-radius: 8px;
+        margin-top: 12px;
+        font-size: 12px;
+        overflow-x: auto;
+        color: var(--text);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="header">
+        <div class="header-top">
+          <h1>
+            <span class="header-check">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,8 6.5,11.5 13,4.5"/></svg>
+            </span>
+            Todo List
+          </h1>
+          <div class="header-buttons">
+            <button id="theme-btn" class="btn-icon" title="Toggle theme">🌓</button>
+            <button id="add-day-btn" class="btn btn-primary">+ New Day</button>
+          </div>
+        </div>
+      </div>
+      <div id="view">
+        <div id="view-inner"></div>
+      </div>
+    </div>
+
+    <script type="module">
+      const viewEl    = document.getElementById('view-inner')
+      const addDayBtn = document.getElementById('add-day-btn')
+      const themeBtn  = document.getElementById('theme-btn')
+
+      let editable = false
+      let data = { days: [] }
+      let currentSource = ''
+      let parseError = null
+
+      // Drag state
+      let dragTodoId = null
+      let dragFromDayId = null
+
+      /* ── Utilities ── */
+      const post = (m) => window.parent.postMessage(m, '*')
+      const uid  = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2))
+      const esc  = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]))
+
+      /* ── Icons ── */
+      const GRIP_SVG = '<svg viewBox="0 0 16 16" width="12" height="12"><circle cx="4" cy="3" r="1.2" fill="currentColor"/><circle cx="4" cy="8" r="1.2" fill="currentColor"/><circle cx="4" cy="13" r="1.2" fill="currentColor"/><circle cx="12" cy="3" r="1.2" fill="currentColor"/><circle cx="12" cy="8" r="1.2" fill="currentColor"/><circle cx="12" cy="13" r="1.2" fill="currentColor"/></svg>'
+      const CHECK_SVG = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,8 6.5,11.5 13,4.5"/></svg>'
+
+      /* ── Date helpers ── */
+      function parseDate(s) {
+        const [y, m, d] = String(s).split('-').map(Number)
+        return new Date(y, m - 1, d)
+      }
+      function dateStr(d) {
+        const y = d.getFullYear()
+        const m = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return `${y}-${m}-${day}`
+      }
+      function todayStr() { return dateStr(new Date()) }
+      function isSameDay(a, b) {
+        return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+      }
+      function dayLabel(ds) {
+        try {
+          const date = parseDate(ds)
+          const today = new Date()
+          const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1)
+          const yesterday = new Date(); yesterday.setDate(today.getDate() - 1)
+          if (isSameDay(date, today)) return 'Today'
+          if (isSameDay(date, tomorrow)) return 'Tomorrow'
+          if (isSameDay(date, yesterday)) return 'Yesterday'
+          return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+        } catch { return ds }
+      }
+      function fullDate(ds) {
+        try { return parseDate(ds).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) }
+        catch { return ds }
+      }
+      function isToday(ds) {
+        try { return isSameDay(parseDate(ds), new Date()) } catch { return false }
+      }
+      function defaultNewDate() {
+        if (data.days.length === 0) return todayStr()
+        const sorted = [...data.days].sort((a, b) => a.date.localeCompare(b.date))
+        const last = parseDate(sorted[sorted.length - 1].date)
+        last.setDate(last.getDate() + 1)
+        return dateStr(last)
+      }
+
+      /* ── Data parse / serialize ── */
+      function normalize(raw) {
+        const d = { days: [], theme: 'auto' }
+        if (raw && Array.isArray(raw.days)) {
+          d.days = raw.days.map(day => ({
+            id: day.id || uid(),
+            date: day.date || todayStr(),
+            todos: Array.isArray(day.todos)
+              ? day.todos.map(t => ({ id: t.id || uid(), text: String(t.text || ''), done: Boolean(t.done) }))
+              : []
+          }))
+        }
+        if (raw && (raw.theme === 'light' || raw.theme === 'dark' || raw.theme === 'auto')) {
+          d.theme = raw.theme
+        }
+        return d
+      }
+      function parseData(source) {
+        if (!source.trim()) return normalize({ days: [] })
+        return normalize(JSON.parse(source))
+      }
+      function serialize() { return JSON.stringify(data, null, 2) }
+
+      /* ── Theme ── */
+      const THEME_ICONS  = { auto: '🌓', light: '☀️', dark: '🌙' }
+      const THEME_LABELS = { auto: 'Auto (system)', light: 'Light', dark: 'Dark' }
+      const mql = window.matchMedia('(prefers-color-scheme: dark)')
+
+      function resolvedTheme() {
+        if (data.theme === 'auto') return mql.matches ? 'dark' : 'light'
+        return data.theme
+      }
+      function applyTheme() {
+        document.documentElement.setAttribute('data-theme', resolvedTheme())
+        if (themeBtn) {
+          themeBtn.textContent = THEME_ICONS[data.theme] || THEME_ICONS.auto
+          themeBtn.title = `Theme: ${THEME_LABELS[data.theme] || 'Auto'} — click to switch`
+        }
+      }
+      function cycleTheme() {
+        const order = ['auto', 'light', 'dark']
+        data.theme = order[(order.indexOf(data.theme) + 1) % order.length]
+        applyTheme()
+        scheduleSave()
+      }
+      mql.addEventListener('change', () => { if (data.theme === 'auto') applyTheme() })
+
+      /* ── Save ── */
+      let saveTimer = null
+      function scheduleSave() {
+        if (!editable) return
+        if (saveTimer) clearTimeout(saveTimer)
+        saveTimer = setTimeout(() => post({ type: 'gt:save', bytes: serialize() }), 500)
+      }
+      function saveAndRender() { scheduleSave(); render() }
+
+      /* ── Find helpers ── */
+      const findDay  = (id) => data.days.find(d => d.id === id)
+      const findTodo = (dayId, todoId) => findDay(dayId)?.todos.find(t => t.id === todoId) || null
+
+      /* ── CRUD ── */
+      function addDay() {
+        data.days.push({ id: uid(), date: defaultNewDate(), todos: [] })
+        saveAndRender()
+        setTimeout(() => {
+          const input = viewEl.querySelector('.day-card:last-child .add-todo-input')
+          if (input) input.focus()
+        }, 0)
+      }
+      function deleteDay(dayId) {
+        data.days = data.days.filter(d => d.id !== dayId)
+        saveAndRender()
+      }
+      function changeDayDate(dayId, newDate) {
+        const day = findDay(dayId)
+        if (day) { day.date = newDate; saveAndRender() }
+      }
+      function addTodo(dayId, text) {
+        const day = findDay(dayId)
+        if (!day || !text.trim()) return
+        day.todos.push({ id: uid(), text: text.trim(), done: false })
+        saveAndRender()
+        setTimeout(() => {
+          const input = viewEl.querySelector(`.add-todo-input[data-day-id="${CSS.escape(dayId)}"]`)
+          if (input) input.focus()
+        }, 0)
+      }
+      function quickAddTodo(text) {
+        if (!text.trim()) return
+        const today = todayStr()
+        let day = data.days.find(d => d.date === today)
+        if (!day) {
+          day = { id: uid(), date: today, todos: [] }
+          data.days.push(day)
+        }
+        day.todos.push({ id: uid(), text: text.trim(), done: false })
+        saveAndRender()
+        setTimeout(() => {
+          const input = viewEl.querySelector('.quick-add-input')
+          if (input) input.focus()
+        }, 0)
+      }
+      function deleteTodo(dayId, todoId) {
+        const day = findDay(dayId)
+        if (day) { day.todos = day.todos.filter(t => t.id !== todoId); saveAndRender() }
+      }
+      function toggleTodo(dayId, todoId) {
+        const todo = findTodo(dayId, todoId)
+        if (!todo) return
+        todo.done = !todo.done
+        scheduleSave()
+        // Direct DOM update — avoids losing focus on any active edit
+        const row = viewEl.querySelector(`.todo-row[data-todo-id="${CSS.escape(todoId)}"]`)
+        if (row) {
+          row.classList.toggle('done', todo.done)
+          const cb = row.querySelector('.checkbox')
+          if (cb) cb.classList.toggle('checked', todo.done)
+        }
+        updateDayProgress(dayId)
+      }
+      function updateTodoText(dayId, todoId, text) {
+        const todo = findTodo(dayId, todoId)
+        if (todo) { todo.text = text; scheduleSave() }
+      }
+      function clearCompleted(dayId) {
+        const day = findDay(dayId)
+        if (day) { day.todos = day.todos.filter(t => !t.done); saveAndRender() }
+      }
+      function moveTodo(todoId, fromDayId, toDayId, toIndex) {
+        const fromDay = findDay(fromDayId)
+        const toDay = findDay(toDayId)
+        if (!fromDay || !toDay) return
+        const fromIndex = fromDay.todos.findIndex(t => t.id === todoId)
+        if (fromIndex === -1) return
+        const [todo] = fromDay.todos.splice(fromIndex, 1)
+        if (fromDayId === toDayId && fromIndex < toIndex) toIndex--
+        toDay.todos.splice(toIndex, 0, todo)
+        saveAndRender()
+      }
+
+      function updateDayProgress(dayId) {
+        const day = findDay(dayId)
+        if (!day) return
+        const total = day.todos.length
+        const done = day.todos.filter(t => t.done).length
+        const el = viewEl.querySelector(`.day-progress[data-day-id="${CSS.escape(dayId)}"]`)
+        if (el) {
+          el.textContent = total === 0 ? 'Empty' : `${done}/${total} done`
+          el.classList.toggle('all-done', total > 0 && done === total)
+        }
+      }
+
+      /* ── Sorting ── */
+      const sortedDays = () => [...data.days].sort((a, b) => a.date.localeCompare(b.date))
+
+      /* ── Render ── */
+      function renderQuickAdd() {
+        if (!editable) return ''
+        const today = todayStr()
+        return `
+          <div class="quick-add">
+            <div class="quick-add-context">Quick add to Today · ${esc(fullDate(today))}</div>
+            <input type="text" class="quick-add-input" placeholder="Add a todo to Today…" />
+          </div>`
+      }
+      function render(source) {
+        if (source !== undefined) {
+          currentSource = source
+          try { data = parseData(source); parseError = null }
+          catch (e) { parseError = e.message; data = { days: [] } }
+        }
+
+        if (parseError) {
+          viewEl.innerHTML = `<div class="error-state"><div>⚠️ Could not parse file</div><pre>${esc(parseError)}</pre></div>`
+          return
+        }
+
+        const days = sortedDays()
+
+        if (days.length === 0) {
+          viewEl.innerHTML = renderQuickAdd() + `
+            <div class="empty-state">
+              <div class="empty-state-icon">📋</div>
+              <div class="empty-state-text">No days yet — add your first day to get started.</div>
+              <button class="btn btn-primary" data-action="add-day">+ New Day</button>
+            </div>`
+          return
+        }
+
+        viewEl.innerHTML = renderQuickAdd() + days.map(day => renderDay(day)).join('')
+      }
+
+      function renderDay(day) {
+        const today = isToday(day.date)
+        const total = day.todos.length
+        const done  = day.todos.filter(t => t.done).length
+        const allDone = total > 0 && done === total
+        const progressText = total === 0 ? 'Empty' : `${done}/${total} done`
+
+        const todosHtml = day.todos.length === 0
+          ? `<div class="day-empty">No todos yet — add one below.</div>`
+          : day.todos.map(t => renderTodo(t, day.id)).join('')
+
+        const clearBtn = (total > 0 && done > 0)
+          ? `<button class="btn-icon clear-completed" data-day-id="${esc(day.id)}" title="Clear completed">🧹</button>` : ''
+
+        return `
+          <div class="day-card" data-day-id="${esc(day.id)}">
+            <div class="day-header">
+              <div class="day-date" data-day-id="${esc(day.id)}">
+                <span class="day-label ${today ? 'today' : ''}">${esc(dayLabel(day.date))}</span>
+                <span class="day-full-date">${esc(fullDate(day.date))}</span>
+              </div>
+              <div class="day-actions">
+                <span class="day-progress ${allDone ? 'all-done' : ''}" data-day-id="${esc(day.id)}">${progressText}</span>
+                ${clearBtn}
+                ${editable ? `<button class="btn-icon danger delete-day" data-day-id="${esc(day.id)}" title="Delete day">✕</button>` : ''}
+              </div>
+            </div>
+            <div class="todo-list" data-day-id="${esc(day.id)}">
+              ${todosHtml}
+              ${editable ? `<div class="add-todo"><input type="text" class="add-todo-input" data-day-id="${esc(day.id)}" placeholder="Add a todo…" /></div>` : ''}
+            </div>
+          </div>`
+      }
+
+      function renderTodo(todo, dayId) {
+        return `
+          <div class="todo-row ${todo.done ? 'done' : ''}" data-todo-id="${esc(todo.id)}" data-day-id="${esc(dayId)}">
+            ${editable ? `<div class="drag-handle" data-todo-id="${esc(todo.id)}" data-day-id="${esc(dayId)}" draggable="true">${GRIP_SVG}</div>` : ''}
+            <div class="checkbox ${todo.done ? 'checked' : ''}" data-todo-id="${esc(todo.id)}" data-day-id="${esc(dayId)}" role="checkbox" aria-checked="${todo.done}">${CHECK_SVG}</div>
+            <span class="todo-text" ${editable ? 'contenteditable="true"' : ''} data-todo-id="${esc(todo.id)}" data-day-id="${esc(dayId)}" spellcheck="false">${esc(todo.text)}</span>
+            ${editable ? `<button class="btn-icon danger delete-todo" data-todo-id="${esc(todo.id)}" data-day-id="${esc(dayId)}" title="Delete todo">✕</button>` : ''}
+          </div>`
+      }
+
+      /* ── Events: buttons & interactions ── */
+
+      addDayBtn.addEventListener('click', () => { if (editable) addDay() })
+      themeBtn.addEventListener('click', cycleTheme)
+
+      viewEl.addEventListener('click', (e) => {
+        // Empty-state "New Day" button
+        if (e.target.dataset.action === 'add-day') { if (editable) addDay(); return }
+
+        if (!editable) return
+
+        const checkbox = e.target.closest('.checkbox')
+        if (checkbox) { toggleTodo(checkbox.dataset.dayId, checkbox.dataset.todoId); return }
+
+        const delTodo = e.target.closest('.delete-todo')
+        if (delTodo) { deleteTodo(delTodo.dataset.dayId, delTodo.dataset.todoId); return }
+
+        const delDay = e.target.closest('.delete-day')
+        if (delDay) { deleteDay(delDay.dataset.dayId); return }
+
+        const clr = e.target.closest('.clear-completed')
+        if (clr) { clearCompleted(clr.dataset.dayId); return }
+
+        // Date editing — click on the date area
+        const dayDate = e.target.closest('.day-date')
+        if (dayDate && !dayDate.querySelector('.day-date-input')) {
+          const dayId = dayDate.dataset.dayId
+          const day = findDay(dayId)
+          if (!day) return
+          const labelEl = dayDate.querySelector('.day-label')
+          const fullEl  = dayDate.querySelector('.day-full-date')
+          const input = document.createElement('input')
+          input.type = 'date'
+          input.value = day.date
+          input.className = 'day-date-input'
+          dayDate.insertBefore(input, labelEl)
+          labelEl.style.display = 'none'
+          fullEl.style.display = 'none'
+          input.focus()
+          const finish = () => {
+            if (input.value) changeDayDate(dayId, input.value)
+            else render()
+          }
+          input.addEventListener('blur', finish, { once: true })
+          input.addEventListener('change', finish, { once: true })
+        }
+      })
+
+      // Add-todo input + todo text keyboard
+      viewEl.addEventListener('keydown', (e) => {
+        if (e.target.classList.contains('quick-add-input') && e.key === 'Enter') {
+          e.preventDefault()
+          if (e.target.value.trim()) quickAddTodo(e.target.value)
+        }
+        if (e.target.classList.contains('add-todo-input') && e.key === 'Enter') {
+          e.preventDefault()
+          const text = e.target.value
+          if (text.trim()) addTodo(e.target.dataset.dayId, text)
+        }
+        if (e.target.classList.contains('todo-text')) {
+          if (e.key === 'Enter') { e.preventDefault(); e.target.blur() }
+          else if (e.key === 'Escape') { e.target.blur() }
+        }
+      })
+
+      // Save todo text on blur and input
+      viewEl.addEventListener('focusout', (e) => {
+        if (e.target.classList.contains('todo-text')) {
+          updateTodoText(e.target.dataset.dayId, e.target.dataset.todoId, e.target.textContent)
+        }
+      })
+      viewEl.addEventListener('input', (e) => {
+        if (e.target.classList.contains('todo-text')) {
+          updateTodoText(e.target.dataset.dayId, e.target.dataset.todoId, e.target.textContent)
+        }
+      })
+
+      // Paste as plain text only
+      viewEl.addEventListener('paste', (e) => {
+        if (e.target.classList.contains('todo-text')) {
+          e.preventDefault()
+          const text = (e.clipboardData || window.clipboardData).getData('text/plain').replace(/[\r\n]+/g, ' ')
+          document.execCommand('insertText', false, text)
+        }
+      })
+
+      /* ── Drag and drop ── */
+      function clearDropIndicators() {
+        viewEl.querySelectorAll('.drop-above,.drop-below,.drop-active,.drop-end').forEach(el =>
+          el.classList.remove('drop-above','drop-below','drop-active','drop-end'))
+      }
+
+      viewEl.addEventListener('dragstart', (e) => {
+        const handle = e.target.closest('.drag-handle')
+        if (!handle) return
+        dragTodoId = handle.dataset.todoId
+        dragFromDayId = handle.dataset.dayId
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', dragTodoId)
+        handle.closest('.todo-row')?.classList.add('dragging')
+      })
+
+      viewEl.addEventListener('dragend', () => {
+        clearDropIndicators()
+        viewEl.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'))
+        dragTodoId = null
+        dragFromDayId = null
+      })
+
+      viewEl.addEventListener('dragover', (e) => {
+        e.preventDefault() // allow drop + suppress external drag side-effects
+        if (!dragTodoId) return
+        e.dataTransfer.dropEffect = 'move'
+        clearDropIndicators()
+
+        const row = e.target.closest('.todo-row')
+        if (row && !row.classList.contains('dragging')) {
+          const rect = row.getBoundingClientRect()
+          const mid = rect.top + rect.height / 2
+          row.classList.add(e.clientY < mid ? 'drop-above' : 'drop-below')
+        } else {
+          const card = e.target.closest('.day-card')
+          if (card) {
+            card.classList.add('drop-active')
+            card.querySelector('.todo-list')?.classList.add('drop-end')
+          }
+        }
+      })
+
+      viewEl.addEventListener('dragleave', (e) => {
+        if (!viewEl.contains(e.relatedTarget)) clearDropIndicators()
+      })
+
+      viewEl.addEventListener('drop', (e) => {
+        if (!dragTodoId) return
+        e.preventDefault()
+        e.stopPropagation()
+
+        const row = e.target.closest('.todo-row')
+        const card = e.target.closest('.day-card')
+        let toDayId = null, toIndex = 0
+
+        if (row && !row.classList.contains('dragging')) {
+          toDayId = row.dataset.dayId
+          const day = findDay(toDayId)
+          if (day) {
+            const targetIdx = day.todos.findIndex(t => t.id === row.dataset.todoId)
+            const rect = row.getBoundingClientRect()
+            toIndex = (e.clientY < rect.top + rect.height / 2) ? targetIdx : targetIdx + 1
+          }
+        } else if (card) {
+          toDayId = card.dataset.dayId
+          const day = findDay(toDayId)
+          if (day) toIndex = day.todos.length
+        }
+
+        clearDropIndicators()
+        if (toDayId) moveTodo(dragTodoId, dragFromDayId, toDayId, toIndex)
+        dragTodoId = null
+        dragFromDayId = null
+      })
+
+      /* ── Quote-to-chat ── */
+      document.addEventListener('selectionchange', () => {
+        const text = (window.getSelection()?.toString() || '').trim()
+        if (text) post({ type: 'gt:quote', text })
+      })
+
+      /* ── Static snapshot for sharing ── */
+      function renderStatic() {
+        const css = document.querySelector('style').textContent
+        const days = sortedDays()
+        const body = days.length === 0
+          ? '<div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">No days yet.</div></div>'
+          : days.map(day => {
+              const today = isToday(day.date)
+              const total = day.todos.length
+              const done = day.todos.filter(t => t.done).length
+              const allDone = total > 0 && done === total
+              const prog = total === 0 ? '' : `<span class="day-progress ${allDone ? 'all-done' : ''}">${done}/${total} done</span>`
+              const todos = (day.todos.length === 0
+                ? '<div class="day-empty">No todos</div>'
+                : day.todos.map(t => `
+                  <div class="todo-row ${t.done ? 'done' : ''}">
+                    <div class="checkbox ${t.done ? 'checked' : ''}">${CHECK_SVG}</div>
+                    <span class="todo-text">${esc(t.text)}</span>
+                  </div>`).join(''))
+              return `
+                <div class="day-card">
+                  <div class="day-header">
+                    <div class="day-date">
+                      <span class="day-label ${today ? 'today' : ''}">${esc(dayLabel(day.date))}</span>
+                      <span class="day-full-date">${esc(fullDate(day.date))}</span>
+                    </div>
+                    <div class="day-actions">${prog}</div>
+                  </div>
+                  <div class="todo-list">${todos}</div>
+                </div>`
+            }).join('')
+
+        const snapshotTheme = resolvedTheme()
+        return `<!doctype html><html lang="en" data-theme="${snapshotTheme}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><style>${css}
+#view{overflow:visible;padding:20px;max-width:680px;margin:0 auto;height:auto}
+#app{height:auto}
+#header{display:none}
+</style></head><body><div id="app"><div id="view">${body}</div></div></body></html>`
+      }
+
+      /* ── Bridge ── */
+      window.addEventListener('message', (event) => {
+        const msg = event.data
+        if (!msg || typeof msg !== 'object') return
+        if (msg.type === 'gt:init') {
+          editable = Boolean(msg.editable)
+          addDayBtn.style.display = editable ? '' : 'none'
+          render(typeof msg.bytes === 'string' ? msg.bytes : '')
+          applyTheme()
+        } else if (msg.type === 'gt:render-static') {
+          post({ type: 'gt:static', html: renderStatic() })
+        }
+      })
+
+      post({ type: 'gt:ready' })
+    </script>
+  </body>
+</html>

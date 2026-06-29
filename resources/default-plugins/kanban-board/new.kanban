@@ -1,0 +1,21 @@
+{
+  "title": "My Board",
+  "columns": [
+    {
+      "id": "col-todo",
+      "name": "To Do",
+      "color": "#3b82f6"
+    },
+    {
+      "id": "col-progress",
+      "name": "In Progress",
+      "color": "#f59e0b"
+    },
+    {
+      "id": "col-done",
+      "name": "Done",
+      "color": "#22c55e"
+    }
+  ],
+  "tasks": []
+}

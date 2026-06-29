@@ -1,0 +1,23 @@
+{
+  "id": "todo-list",
+  "name": "Todo List",
+  "version": "1.0.0",
+  "minAppVersion": "0.6.0",
+  "description": "Vertical day-by-day todo list with drag and drop between days",
+  "author": "Green Tea",
+  "contributes": {
+    "artifacts": [
+      {
+        "kind": "todo-list",
+        "extensions": ["todos"],
+        "entry": "viewer.html",
+        "icon": "ListTodo",
+        "editable": true,
+        "shareable": true,
+        "creatable": true,
+        "newLabel": "New todo list",
+        "templateFile": "new.todos"
+      }
+    ]
+  }
+}
