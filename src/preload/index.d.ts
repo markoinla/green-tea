@@ -275,6 +275,10 @@ interface GreenteaApi {
   }
   share: {
     publish(documentId: string): Promise<{ url: string; slug: string; expiresAt: string }>
+    publishCanvas(
+      documentId: string,
+      entryHtml: string
+    ): Promise<{ url: string; slug: string; expiresAt: string }>
     unpublish(documentId: string): Promise<void>
     status(
       documentId: string

@@ -268,6 +268,7 @@ export function LeftSidebar({
           selectedWorkspaceId={selectedWorkspaceId}
           onSelectWorkspace={onSelectWorkspace}
           onNewDocument={handleNewDocument}
+          onNewCanvas={handleNewCanvas}
           onNewFolder={handleNewFolder}
         />
         <button

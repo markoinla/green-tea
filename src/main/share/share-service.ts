@@ -80,9 +80,38 @@ function loadShareableDoc(db: Database.Database, documentId: string): Document {
 }
 
 /**
- * Render `doc` and push it to the worker, reusing the prior slug when one exists
- * (so the public URL is stable across re-publishes). Records the result in the
- * local `shares` index and returns the live URL + derived expiry.
+ * Push a PREBUILT request to the worker, reusing the prior slug when one exists
+ * (so the public URL is stable across re-publishes), record it in the local
+ * `shares` index, and return the live URL + derived expiry. The request-building
+ * is the caller's job — note/html render server-side here, while a canvas is
+ * prerendered in the renderer (it needs a DOM) and arrives as ready HTML.
+ */
+async function recordAndPush(
+  db: Database.Database,
+  doc: Document,
+  req: PublishRequest,
+  token: string,
+  baseUrl: string
+): Promise<{ url: string; slug: string; expiresAt: string }> {
+  const result = await publishToWorker(baseUrl, token, req)
+
+  const publishedAt = new Date()
+  upsertShare(db, computeDocKey(db, doc), {
+    slug: result.slug,
+    url: result.url,
+    type: shareTypeForKind(doc.kind),
+    workspaceId: doc.workspace_id,
+    filePath: doc.file_path,
+    title: doc.title || 'Untitled'
+  })
+
+  return { url: result.url, slug: result.slug, expiresAt: expiresAtFrom(publishedAt) }
+}
+
+/**
+ * Render `doc` (note or html) server-side and push it to the worker. Canvas is
+ * NOT handled here — it can't render without a DOM, so it comes through
+ * {@link publishCanvasShare} with renderer-prerendered HTML instead.
  */
 async function pushToWorker(
   db: Database.Database,
@@ -90,8 +119,7 @@ async function pushToWorker(
   token: string,
   baseUrl: string
 ): Promise<{ url: string; slug: string; expiresAt: string }> {
-  const docKey = computeDocKey(db, doc)
-  const prevSlug = getShareByDoc(db, docKey)?.slug
+  const prevSlug = getShareByDoc(db, computeDocKey(db, doc))?.slug
   const title = doc.title || 'Untitled'
 
   let req: PublishRequest
@@ -110,19 +138,7 @@ async function pushToWorker(
     }
   }
 
-  const result = await publishToWorker(baseUrl, token, req)
-
-  const publishedAt = new Date()
-  upsertShare(db, docKey, {
-    slug: result.slug,
-    url: result.url,
-    type: shareTypeForKind(doc.kind),
-    workspaceId: doc.workspace_id,
-    filePath: doc.file_path,
-    title
-  })
-
-  return { url: result.url, slug: result.slug, expiresAt: expiresAtFrom(publishedAt) }
+  return recordAndPush(db, doc, req, token, baseUrl)
 }
 
 /**
@@ -138,6 +154,40 @@ export async function publishShare(
   if (!token) throw new Error('Share publish token not configured')
   const doc = loadShareableDoc(db, documentId)
   return pushToWorker(db, doc, token, resolveBaseUrl(db))
+}
+
+/**
+ * Publish (or re-publish) a CANVAS share from renderer-prerendered HTML. A
+ * `.excalidraw` file is JSON — it renders nothing in a browser without the
+ * Excalidraw runtime — so the renderer exports the scene to a static, fully
+ * self-contained SVG page (`exportToSvg` needs a DOM, which only the renderer
+ * has) and passes it here as `entryHtml`. This main-side half just pushes that
+ * HTML through the existing `artifact` worker path: path-based docKey, slug reuse
+ * (stable URL across re-publishes), 30-day expiry. The HTML already inlines the
+ * SVG, its fonts, and any base64 images, so there are no sibling assets to bundle.
+ */
+export async function publishCanvasShare(
+  db: Database.Database,
+  documentId: string,
+  entryHtml: string
+): Promise<{ url: string; slug: string; expiresAt: string }> {
+  const token = resolveToken(db)
+  if (!token) throw new Error('Share publish token not configured')
+  const doc = getDocument(db, documentId)
+  if (!doc) throw new Error('Document not found')
+  if (doc.kind !== 'canvas')
+    throw new Error(`Sharing via canvas path requires a canvas: ${doc.kind}`)
+  if (!doc.file_path) throw new Error('Document has no backing file to share')
+
+  const prevSlug = getShareByDoc(db, computeDocKey(db, doc))?.slug
+  const req: PublishRequest = {
+    type: 'artifact',
+    title: doc.title || 'Untitled',
+    entryHtml,
+    assets: [],
+    slug: prevSlug
+  }
+  return recordAndPush(db, doc, req, token, resolveBaseUrl(db))
 }
 
 /** Remove a document's share from the worker and the local index (idempotent). */

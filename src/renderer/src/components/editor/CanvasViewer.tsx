@@ -259,6 +259,7 @@ export function CanvasViewer({ gtFileId, fileName, watchDocId }: CanvasViewerPro
   }
 
   const Excalidraw = mod?.Excalidraw
+  const MainMenu = mod?.MainMenu
   const ready = status === 'ready' && Excalidraw && initialData !== null
 
   return (
@@ -286,7 +287,27 @@ export function CanvasViewer({ gtFileId, fileName, watchDocId }: CanvasViewerPro
                 lastInteractionRef.current = Date.now()
               })
             }}
-          />
+          >
+            {/* Custom hamburger menu: drop the rows that don't fit a vault-backed,
+                autosaving, local-first canvas. LoadScene/SaveToActiveFile would
+                load/overwrite a DIFFERENT file (breaking our vault-file identity +
+                autosave); Export is the Excalidraw+/cloud "save to…" (redundant —
+                the scene IS the vault file); Socials/LiveCollaboration don't apply;
+                ToggleTheme is a no-op here because `theme` is a controlled prop
+                driven by the app chrome. Keep local image export, search, command
+                palette, help, canvas background (persisted into the scene), clear. */}
+            {MainMenu && (
+              <MainMenu>
+                <MainMenu.DefaultItems.SaveAsImage />
+                <MainMenu.DefaultItems.SearchMenu />
+                <MainMenu.DefaultItems.CommandPalette />
+                <MainMenu.DefaultItems.Help />
+                <MainMenu.Separator />
+                <MainMenu.DefaultItems.ChangeCanvasBackground />
+                <MainMenu.DefaultItems.ClearCanvas />
+              </MainMenu>
+            )}
+          </Excalidraw>
         </div>
       )}
     </div>

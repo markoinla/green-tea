@@ -342,6 +342,13 @@ const greenteaApi = {
   share: {
     publish: (documentId: string): Promise<{ url: string; slug: string; expiresAt: string }> =>
       ipcRenderer.invoke('share:publish', documentId),
+    // Canvas: the renderer prerenders the scene to a static HTML/SVG page and
+    // passes it here (exportToSvg needs a DOM the main process doesn't have).
+    publishCanvas: (
+      documentId: string,
+      entryHtml: string
+    ): Promise<{ url: string; slug: string; expiresAt: string }> =>
+      ipcRenderer.invoke('share:publishCanvas', documentId, entryHtml),
     unpublish: (documentId: string): Promise<void> =>
       ipcRenderer.invoke('share:unpublish', documentId),
     status: (
