@@ -206,14 +206,14 @@ app.whenReady().then(() => {
   seedDefaultPlugins(db)
   reloadPluginRegistry(db)
 
-  // One-time DB->file backfill of README.md / memory.md
+  // One-time DB->file backfill of README.md / MEMORY.md
   // from the legacy `workspaces.description` / `workspaces.memory` columns. MUST
   // run AFTER migrateLegacyVaultLayout + ensureUserDirs (so each workspace folder
   // is already at its final location) and BEFORE reindexAllWorkspaces (so the
   // backfilled files get indexed this session). One-shot-guarded internally.
   backfillWorkspaceDocs(db)
 
-  // Ensure each workspace has its README.md / memory.md
+  // Ensure each workspace has its README.md / MEMORY.md
   // present at the workspace root, recreating them EMPTY if deleted (create-only;
   // never restores old content). Runs BEFORE reindexAllWorkspaces so a recreated
   // file is indexed/visible this session (not only after the next restart).

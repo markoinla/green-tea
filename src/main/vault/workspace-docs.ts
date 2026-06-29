@@ -8,7 +8,7 @@ import { getWorkspaceVaultDir } from './paths'
 /**
  * Workspace description & memory as visible, indexed markdown files at the
  * workspace ROOT — `README.md` (human-authored project context; the conventional
- * name, so an existing folder's README is adopted as-is) and `memory.md`
+ * name, so an existing folder's README is adopted as-is) and `MEMORY.md`
  * (agent-managed notebook). They are NOT hidden in `.greentea/`: being `.md`
  * files at the root, the vault watcher indexes them and the existing note editor
  * edits them — zero bespoke UI.
@@ -26,7 +26,7 @@ import { getWorkspaceVaultDir } from './paths'
  */
 
 export const WORKSPACE_DESCRIPTION_FILE = 'README.md'
-export const WORKSPACE_MEMORY_FILE = 'memory.md'
+export const WORKSPACE_MEMORY_FILE = 'MEMORY.md'
 
 export type WorkspaceDocKind = 'description' | 'memory'
 

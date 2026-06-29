@@ -78,7 +78,7 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
       // One folder per workspace: the durable notes vault, also the agent's home.
       const vaultDir = getWorkspaceVaultDir(db, workspace.id)
       ensureVaultDir(vaultDir)
-      // Seed the visible, indexed README.md / memory.md
+      // Seed the visible, indexed README.md / MEMORY.md
       // (empty) before the reindex below so they're picked up like any other note.
       ensureWorkspaceDocs(db, workspace.id)
       if (mode === 'open') {

@@ -447,7 +447,7 @@ export function runMigrations(db: Database.Database): void {
 }
 
 /**
- * One-time backfill of the on-disk workspace docs (`README.md` / `memory.md`)
+ * One-time backfill of the on-disk workspace docs (`README.md` / `MEMORY.md`)
  * from the legacy `workspaces.description` /
  * `workspaces.memory` columns. Files are now the source of truth (see
  * `vault/workspace-docs.ts`); the columns are kept this release as a vestigial
