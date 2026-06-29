@@ -44,6 +44,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@excalidraw/excalidraw": "^0.18.1",
+    "@glideapps/glide-data-grid": "^6.0.3",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.14.3",
@@ -60,12 +61,14 @@
     "dotenv": "^17.2.4",
     "electron-updater": "^6.7.3",
     "linkedom": "^0.18.12",
+    "lodash": "^4.18.1",
     "marked": "^14.1.4",
     "mdast-util-from-markdown": "^2.0.2",
     "mdast-util-gfm": "^3.1.0",
     "mdast-util-to-markdown": "^2.1.2",
     "micromark-extension-gfm": "^3.0.0",
     "papaparse": "^5.5.4",
+    "react-responsive-carousel": "^3.2.23",
     "sonner": "^2.0.7",
     "turndown": "^7.2.2",
     "typebox": "1.1.38",
@@ -135,5 +138,16 @@
     "typescript": "^5.9.3",
     "vite": "^7.2.6",
     "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "@glideapps/glide-data-grid": {
+      "react": "$react",
+      "react-dom": "$react-dom",
+      "marked": "$marked"
+    },
+    "react-responsive-carousel": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
   }
 }

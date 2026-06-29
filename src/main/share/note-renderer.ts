@@ -72,6 +72,7 @@ const URL_ATTRS = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 
 /** True for URLs whose scheme can execute script or smuggle markup. */
 function isDangerousUrl(value: string): boolean {
   // Strip control chars/whitespace marked could not, then test the scheme.
+  // eslint-disable-next-line no-control-regex -- intentional: strip C0 control chars used to smuggle URL schemes
   const v = value.replace(/[\u0000-\u0020]+/g, '').toLowerCase()
   return (
     v.startsWith('javascript:') ||

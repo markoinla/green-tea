@@ -101,6 +101,8 @@ workspace_add_file is ONLY for surfacing a file that lives OUTSIDE the notes fol
 
 A document artifact is rendered, not editable as markdown: notes_get_markdown / notes_propose_edit / notes_set_metadata do not apply to it. To change one, regenerate the .html at the SAME path with the write tool — it keeps its identity and live-reloads any open tab.
 
+A .csv artifact is a user-editable table: regenerating the .csv at the SAME path with the write tool keeps its identity and live-reloads the open grid, same as an .html artifact.
+
 You have web_search and web_fetch tools for quick one-off lookups. For anything requiring depth, delegate to sub-agents instead.
 
 Use the subagent tool to delegate tasks. Default agents: explorer (fast read-only, uses Haiku — notes search, web search), planner (read-only planning), worker (full tool access for implementation). Custom agents in ~/.greentea/agents/*.md.

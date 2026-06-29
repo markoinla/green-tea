@@ -131,6 +131,12 @@ export function LeftSidebar({
     onSelectDoc(doc.id, { newTab: true })
   }, [selectedWorkspaceId, createArtifact, onSelectDoc])
 
+  const handleNewTable = useCallback(async () => {
+    if (!selectedWorkspaceId) return
+    const doc = await createArtifact({ title: 'Untitled', kind: 'csv' })
+    onSelectDoc(doc.id, { newTab: true })
+  }, [selectedWorkspaceId, createArtifact, onSelectDoc])
+
   const handleNewFolder = useCallback(async () => {
     await createFolder({ name: uniqueFolderName(folders, '') })
   }, [createFolder, folders])
@@ -165,6 +171,17 @@ export function LeftSidebar({
       const parent = folders.find((f) => f.id === folderId)
       if (parent && parent.collapsed === 1) await updateFolder(folderId, { collapsed: 0 })
       const doc = await createArtifact({ title: 'Untitled', kind: 'canvas', folder_id: folderId })
+      onSelectDoc(doc.id, { newTab: true })
+    },
+    [selectedWorkspaceId, folders, updateFolder, createArtifact, onSelectDoc]
+  )
+
+  const handleNewTableInFolder = useCallback(
+    async (folderId: string) => {
+      if (!selectedWorkspaceId) return
+      const parent = folders.find((f) => f.id === folderId)
+      if (parent && parent.collapsed === 1) await updateFolder(folderId, { collapsed: 0 })
+      const doc = await createArtifact({ title: 'Untitled', kind: 'csv', folder_id: folderId })
       onSelectDoc(doc.id, { newTab: true })
     },
     [selectedWorkspaceId, folders, updateFolder, createArtifact, onSelectDoc]
@@ -269,6 +286,7 @@ export function LeftSidebar({
           onSelectWorkspace={onSelectWorkspace}
           onNewDocument={handleNewDocument}
           onNewCanvas={handleNewCanvas}
+          onNewTable={handleNewTable}
           onNewFolder={handleNewFolder}
         />
         <button
@@ -315,6 +333,7 @@ export function LeftSidebar({
         onSelectDoc={onSelectDoc}
         onNewDocument={handleNewDocument}
         onNewCanvas={handleNewCanvas}
+        onNewTable={handleNewTable}
         onNewFolder={handleNewFolder}
         onRenameDoc={handleRenameDoc}
         onDeleteDoc={handleDeleteDoc}
@@ -324,6 +343,7 @@ export function LeftSidebar({
         onToggleFolder={handleToggleFolder}
         onNewDocInFolder={handleNewDocInFolder}
         onNewCanvasInFolder={handleNewCanvasInFolder}
+        onNewTableInFolder={handleNewTableInFolder}
         onNewSubfolder={handleNewSubfolder}
         onMoveDocument={handleMoveDocument}
         onRefresh={handleRefresh}

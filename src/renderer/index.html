@@ -12,6 +12,10 @@
 
   <body>
     <div id="root"></div>
+    <!-- Mount point for Glide Data Grid's cell-editor overlay (the Table artifact).
+         Glide portals its editing overlay into div#portal; without it, cell editing
+         silently does nothing. Invisible until an editor opens. -->
+    <div id="portal" style="position: fixed; left: 0; top: 0; z-index: 9999"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

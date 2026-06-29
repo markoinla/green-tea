@@ -173,6 +173,25 @@ describe('createArtifact (canvas)', () => {
   })
 })
 
+describe('createArtifact (csv)', () => {
+  it('creates a .csv file under the vault: kind=csv, content=null, seed header + empty rows', () => {
+    const doc = createArtifact(db, { title: 'My Table', kind: 'csv', workspace_id: workspaceId })
+
+    expect(doc.kind).toBe('csv')
+    expect(doc.content).toBeNull()
+    expect(doc.title).toBe('My Table')
+    expect(doc.file_path!.endsWith('.csv')).toBe(true)
+    expect(doc.file_path!.startsWith(vault)).toBe(true)
+
+    // The seed file is on disk: header row, three empty data rows, trailing LF.
+    const raw = readFileSync(doc.file_path!, 'utf-8')
+    expect(raw).toBe('Column 1,Column 2,Column 3\n,,\n,,\n,,\n')
+
+    // Indexed like any artifact: getDocument round-trips it.
+    expect(getDocument(db, doc.id)!.kind).toBe('csv')
+  })
+})
+
 describe('artifact getDocument / updateDocument / updateFrontmatter', () => {
   function indexArtifact(): string {
     const path = join(vault, 'Report.html')

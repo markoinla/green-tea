@@ -776,9 +776,17 @@ const EMPTY_CANVAS_SCENE = JSON.stringify(
   2
 )
 
+/**
+ * Seed CSV for an in-app-created Table artifact: a header row plus three empty
+ * data rows. LF newlines and a trailing newline so the on-disk truth is a plain,
+ * well-formed `.csv` the editable grid round-trips in its own dialect.
+ */
+const SEED_CSV = 'Column 1,Column 2,Column 3\n,,\n,,\n,,\n'
+
 /** Per-kind on-disk extension + seed contents for an in-app-created artifact. */
 const ARTIFACT_TEMPLATES: Partial<Record<DocumentKind, { ext: string; contents: string }>> = {
-  canvas: { ext: '.excalidraw', contents: EMPTY_CANVAS_SCENE }
+  canvas: { ext: '.excalidraw', contents: EMPTY_CANVAS_SCENE },
+  csv: { ext: '.csv', contents: SEED_CSV }
 }
 
 /**

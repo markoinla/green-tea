@@ -1,14 +1,7 @@
 import type { ComponentType } from 'react'
-import {
-  FileCode,
-  FileImage,
-  FileSpreadsheet,
-  FileText,
-  Shapes,
-  type LucideIcon
-} from 'lucide-react'
+import { FileCode, FileImage, FileText, Shapes, Table2, type LucideIcon } from 'lucide-react'
 import { HtmlViewer } from '../editor/HtmlViewer'
-import { CsvViewer } from '../editor/CsvViewer'
+import { TableViewer } from '../editor/TableViewer'
 import { ImageViewer } from '../editor/ImageViewer'
 import { PdfViewer } from '../editor/PdfViewer'
 import { CanvasViewer } from '../editor/CanvasViewer'
@@ -48,9 +41,14 @@ function HtmlArtifactViewer({
   )
 }
 
-/** CSV: bytes delivered over the `documents:readArtifact` IPC (not gt-file://). */
-function CsvArtifactViewer({ doc }: { doc: Document; onQuoteSelection?: (text: string) => void }) {
-  return <CsvViewer gtFileId={doc.id} fileName={doc.title} watchDocId={doc.id} />
+/** Table (CSV): EDITABLE grid; bytes over readArtifact/writeArtifact IPC. */
+function TableArtifactViewer({
+  doc
+}: {
+  doc: Document
+  onQuoteSelection?: (text: string) => void
+}) {
+  return <TableViewer gtFileId={doc.id} fileName={doc.title} watchDocId={doc.id} />
 }
 
 /** Image: streamed by gt-file:// via <img>, live-reloading on rewrite. */
@@ -80,7 +78,7 @@ function CanvasArtifactViewer({
 
 const REGISTRY: Partial<Record<DocumentKind, ArtifactViewerEntry>> = {
   html: { Viewer: HtmlArtifactViewer, icon: FileCode, dataSource: 'gt-file' },
-  csv: { Viewer: CsvArtifactViewer, icon: FileSpreadsheet, dataSource: 'read' },
+  csv: { Viewer: TableArtifactViewer, icon: Table2, dataSource: 'read' },
   image: { Viewer: ImageArtifactViewer, icon: FileImage, dataSource: 'gt-file' },
   pdf: { Viewer: PdfArtifactViewer, icon: FileText, dataSource: 'gt-file' },
   canvas: { Viewer: CanvasArtifactViewer, icon: Shapes, dataSource: 'read' }

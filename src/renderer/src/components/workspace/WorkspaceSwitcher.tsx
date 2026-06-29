@@ -11,6 +11,7 @@ import {
   SquarePen,
   FileText,
   Shapes,
+  Table2,
   FolderPlus,
   Folder,
   Leaf
@@ -51,6 +52,7 @@ interface WorkspaceSwitcherProps {
   onSelectWorkspace: (id: string) => void
   onNewDocument?: () => void
   onNewCanvas?: () => void
+  onNewTable?: () => void
   onNewFolder?: () => void
 }
 
@@ -59,6 +61,7 @@ export function WorkspaceSwitcher({
   onSelectWorkspace,
   onNewDocument,
   onNewCanvas,
+  onNewTable,
   onNewFolder
 }: WorkspaceSwitcherProps) {
   const { workspaces, createWorkspace, deleteWorkspace, updateWorkspace } = useWorkspaces()
@@ -141,6 +144,12 @@ export function WorkspaceSwitcher({
                   <DropdownMenuItem onSelect={onNewCanvas}>
                     <Shapes className="h-4 w-4" />
                     New Canvas
+                  </DropdownMenuItem>
+                )}
+                {onNewTable && (
+                  <DropdownMenuItem onSelect={onNewTable}>
+                    <Table2 className="h-4 w-4" />
+                    New Table
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>

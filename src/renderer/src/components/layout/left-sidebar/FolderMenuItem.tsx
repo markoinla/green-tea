@@ -7,6 +7,7 @@ import {
   FolderPlus,
   Pencil,
   Shapes,
+  Table2,
   Trash2
 } from 'lucide-react'
 import { dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
@@ -39,6 +40,7 @@ interface FolderMenuItemProps {
   onToggleFolder: (id: string, collapsed: number) => void
   onNewDocInFolder: (folderId: string) => void
   onNewCanvasInFolder: (folderId: string) => void
+  onNewTableInFolder: (folderId: string) => void
   onNewSubfolder: (folderId: string) => void
 }
 
@@ -56,6 +58,7 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
   onToggleFolder,
   onNewDocInFolder,
   onNewCanvasInFolder,
+  onNewTableInFolder,
   onNewSubfolder
 }: FolderMenuItemProps) {
   const folder = node.folder
@@ -166,6 +169,10 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                   <Shapes className="h-3.5 w-3.5 mr-2" />
                   New Canvas
                 </ContextMenuItem>
+                <ContextMenuItem onClick={() => onNewTableInFolder(folder.id)}>
+                  <Table2 className="h-3.5 w-3.5 mr-2" />
+                  New Table
+                </ContextMenuItem>
                 <ContextMenuItem onClick={() => onNewSubfolder(folder.id)}>
                   <FolderPlus className="h-3.5 w-3.5 mr-2" />
                   New Folder
@@ -203,6 +210,7 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                     onToggleFolder={onToggleFolder}
                     onNewDocInFolder={onNewDocInFolder}
                     onNewCanvasInFolder={onNewCanvasInFolder}
+                    onNewTableInFolder={onNewTableInFolder}
                     onNewSubfolder={onNewSubfolder}
                   />
                 ))}
