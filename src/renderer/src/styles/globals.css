@@ -314,3 +314,9 @@
 .ProseMirror ul[data-type='taskList'] li > div > p {
   margin: 0;
 }
+
+/* Hide the Excalidraw library button (top-right). The library panel doesn't fit a
+   vault-backed, autosaving canvas — its items live outside the scene file. */
+.excalidraw .default-sidebar-trigger {
+  display: none !important;
+}
