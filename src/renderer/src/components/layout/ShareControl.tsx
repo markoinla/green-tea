@@ -11,6 +11,7 @@ import {
 } from '@renderer/components/ui/dropdown-menu'
 import { cn } from '@renderer/lib/utils'
 import { publishCanvasShare } from '../editor/canvas-share'
+import { publishCsvShare } from '../editor/csv-share'
 import { publishPluginShare } from '../editor/plugin-share'
 import type { DocumentKind } from '../../../../main/database/types'
 
@@ -86,11 +87,12 @@ export function ShareControl({
   const [state, setState] = useState<ShareState>({ shared: false })
   const [busy, setBusy] = useState(false)
 
-  // Publish/update funnel. Neither a canvas nor a plugin artifact can be rendered
-  // server-side (no DOM): a canvas goes through the renderer exporter (exportToSvg
-  // → static HTML), and a plugin pulls a self-contained snapshot from its live
-  // viewer; both then call the same prerendered-publish IPC (share.publishCanvas).
-  // Every other shareable kind (notes, html) renders main-side via share.publish.
+  // Publish/update funnel. A canvas, a CSV table, and a plugin artifact can't be
+  // rendered server-side (no DOM): a canvas goes through the renderer exporter
+  // (exportToSvg → static HTML), a CSV is parsed to a static HTML table, and a
+  // plugin pulls a self-contained snapshot from its live viewer; all three then
+  // call the same prerendered-publish IPC (share.publishCanvas). Every other
+  // shareable kind (notes, html) renders main-side via share.publish.
   const runPublish = useCallback((): Promise<{
     url: string
     slug: string
@@ -98,6 +100,7 @@ export function ShareControl({
   }> => {
     if (!docId) return Promise.reject(new Error('No document'))
     if (docKind === 'canvas') return publishCanvasShare(docId, docTitle ?? 'Canvas')
+    if (docKind === 'csv') return publishCsvShare(docId, docTitle ?? 'Table')
     if (docKind?.startsWith('plugin:')) return publishPluginShare(docId)
     return window.api.share.publish(docId)
   }, [docId, docKind, docTitle])

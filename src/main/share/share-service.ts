@@ -161,14 +161,14 @@ export async function publishShare(
  * Authorize a renderer-prerendered publish SERVER-SIDE. `entryHtml` is arbitrary
  * renderer-supplied HTML, so the main process — not the renderer's UI gating — is
  * the trust boundary deciding which kinds may publish. Allowed: the built-in
- * `canvas` kind, OR a plugin artifact kind whose on-disk manifest declares
- * `shareable: true` (looked up from the trusted plugin registry, which the
- * renderer cannot forge). Everything else throws. A plugin/agent can never
+ * `canvas` and `csv` kinds, OR a plugin artifact kind whose on-disk manifest
+ * declares `shareable: true` (looked up from the trusted plugin registry, which
+ * the renderer cannot forge). Everything else throws. A plugin/agent can never
  * self-publish: this only gates WHICH kinds may be published; the act of
  * publishing remains a user action through the share UI.
  */
 function authorizePrerenderedPublish(db: Database.Database, doc: Document): void {
-  if (doc.kind === 'canvas') return
+  if (doc.kind === 'canvas' || doc.kind === 'csv') return
   if (typeof doc.kind === 'string' && doc.kind.startsWith('plugin:')) {
     const contrib = getPluginViewerContribution(db, doc.kind)
     if (contrib?.shareable) return

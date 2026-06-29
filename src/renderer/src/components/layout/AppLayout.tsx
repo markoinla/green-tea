@@ -137,9 +137,10 @@ export function AppLayout({
   // `shareable` flag arrives asynchronously and may land after the doc is active.
   useSyncExternalStore(subscribePluginViewers, getPluginViewersVersion)
   // Sharing covers notes (kind undefined/'note'), html artifacts, canvases
-  // (published as a static SVG page), and plugin artifacts whose contribution
-  // declares `shareable` (published from a live-viewer snapshot). `file:` tabs
-  // have no Document row / shareable identity, so they're excluded.
+  // (published as a static SVG page), csv tables (published as a static HTML
+  // table), and plugin artifacts whose contribution declares `shareable`
+  // (published from a live-viewer snapshot). `file:` tabs have no Document row /
+  // shareable identity, so they're excluded.
   const canShare =
     !!activeDocId &&
     !isFileTabId(activeDocId) &&
@@ -148,6 +149,7 @@ export function AppLayout({
       activeDoc.kind === 'note' ||
       activeDoc.kind === 'html' ||
       activeDoc.kind === 'canvas' ||
+      activeDoc.kind === 'csv' ||
       isShareablePluginKind(activeDoc.kind))
 
   // Broader than `canShare`: any real Document may carry an EXISTING share that must
