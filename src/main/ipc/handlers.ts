@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3'
 import { registerDbHandlers } from './register-db-handlers'
 import { registerAgentHandlers } from './register-agent-handlers'
 import { registerSkillsHandlers } from './register-skills-handlers'
+import { registerPluginHandlers } from './register-plugin-handlers'
 import { registerWorkspaceFileHandlers } from './register-workspace-file-handlers'
 import { registerSystemHandlers } from './register-system-handlers'
 import { registerSchedulerHandlers } from './register-scheduler-handlers'
@@ -17,6 +18,7 @@ export function registerIpcHandlers(db: Database.Database, mainWindow?: BrowserW
   registerDbHandlers(context)
   registerAgentHandlers(context)
   registerSkillsHandlers(context)
+  registerPluginHandlers(context)
   registerWorkspaceFileHandlers(context)
   registerSystemHandlers(context)
   registerSchedulerHandlers(context)

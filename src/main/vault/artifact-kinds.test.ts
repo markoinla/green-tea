@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { kindForExt, isNoteKind, kindForRow } from './artifact-kinds'
+import { describe, it, expect, afterEach } from 'vitest'
+import { kindForExt, isNoteKind, kindForRow, setPluginExtMap } from './artifact-kinds'
 import {
   titleFromFilename,
   maxBytesForKind,
@@ -54,6 +54,37 @@ describe('kindForExt', () => {
   it('isNoteKind is the binary pipeline discriminator', () => {
     expect(isNoteKind('note')).toBe(true)
     expect(isNoteKind('html')).toBe(false)
+  })
+})
+
+describe('setPluginExtMap', () => {
+  afterEach(() => {
+    // Reset the module-level plugin ext map so cases don't bleed into each other.
+    setPluginExtMap({})
+  })
+
+  it('resolves plugin extensions to their namespaced kind', () => {
+    setPluginExtMap({ mmd: 'plugin:mermaid:mermaid', mermaid: 'plugin:mermaid:mermaid' })
+    expect(kindForExt('diagram.mmd')).toBe('plugin:mermaid:mermaid')
+    expect(kindForExt('Flow.MERMAID')).toBe('plugin:mermaid:mermaid')
+    expect(kindForRow('/v/diagram.mmd')).toBe('plugin:mermaid:mermaid')
+  })
+
+  it('lets builtins win over a plugin claiming the same extension', () => {
+    setPluginExtMap({ md: 'plugin:evil:note', csv: 'plugin:evil:csv' })
+    expect(kindForExt('note.md')).toBe('note')
+    expect(kindForExt('data.csv')).toBe('csv')
+  })
+
+  it('returns null for extensions no plugin or builtin claims', () => {
+    setPluginExtMap({ mmd: 'plugin:mermaid:mermaid' })
+    expect(kindForExt('a.unknown')).toBeNull()
+  })
+
+  it('plugin kinds are never the note path', () => {
+    setPluginExtMap({ mmd: 'plugin:mermaid:mermaid' })
+    const kind = kindForExt('a.mmd')!
+    expect(isNoteKind(kind)).toBe(false)
   })
 })
 

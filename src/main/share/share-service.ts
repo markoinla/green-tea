@@ -10,6 +10,7 @@ import { getShareByDoc, upsertShare, deleteShare } from '../database/repositorie
 import { renderNoteToHtml } from './note-renderer'
 import { walkArtifactAssets } from './asset-walker'
 import { publishToWorker, unpublishFromWorker } from './publish-client'
+import { getPluginViewerContribution } from '../plugins/registry'
 
 const DEFAULT_BASE_URL = 'https://share.greentea.app'
 
@@ -157,14 +158,39 @@ export async function publishShare(
 }
 
 /**
- * Publish (or re-publish) a CANVAS share from renderer-prerendered HTML. A
- * `.excalidraw` file is JSON — it renders nothing in a browser without the
- * Excalidraw runtime — so the renderer exports the scene to a static, fully
- * self-contained SVG page (`exportToSvg` needs a DOM, which only the renderer
- * has) and passes it here as `entryHtml`. This main-side half just pushes that
- * HTML through the existing `artifact` worker path: path-based docKey, slug reuse
- * (stable URL across re-publishes), 30-day expiry. The HTML already inlines the
- * SVG, its fonts, and any base64 images, so there are no sibling assets to bundle.
+ * Authorize a renderer-prerendered publish SERVER-SIDE. `entryHtml` is arbitrary
+ * renderer-supplied HTML, so the main process — not the renderer's UI gating — is
+ * the trust boundary deciding which kinds may publish. Allowed: the built-in
+ * `canvas` kind, OR a plugin artifact kind whose on-disk manifest declares
+ * `shareable: true` (looked up from the trusted plugin registry, which the
+ * renderer cannot forge). Everything else throws. A plugin/agent can never
+ * self-publish: this only gates WHICH kinds may be published; the act of
+ * publishing remains a user action through the share UI.
+ */
+function authorizePrerenderedPublish(db: Database.Database, doc: Document): void {
+  if (doc.kind === 'canvas') return
+  if (typeof doc.kind === 'string' && doc.kind.startsWith('plugin:')) {
+    const contrib = getPluginViewerContribution(db, doc.kind)
+    if (contrib?.shareable) return
+    throw new Error('Sharing is not enabled for this plugin artifact')
+  }
+  throw new Error(`Sharing via the prerendered path is not supported for ${doc.kind} documents`)
+}
+
+/**
+ * Publish (or re-publish) a prerendered, FROZEN, read-only share from
+ * renderer-supplied static HTML. Used for both the built-in `canvas` kind and
+ * shareable plugin artifacts: kinds (like a `.excalidraw` canvas) that render
+ * nothing in a plain browser, so the renderer produces a self-contained static
+ * page (`exportToSvg`/a plugin's own `gt:render-static` snapshot need a DOM,
+ * which only the renderer has) and passes it here as `entryHtml`. This main-side
+ * half authorizes the kind server-side, then pushes the HTML through the existing
+ * `artifact` worker path: path-based docKey, slug reuse (stable URL across
+ * re-publishes), 30-day expiry. The HTML is fully self-contained (inlined SVG,
+ * fonts, base64 images, any read-only scripts), so there are no sibling assets to
+ * bundle. The function name is kept (and the IPC channel `share:publishCanvas`
+ * stays) so the renderer-facing pipe is reused unchanged for both canvas and
+ * plugin snapshots.
  */
 export async function publishCanvasShare(
   db: Database.Database,
@@ -175,8 +201,7 @@ export async function publishCanvasShare(
   if (!token) throw new Error('Share publish token not configured')
   const doc = getDocument(db, documentId)
   if (!doc) throw new Error('Document not found')
-  if (doc.kind !== 'canvas')
-    throw new Error(`Sharing via canvas path requires a canvas: ${doc.kind}`)
+  authorizePrerenderedPublish(db, doc)
   if (!doc.file_path) throw new Error('Document has no backing file to share')
 
   const prevSlug = getShareByDoc(db, computeDocKey(db, doc))?.slug

@@ -1,0 +1,19 @@
+{
+  "id": "mermaid",
+  "name": "Mermaid Diagrams",
+  "version": "1.0.0",
+  "minAppVersion": "6.2.0",
+  "description": "Render and edit Mermaid diagrams",
+  "author": "Green Tea",
+  "contributes": {
+    "artifacts": [
+      {
+        "kind": "mermaid",
+        "extensions": ["mmd", "mermaid"],
+        "entry": "viewer.html",
+        "icon": "GitBranch",
+        "editable": true
+      }
+    ]
+  }
+}

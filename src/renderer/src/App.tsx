@@ -11,6 +11,7 @@ import { useTaskNotifications } from './hooks/useTaskNotifications'
 import { usePythonCheck } from './hooks/usePythonCheck'
 import { MetadataFilterProvider } from './contexts/MetadataFilterContext'
 import { getFontStack } from './components/settings/constants'
+import { setPluginViewers } from './components/artifacts/registry'
 import type { DocumentVersion } from '../../main/database/types'
 
 const THEME_CSS_KEYS = [
@@ -135,6 +136,17 @@ export default function App() {
   usePythonCheck()
 
   const clearSelection = useCallback(() => setSelectionContext(null), [])
+
+  // Keep the renderer plugin-viewer store in sync with enabled plugins: fetch the
+  // viewer contributions on mount and whenever plugins change, feeding them into
+  // the artifact registry so `plugin:*` kinds resolve to their viewers.
+  useEffect(() => {
+    const syncViewers = (): void => {
+      window.api.plugins.viewers().then(setPluginViewers)
+    }
+    syncViewers()
+    return window.api.onPluginsChanged(syncViewers)
+  }, [])
 
   // Preview is only active when it belongs to the currently active tab.
   const activePreview =

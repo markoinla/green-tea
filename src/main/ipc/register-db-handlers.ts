@@ -12,6 +12,11 @@ import * as documentVersions from '../database/repositories/document-versions'
 import * as documents from '../vault/documents-service'
 import { MAX_ARTIFACT_BYTES, atomicWriteFile } from '../vault/note-store'
 import { markSelfWrite } from '../vault/self-write'
+import {
+  readWorkspaceDoc,
+  writeWorkspaceDoc,
+  ensureWorkspaceDocs
+} from '../vault/workspace-docs'
 import type { DocumentKind } from '../database/types'
 import { patchHtmlText } from '../protocol/html-text-patch'
 import { getWorkspaceVaultDir, ensureVaultDir } from '../vault/paths'
@@ -44,11 +49,18 @@ function ensureSeedNote(vaultDir: string): void {
 export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void {
   // Workspaces
   ipcMain.handle('db:workspaces:list', () => {
-    return workspaces.listWorkspaces(db)
+    // description now lives in `README.md` at the workspace root, not
+    // the (vestigial) DB column — surface the file content so the switcher shows the
+    // current value with no renderer change.
+    return workspaces
+      .listWorkspaces(db)
+      .map((ws) => ({ ...ws, description: readWorkspaceDoc(db, ws.id, 'description') }))
   })
 
   ipcMain.handle('db:workspaces:get', (_event, id: string) => {
-    return workspaces.getWorkspace(db, id)
+    const ws = workspaces.getWorkspace(db, id)
+    if (!ws) return ws
+    return { ...ws, description: readWorkspaceDoc(db, ws.id, 'description') }
   })
 
   ipcMain.handle(
@@ -66,6 +78,9 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
       // One folder per workspace: the durable notes vault, also the agent's home.
       const vaultDir = getWorkspaceVaultDir(db, workspace.id)
       ensureVaultDir(vaultDir)
+      // Seed the visible, indexed README.md / MEMORY.md
+      // (empty) before the reindex below so they're picked up like any other note.
+      ensureWorkspaceDocs(db, workspace.id)
       if (mode === 'open') {
         // Open-existing: recursively index whatever `.md`/`.html`/`.csv` already
         // lives in the chosen folder (dotfolders incl. `.greentea/` are skipped by
@@ -131,7 +146,14 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
           }
         }
       }
-      const workspace = workspaces.updateWorkspace(db, id, data)
+      // description now lives in `README.md`, not the DB column: route
+      // it to the file (atomic + self-write so the watcher doesn't echo-loop) and
+      // strip it so updateWorkspace only sees name/path/other fields.
+      const { description, ...rest } = data
+      if (description !== undefined) {
+        writeWorkspaceDoc(db, id, 'description', description)
+      }
+      const workspace = workspaces.updateWorkspace(db, id, rest)
       // File paths in the index moved with the vault dir — rebuild from disk.
       documents.reindexWorkspace(db, id)
       mainWindow?.webContents.send('workspaces:changed')

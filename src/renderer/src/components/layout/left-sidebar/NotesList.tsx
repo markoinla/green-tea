@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { FilePlus, FolderPlus, RefreshCw, Shapes, Table2 } from 'lucide-react'
 import {
   dropTargetForElements,
@@ -23,7 +23,12 @@ import { FolderMenuItem } from './FolderMenuItem'
 import { DocumentMenuItem } from './DocumentMenuItem'
 import { buildFolderTree } from './folderTree'
 import { DROP_TYPE_ROOT, isDocumentDragData, isFolderDropData, isRootDropData } from './dnd'
-import type { Document } from '../../../../../main/database/types'
+import {
+  creatablePluginKinds,
+  getPluginViewersVersion,
+  subscribePluginViewers
+} from '@renderer/components/artifacts/registry'
+import type { Document, DocumentKind } from '../../../../../main/database/types'
 import type { Folder } from '../../../../../main/database/types'
 
 interface NotesListProps {
@@ -37,6 +42,8 @@ interface NotesListProps {
   onNewCanvas: () => void
   /** Create a new table (csv) artifact at the root. */
   onNewTable: () => void
+  /** Create a new plugin-contributed artifact of `kind`, optionally inside `folderId`. */
+  onNewArtifactKind: (kind: DocumentKind, folderId?: string) => void
   onNewFolder: () => void
   onRenameDoc: (id: string, newTitle: string) => void
   onDeleteDoc: (id: string) => void
@@ -103,6 +110,7 @@ export function NotesList({
   onNewDocument,
   onNewCanvas,
   onNewTable,
+  onNewArtifactKind,
   onNewFolder,
   onRenameDoc,
   onDeleteDoc,
@@ -117,6 +125,10 @@ export function NotesList({
   onMoveDocument,
   onRefresh
 }: NotesListProps) {
+  // Re-read the plugin-viewer store on change so the data-driven "New X" items
+  // appear once plugins load (their contributions arrive asynchronously).
+  useSyncExternalStore(subscribePluginViewers, getPluginViewersVersion)
+  const pluginKinds = creatablePluginKinds()
   // The folder rows are flat but their names are slash-paths; build the nested
   // tree the sidebar renders from them (synthesizing row-less intermediates).
   const folderTree = useMemo(() => buildFolderTree(folders, documents), [folders, documents])
@@ -194,6 +206,7 @@ export function NotesList({
                       onNewDocInFolder={onNewDocInFolder}
                       onNewCanvasInFolder={onNewCanvasInFolder}
                       onNewTableInFolder={onNewTableInFolder}
+                      onNewArtifactKind={onNewArtifactKind}
                       onNewSubfolder={onNewSubfolder}
                     />
                   ))}
@@ -233,6 +246,12 @@ export function NotesList({
           <Table2 className="h-3.5 w-3.5 mr-2" />
           New Table
         </ContextMenuItem>
+        {pluginKinds.map((entry) => (
+          <ContextMenuItem key={entry.kind} onClick={() => onNewArtifactKind(entry.kind)}>
+            <entry.icon className="h-3.5 w-3.5 mr-2" />
+            {entry.label}
+          </ContextMenuItem>
+        ))}
         <ContextMenuItem onClick={onNewFolder}>
           <FolderPlus className="h-3.5 w-3.5 mr-2" />
           New Folder

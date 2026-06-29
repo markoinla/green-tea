@@ -4,7 +4,14 @@
  * kind mapping (and the helpers) live in `../vault/artifact-kinds`; the type is
  * defined HERE so the renderer can import it without pulling in node-only code.
  */
-export type DocumentKind = 'note' | 'html' | 'csv' | 'image' | 'pdf' | 'canvas'
+export type BuiltinDocumentKind = 'note' | 'html' | 'csv' | 'image' | 'pdf' | 'canvas'
+
+/**
+ * A document's kind. Either one of the built-in kinds, or a namespaced plugin
+ * artifact kind (`plugin:<pluginId>:<kind>`, see `pluginKind`). Plugin kinds are
+ * always artifacts (never `'note'`).
+ */
+export type DocumentKind = BuiltinDocumentKind | `plugin:${string}`
 
 export interface Document {
   id: string

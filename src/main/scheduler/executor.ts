@@ -16,6 +16,7 @@ import { getAgentBaseDir, getAgentWorkDir, getWorkspaceDir } from '../agent/path
 import { getSkillsDir } from '../skills/manager'
 import { getSetting } from '../database/repositories/settings'
 import { getWorkspace } from '../database/repositories/workspaces'
+import { readWorkspaceDoc } from '../vault/workspace-docs'
 import {
   updateScheduledTask,
   createTaskRun,
@@ -138,11 +139,13 @@ export async function executeScheduledTask(
 
     const workspace = getWorkspace(db, task.workspace_id)
     if (workspace) {
-      if (workspace.memory) {
-        fullPrompt = `[Workspace Memory:\n${workspace.memory}]\n\n${fullPrompt}`
+      const memory = readWorkspaceDoc(db, task.workspace_id, 'memory')
+      const description = readWorkspaceDoc(db, task.workspace_id, 'description')
+      if (memory) {
+        fullPrompt = `[Workspace Memory:\n${memory}]\n\n${fullPrompt}`
       }
-      if (workspace.description) {
-        fullPrompt = `[Workspace Context — "${workspace.name}":\n${workspace.description}]\n\n${fullPrompt}`
+      if (description) {
+        fullPrompt = `[Workspace Context — "${workspace.name}":\n${description}]\n\n${fullPrompt}`
       }
     }
 

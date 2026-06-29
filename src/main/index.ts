@@ -14,6 +14,10 @@ import { ensureUserDirs } from './agent/paths'
 import { reindexAllWorkspaces } from './vault/documents-service'
 import { migrateLegacyVaultLayout } from './vault/paths'
 import { startVaultWatcher, stopVaultWatcher } from './vault/vault-watcher'
+import { ensureWorkspaceDocs } from './vault/workspace-docs'
+import { backfillWorkspaceDocs } from './database/migrations'
+import { listWorkspaces } from './database/repositories/workspaces'
+import { startPluginWatcher, stopPluginWatcher } from './plugins/watcher'
 import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
 import { getMcpManager } from './mcp'
@@ -29,6 +33,9 @@ import {
 } from './theme-watcher'
 import { getPythonBinDir } from './python'
 import { GT_FILE_SCHEME, GT_FILE_PRIVILEGE, createGtFileHandler } from './protocol/gt-file'
+import { GT_PLUGIN_SCHEME, GT_PLUGIN_PRIVILEGE, createGtPluginHandler } from './protocol/gt-plugin'
+import { seedDefaultPlugins } from './plugins/manager'
+import { reloadPluginRegistry } from './plugins/registry'
 
 // Fix PATH for macOS/Linux — Electron launched from the dock gets a minimal
 // PATH that excludes nvm, homebrew, etc. Fetch the real shell PATH so spawned
@@ -70,7 +77,8 @@ protocol.registerSchemesAsPrivileged([
       secure: true
     }
   },
-  GT_FILE_PRIVILEGE
+  GT_FILE_PRIVILEGE,
+  GT_PLUGIN_PRIVILEGE
 ])
 
 // Set true on a genuine quit (Cmd-Q / tray Quit / app-menu Quit) so the
@@ -174,6 +182,10 @@ app.whenReady().then(() => {
   // Traversal-guarded + CSP-headed; see src/main/protocol/gt-file.ts.
   protocol.handle(GT_FILE_SCHEME, createGtFileHandler(db))
 
+  // Serve plugin viewer assets via gt-plugin://<id>/ protocol.
+  // Traversal-guarded + CSP-headed; see src/main/protocol/gt-plugin.ts.
+  protocol.handle(GT_PLUGIN_SCHEME, createGtPluginHandler(db))
+
   // One-time: move notes from the old `vaults/` tree into the unified
   // `workspaces/` tree. Runs before ensureUserDirs so it can rename the whole
   // tree when the target doesn't exist yet. Guarded so a filesystem error
@@ -187,6 +199,32 @@ app.whenReady().then(() => {
 
   // Ensure base user directories exist (re-creates if deleted)
   ensureUserDirs(db)
+
+  // Seed bundled default plugins (re-seeds if deleted) and build the plugin
+  // registry (ext map + viewer cache). Must run BEFORE reindexAllWorkspaces so
+  // the plugin extension map is populated when the index walk classifies files.
+  seedDefaultPlugins(db)
+  reloadPluginRegistry(db)
+
+  // One-time DB->file backfill of README.md / MEMORY.md
+  // from the legacy `workspaces.description` / `workspaces.memory` columns. MUST
+  // run AFTER migrateLegacyVaultLayout + ensureUserDirs (so each workspace folder
+  // is already at its final location) and BEFORE reindexAllWorkspaces (so the
+  // backfilled files get indexed this session). One-shot-guarded internally.
+  backfillWorkspaceDocs(db)
+
+  // Ensure each workspace has its README.md / MEMORY.md
+  // present at the workspace root, recreating them EMPTY if deleted (create-only;
+  // never restores old content). Runs BEFORE reindexAllWorkspaces so a recreated
+  // file is indexed/visible this session (not only after the next restart).
+  // Defensive per-workspace so a single bad folder never blocks startup.
+  for (const ws of listWorkspaces(db)) {
+    try {
+      ensureWorkspaceDocs(db, ws.id)
+    } catch (err) {
+      console.error('[workspace-docs] ensure failed for workspace', ws.id, err)
+    }
+  }
 
   // Rebuild the derived documents index from the markdown files on disk
   // (files are the source of truth; the SQLite rows are a disposable cache).
@@ -285,6 +323,12 @@ app.whenReady().then(() => {
   // Obsidian, sync, or the agent writing files → live-reload the open note.
   startVaultWatcher(db, mainWindow)
 
+  // Watch the plugins directory for hot-reload: when plugin files are added,
+  // changed, or removed (external editor or the agent authoring a plugin),
+  // rebuild the plugin registry and notify the renderer so new artifact viewers
+  // appear without an app restart.
+  startPluginWatcher(db, mainWindow)
+
   // Prune old document versions at startup and hourly
   pruneVersions(db)
   setInterval(() => pruneVersions(db), 60 * 60 * 1000)
@@ -305,6 +349,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopThemeWatcher()
   stopVaultWatcher()
+  stopPluginWatcher()
   getMcpManager().disconnectAll()
   if (process.platform !== 'darwin') {
     app.quit()

@@ -1,7 +1,7 @@
 import { shell } from 'electron'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
-import { existsSync, renameSync, rmSync, statSync } from 'fs'
+import { existsSync, readFileSync, renameSync, rmSync, statSync } from 'fs'
 import { dirname, extname, join, relative, sep } from 'path'
 import type { Document, DocumentKind } from '../database/types'
 import { sanitizeWorkspaceName, getDefaultWorkspaceDir } from '../agent/paths'
@@ -11,6 +11,9 @@ import type { TTDoc, TTNode } from '../markdown/tiptap-markdown'
 import { getWorkspaceVaultDir, ensureVaultDir } from './paths'
 import { kindForRow } from './artifact-kinds'
 import { markSelfWrite } from './self-write'
+import { getPluginViewerContribution } from '../plugins/registry'
+import { getPluginsDir } from '../plugins/manager'
+import { resolveGtFileAsset } from '../protocol/gt-file'
 import {
   readNote,
   writeNote,
@@ -803,21 +806,55 @@ export function createArtifact(
   db: Database.Database,
   data: { title: string; kind: DocumentKind; workspace_id?: string; folder_id?: string | null }
 ): Document {
-  const template = ARTIFACT_TEMPLATES[data.kind]
-  if (!template) throw new Error(`Cannot create an artifact of kind: ${data.kind}`)
+  // The only per-kind variation is the on-disk extension + seed bytes. Built-ins
+  // come from the static ARTIFACT_TEMPLATES map; plugin kinds (`plugin:<id>:<kind>`)
+  // resolve their extension + manifest-declared seed file from the trusted on-disk
+  // plugin registry. Everything after this is kind-agnostic.
+  let ext: string
+  let contents: string
+  if (data.kind.startsWith('plugin:')) {
+    const contrib = getPluginViewerContribution(db, data.kind)
+    if (!contrib || !contrib.creatable) {
+      throw new Error(`Cannot create an artifact of kind: ${data.kind}`)
+    }
+    const rawExt = contrib.extensions[0]
+    ext = rawExt.startsWith('.') ? rawExt : `.${rawExt}`
+    contents = ''
+    if (contrib.templateFile) {
+      // Clamp the read to the plugin dir (rejects `..`/absolute/escaping-symlink and
+      // returns null on a missing file), falling back to an empty seed.
+      const pluginDir = join(getPluginsDir(db), contrib.pluginId)
+      const resolved = resolveGtFileAsset({
+        baseDir: pluginDir,
+        requestPathname: `/${contrib.templateFile}`
+      })
+      if (resolved) {
+        try {
+          contents = readFileSync(resolved, 'utf-8')
+        } catch {
+          contents = ''
+        }
+      }
+    }
+  } else {
+    const template = ARTIFACT_TEMPLATES[data.kind]
+    if (!template) throw new Error(`Cannot create an artifact of kind: ${data.kind}`)
+    ext = template.ext
+    contents = template.contents
+  }
 
   const workspaceId = data.workspace_id ?? defaultWorkspaceId(db)
   const id = randomUUID()
   const folder = data.folder_id ?? null
 
   const dir = resolveDir(db, workspaceId, folder)
-  const filePath = uniqueArtifactPath(dir, slugifyTitle(data.title), template.ext)
+  const filePath = uniqueArtifactPath(dir, slugifyTitle(data.title), ext)
   const created = nowIso()
 
   // Atomic write + self-write mark: identical to the write-back IPC, so a crash
   // mid-write can't corrupt the file and the vault watcher stays silent on it.
-  markSelfWrite(filePath, template.contents)
-  atomicWriteFile(filePath, template.contents)
+  markSelfWrite(filePath, contents)
+  atomicWriteFile(filePath, contents)
 
   // Display title tracks the filename (artifacts carry no title override), so it
   // matches what a reindex would derive — no flap.

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Folder,
   FolderOpen,
@@ -21,9 +21,15 @@ import {
   ContextMenuTrigger
 } from '@renderer/components/ui/context-menu'
 import { useInlineRename } from '@renderer/hooks/useInlineRename'
+import {
+  creatablePluginKinds,
+  getPluginViewersVersion,
+  subscribePluginViewers
+} from '@renderer/components/artifacts/registry'
 import { DocumentMenuItem } from './DocumentMenuItem'
 import { DROP_TYPE_FOLDER, isDocumentDragData } from './dnd'
 import type { FolderNode } from './folderTree'
+import type { DocumentKind } from '../../../../../main/database/types'
 
 interface FolderMenuItemProps {
   node: FolderNode
@@ -41,6 +47,8 @@ interface FolderMenuItemProps {
   onNewDocInFolder: (folderId: string) => void
   onNewCanvasInFolder: (folderId: string) => void
   onNewTableInFolder: (folderId: string) => void
+  /** Create a new plugin-contributed artifact of `kind` inside `folderId`. */
+  onNewArtifactKind: (kind: DocumentKind, folderId?: string) => void
   onNewSubfolder: (folderId: string) => void
 }
 
@@ -59,8 +67,13 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
   onNewDocInFolder,
   onNewCanvasInFolder,
   onNewTableInFolder,
+  onNewArtifactKind,
   onNewSubfolder
 }: FolderMenuItemProps) {
+  // Re-read the plugin-viewer store on change so data-driven "New X" items appear
+  // once plugins load asynchronously (memo only gates prop-driven re-renders).
+  useSyncExternalStore(subscribePluginViewers, getPluginViewersVersion)
+  const pluginKinds = creatablePluginKinds()
   const folder = node.folder
   // Synthetic intermediate nodes (no backing row) are grouping-only: collapse
   // works via local state, but rename/delete/new-note/drop need a row id and so
@@ -173,6 +186,15 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                   <Table2 className="h-3.5 w-3.5 mr-2" />
                   New Table
                 </ContextMenuItem>
+                {pluginKinds.map((entry) => (
+                  <ContextMenuItem
+                    key={entry.kind}
+                    onClick={() => onNewArtifactKind(entry.kind, folder.id)}
+                  >
+                    <entry.icon className="h-3.5 w-3.5 mr-2" />
+                    {entry.label}
+                  </ContextMenuItem>
+                ))}
                 <ContextMenuItem onClick={() => onNewSubfolder(folder.id)}>
                   <FolderPlus className="h-3.5 w-3.5 mr-2" />
                   New Folder
@@ -211,6 +233,7 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                     onNewDocInFolder={onNewDocInFolder}
                     onNewCanvasInFolder={onNewCanvasInFolder}
                     onNewTableInFolder={onNewTableInFolder}
+                    onNewArtifactKind={onNewArtifactKind}
                     onNewSubfolder={onNewSubfolder}
                   />
                 ))}

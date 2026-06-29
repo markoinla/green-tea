@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import {
   ChevronDown,
   ChevronLeft,
@@ -18,6 +18,12 @@ import {
 } from 'lucide-react'
 import { useWorkspaces } from '@renderer/hooks/useWorkspaces'
 import { useWorkspace } from '@renderer/hooks/useWorkspace'
+import {
+  creatablePluginKinds,
+  getPluginViewersVersion,
+  subscribePluginViewers
+} from '@renderer/components/artifacts/registry'
+import type { DocumentKind } from '../../../../main/database/types'
 import {
   Dialog,
   DialogContent,
@@ -53,6 +59,7 @@ interface WorkspaceSwitcherProps {
   onNewDocument?: () => void
   onNewCanvas?: () => void
   onNewTable?: () => void
+  onNewArtifactKind?: (kind: DocumentKind, folderId?: string) => void
   onNewFolder?: () => void
 }
 
@@ -62,8 +69,13 @@ export function WorkspaceSwitcher({
   onNewDocument,
   onNewCanvas,
   onNewTable,
+  onNewArtifactKind,
   onNewFolder
 }: WorkspaceSwitcherProps) {
+  // Re-render when the plugin-viewer store changes so creatable plugin kinds
+  // appear/disappear in the New menu as plugins load/enable/disable.
+  useSyncExternalStore(subscribePluginViewers, getPluginViewersVersion)
+  const pluginKinds = creatablePluginKinds()
   const { workspaces, createWorkspace, deleteWorkspace, updateWorkspace } = useWorkspaces()
   const { workspace } = useWorkspace(selectedWorkspaceId)
   const [isOpen, setIsOpen] = useState(false)
@@ -152,6 +164,16 @@ export function WorkspaceSwitcher({
                     New Table
                   </DropdownMenuItem>
                 )}
+                {onNewArtifactKind &&
+                  pluginKinds.map((entry) => (
+                    <DropdownMenuItem
+                      key={entry.kind}
+                      onSelect={() => onNewArtifactKind(entry.kind)}
+                    >
+                      <entry.icon className="h-4 w-4" />
+                      {entry.label}
+                    </DropdownMenuItem>
+                  ))}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
