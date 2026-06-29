@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { ipcMain, session } from 'electron'
+import { GT_PLUGIN_SCHEME } from '../protocol/gt-plugin'
 import * as settings from '../database/repositories/settings'
 import * as pluginManager from '../plugins/manager'
 import { fetchPluginRegistry, pluginUrl } from '../plugins/marketplace'
@@ -42,12 +43,18 @@ export function registerPluginHandlers({ db, mainWindow }: IpcHandlerContext): v
     }
   })
 
-  ipcMain.handle('plugins:remove', (_event, id: string) => {
+  ipcMain.handle('plugins:remove', async (_event, id: string) => {
     pluginManager.removePlugin(db, id)
     const disabledRaw = settings.getSetting(db, 'disabledPlugins')
     const disabled: string[] = disabledRaw ? JSON.parse(disabledRaw) : []
     const updated = disabled.filter((p) => p !== id)
     settings.setSetting(db, 'disabledPlugins', JSON.stringify(updated))
+    // Plugin viewers run at the `gt-plugin://<id>` origin (allow-same-origin), so
+    // they may have accumulated persistent web storage. Reclaim it on uninstall —
+    // the on-disk dir is already gone, but storage is keyed by origin, not path.
+    await session.defaultSession
+      .clearStorageData({ origin: `${GT_PLUGIN_SCHEME}://${id}` })
+      .catch((err: unknown) => console.error('[plugin] storage cleanup failed', err))
     afterMutation()
   })
 

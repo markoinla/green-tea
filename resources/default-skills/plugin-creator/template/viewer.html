@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plugin Viewer</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        color: #1f2937;
+        background: #ffffff;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      #view {
+        flex: 1 1 auto;
+        overflow: auto;
+        padding: 16px;
+      }
+      pre {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      #editor {
+        flex: 0 0 auto;
+        border-top: 1px solid #e5e7eb;
+        display: none;
+      }
+      #editor.visible {
+        display: block;
+      }
+      textarea {
+        width: 100%;
+        height: 160px;
+        border: 0;
+        resize: vertical;
+        padding: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        outline: none;
+        color: #111827;
+      }
+      .error {
+        color: #b91c1c;
+        font-family: ui-monospace, monospace;
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="view"></div>
+      <div id="editor">
+        <textarea id="source" spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <script type="module">
+      // OPTIONAL: import any library from a CDN (opaque-origin iframe allows https: scripts).
+      // import { something } from 'https://esm.sh/some-lib@1'
+
+      // The host bridges file contents as a plain UTF-8 string, so `bytes` on
+      // both gt:init and gt:save is a string — no Text{En,De}coder needed.
+      const viewEl = document.getElementById('view')
+      const editorEl = document.getElementById('editor')
+      const sourceEl = document.getElementById('source')
+
+      let editable = false
+      // Keep the current source so we can produce a frozen snapshot on demand.
+      let currentSource = ''
+
+      function post(msg) {
+        window.parent.postMessage(msg, '*')
+      }
+
+      // Build a SELF-CONTAINED, READ-ONLY HTML snapshot of the current state.
+      // No host bridge, no gt:save, no editing — just a standalone rendering.
+      // Inline all CSS/data here; external https: assets are allowed but prefer fully inline.
+      function renderStatic() {
+        const source = currentSource
+        let pretty
+        try {
+          pretty = JSON.stringify(JSON.parse(source), null, 2)
+        } catch {
+          pretty = source
+        }
+        const escaped = pretty.replace(
+          /[&<>]/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]
+        )
+        return [
+          '<!doctype html>',
+          '<html lang="en"><head><meta charset="utf-8" />',
+          '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+          '<style>',
+          'body{margin:0;padding:16px;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;color:#1f2937;background:#fff}',
+          'pre{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word}',
+          '</style></head><body><pre>',
+          escaped,
+          '</pre></body></html>'
+        ].join('')
+      }
+
+      // TODO: replace this render() with your own rendering logic.
+      // The default pretty-prints JSON and falls back to plain text.
+      function render(source) {
+        currentSource = source
+        let html
+        try {
+          html = JSON.stringify(JSON.parse(source), null, 2)
+        } catch {
+          html = source
+        }
+        const pre = document.createElement('pre')
+        pre.textContent = html
+        viewEl.replaceChildren(pre)
+      }
+
+      // Debounce saves so we do not write on every keystroke.
+      let saveTimer = null
+      function scheduleSave(source) {
+        if (saveTimer) clearTimeout(saveTimer)
+        saveTimer = setTimeout(() => {
+          post({ type: 'gt:save', bytes: source })
+        }, 500)
+      }
+
+      sourceEl.addEventListener('input', () => {
+        const source = sourceEl.value
+        render(source)
+        scheduleSave(source)
+      })
+
+      // Send the current text selection to the chat as a quote.
+      document.addEventListener('selectionchange', () => {
+        const sel = window.getSelection()
+        const text = sel ? sel.toString().trim() : ''
+        if (text) post({ type: 'gt:quote', text })
+      })
+
+      // 1) Attach the message listener BEFORE announcing readiness.
+      window.addEventListener('message', (event) => {
+        const msg = event.data
+        if (!msg || typeof msg !== 'object') return
+        if (msg.type === 'gt:init') {
+          editable = Boolean(msg.editable)
+          const source = typeof msg.bytes === 'string' ? msg.bytes : ''
+          sourceEl.value = source
+          if (editable) editorEl.classList.add('visible')
+          render(source)
+        } else if (msg.type === 'gt:render-static') {
+          // Host requests a frozen snapshot for publishing. Reply with a
+          // self-contained, read-only HTML string of the current state.
+          post({ type: 'gt:static', html: renderStatic() })
+        }
+      })
+
+      // 2) Only NOW tell the host we are ready. If you post gt:ready before the
+      //    listener above is wired, the first gt:init can be dropped and the
+      //    view stays blank.
+      post({ type: 'gt:ready' })
+    </script>
+  </body>
+</html>

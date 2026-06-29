@@ -33,7 +33,8 @@ export function reloadPluginRegistry(db: Database.Database): void {
         pluginId: plugin.id,
         entry: artifact.entry,
         icon: artifact.icon,
-        editable: artifact.editable ?? false
+        editable: artifact.editable ?? false,
+        shareable: artifact.shareable ?? false
       })
     }
   }
@@ -49,4 +50,18 @@ export function reloadPluginRegistry(db: Database.Database): void {
 export function getPluginViewerContributions(db: Database.Database): ViewerContribution[] {
   void db
   return cachedViewers
+}
+
+/**
+ * Resolve a single namespaced `plugin:<id>:<kind>` to its cached viewer
+ * contribution, or null when no enabled plugin provides it. The returned
+ * contribution comes from the trusted on-disk manifest, so the main-side share
+ * authorization can read `.shareable` off it without trusting the renderer.
+ */
+export function getPluginViewerContribution(
+  db: Database.Database,
+  kind: string
+): ViewerContribution | null {
+  void db
+  return cachedViewers.find((v) => v.kind === kind) ?? null
 }

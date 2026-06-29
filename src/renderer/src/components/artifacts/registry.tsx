@@ -1,5 +1,4 @@
 import type { ComponentType } from 'react'
-import * as Icons from 'lucide-react'
 import {
   FileCode,
   FileImage,
@@ -9,6 +8,7 @@ import {
   Table2,
   type LucideIcon
 } from 'lucide-react'
+import { resolveLucideIcon } from './lucide-icon'
 import { HtmlViewer } from '../editor/HtmlViewer'
 import { TableViewer } from '../editor/TableViewer'
 import { ImageViewer } from '../editor/ImageViewer'
@@ -104,12 +104,16 @@ const REGISTRY: Partial<Record<BuiltinDocumentKind, ArtifactViewerEntry>> = {
  */
 let PLUGIN_VIEWERS: Record<string, ViewerContribution> = {}
 const pluginViewerSubscribers = new Set<() => void>()
+// Bumped on every store replacement so `useSyncExternalStore` consumers (e.g.
+// AppLayout's `canShare`) re-read after the contributions arrive asynchronously.
+let pluginViewersVersion = 0
 
 /** Replace the plugin-viewer store and notify subscribers (re-renders trees/tabs). */
 export function setPluginViewers(contributions: ViewerContribution[]): void {
   const next: Record<string, ViewerContribution> = {}
   for (const c of contributions) next[c.kind] = c
   PLUGIN_VIEWERS = next
+  pluginViewersVersion++
   for (const cb of pluginViewerSubscribers) cb()
 }
 
@@ -121,13 +125,41 @@ export function subscribePluginViewers(cb: () => void): () => void {
   }
 }
 
+/** Monotonic store version — the `getSnapshot` half of `subscribePluginViewers`. */
+export function getPluginViewersVersion(): number {
+  return pluginViewersVersion
+}
+
 /**
- * Resolve a lucide icon name (as declared in a plugin manifest, e.g. `'Network'`)
- * to its component, falling back to the generic plugin icon for an unknown name.
+ * True when `kind` is a plugin artifact whose contribution opts into public
+ * sharing (`shareable === true` in its manifest). The renderer gate; the main
+ * process re-authorizes server-side against the trusted manifest cache.
  */
-function resolveLucideIcon(name: string): LucideIcon {
-  const icon = (Icons as unknown as Record<string, unknown>)[name]
-  return typeof icon === 'function' ? (icon as LucideIcon) : Puzzle
+export function isShareablePluginKind(kind: DocumentKind | undefined): boolean {
+  return !!kind && kind.startsWith('plugin:') && PLUGIN_VIEWERS[kind]?.shareable === true
+}
+
+/**
+ * Snapshot-provider registry, keyed by doc id. A mounted {@link PluginViewer}
+ * registers a function that asks its live iframe for a self-contained, read-only
+ * HTML snapshot (the `gt:render-static` → `gt:static` round-trip); the share UI
+ * looks it up by the active doc id at publish time. Unlike canvas (which renders
+ * headlessly from raw bytes), a plugin snapshot needs the live frame, so the
+ * provider is only available while the document is open.
+ */
+const snapshotProviders = new Map<string, () => Promise<string>>()
+
+/** Register a doc's snapshot provider; returns an unregister fn for cleanup. */
+export function registerSnapshotProvider(docId: string, fn: () => Promise<string>): () => void {
+  snapshotProviders.set(docId, fn)
+  return () => {
+    if (snapshotProviders.get(docId) === fn) snapshotProviders.delete(docId)
+  }
+}
+
+/** The snapshot provider for an open plugin doc, or null when it isn't mounted. */
+export function getSnapshotProvider(docId: string): (() => Promise<string>) | null {
+  return snapshotProviders.get(docId) ?? null
 }
 
 /** The viewer entry for a plugin kind, or null when no enabled plugin provides it. */

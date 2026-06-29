@@ -1,0 +1,20 @@
+{
+  "id": "my-plugin",
+  "name": "My Plugin",
+  "version": "1.0.0",
+  "minAppVersion": "6.2.0",
+  "description": "Describe what this artifact renders and edits",
+  "author": "Green Tea",
+  "contributes": {
+    "artifacts": [
+      {
+        "kind": "my-plugin",
+        "extensions": ["ext"],
+        "entry": "viewer.html",
+        "icon": "FileText",
+        "editable": true,
+        "shareable": false
+      }
+    ]
+  }
+}

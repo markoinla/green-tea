@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import {
   SidebarProvider,
   SidebarInset,
@@ -14,6 +14,11 @@ import { UpdateBanner } from './UpdateBanner'
 import { VersionHistoryPanel } from '../VersionHistoryPanel'
 import { toast } from 'sonner'
 import { useDocuments } from '@renderer/hooks/useDocuments'
+import {
+  isShareablePluginKind,
+  subscribePluginViewers,
+  getPluginViewersVersion
+} from '@renderer/components/artifacts/registry'
 import { isFileTabId } from '@renderer/lib/tab-ids'
 import type { DocumentVersion } from '../../../../main/database/types'
 
@@ -117,9 +122,13 @@ export function AppLayout({
   // Export actions only apply to note docs — not file: tabs or csv/html artifacts.
   const isActiveNote =
     !!activeDocId && !isFileTabId(activeDocId) && (!activeDoc?.kind || activeDoc.kind === 'note')
-  // Sharing covers notes (kind undefined/'note'), html artifacts, and canvases
-  // (published as a static SVG page). `file:` tabs have no Document row /
-  // shareable identity, so they're excluded.
+  // Re-read `canShare` when the plugin-viewer store changes — a plugin's
+  // `shareable` flag arrives asynchronously and may land after the doc is active.
+  useSyncExternalStore(subscribePluginViewers, getPluginViewersVersion)
+  // Sharing covers notes (kind undefined/'note'), html artifacts, canvases
+  // (published as a static SVG page), and plugin artifacts whose contribution
+  // declares `shareable` (published from a live-viewer snapshot). `file:` tabs
+  // have no Document row / shareable identity, so they're excluded.
   const canShare =
     !!activeDocId &&
     !isFileTabId(activeDocId) &&
@@ -127,7 +136,13 @@ export function AppLayout({
     (!activeDoc.kind ||
       activeDoc.kind === 'note' ||
       activeDoc.kind === 'html' ||
-      activeDoc.kind === 'canvas')
+      activeDoc.kind === 'canvas' ||
+      isShareablePluginKind(activeDoc.kind))
+
+  // Broader than `canShare`: any real Document may carry an EXISTING share that must
+  // stay revocable even if its kind is no longer shareable (e.g. a plugin disabled
+  // after publishing). `file:` tabs have no share identity, so they're excluded.
+  const statusEligible = !!activeDocId && !isFileTabId(activeDocId) && !!activeDoc
 
   const handleCopyMarkdown = useCallback(async () => {
     if (!activeDocId) return
@@ -249,6 +264,7 @@ export function AppLayout({
                 <ShareControl
                   docId={activeDocId}
                   canShare={canShare}
+                  statusEligible={statusEligible}
                   docKind={activeDoc?.kind}
                   docTitle={activeDoc?.title}
                 />

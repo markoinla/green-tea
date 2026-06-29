@@ -14,6 +14,7 @@ import { ensureUserDirs } from './agent/paths'
 import { reindexAllWorkspaces } from './vault/documents-service'
 import { migrateLegacyVaultLayout } from './vault/paths'
 import { startVaultWatcher, stopVaultWatcher } from './vault/vault-watcher'
+import { startPluginWatcher, stopPluginWatcher } from './plugins/watcher'
 import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
 import { getMcpManager } from './mcp'
@@ -299,6 +300,12 @@ app.whenReady().then(() => {
   // Obsidian, sync, or the agent writing files → live-reload the open note.
   startVaultWatcher(db, mainWindow)
 
+  // Watch the plugins directory for hot-reload: when plugin files are added,
+  // changed, or removed (external editor or the agent authoring a plugin),
+  // rebuild the plugin registry and notify the renderer so new artifact viewers
+  // appear without an app restart.
+  startPluginWatcher(db, mainWindow)
+
   // Prune old document versions at startup and hourly
   pruneVersions(db)
   setInterval(() => pruneVersions(db), 60 * 60 * 1000)
@@ -319,6 +326,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopThemeWatcher()
   stopVaultWatcher()
+  stopPluginWatcher()
   getMcpManager().disconnectAll()
   if (process.platform !== 'darwin') {
     app.quit()

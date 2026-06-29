@@ -11,6 +11,14 @@ export interface ArtifactContribution {
   entry: string
   icon: string
   editable?: boolean
+  /**
+   * Opt this artifact kind into public sharing. When true, a published, FROZEN,
+   * read-only HTML snapshot of the artifact may be created via the user-driven
+   * share flow. Defaults to false — a plugin must explicitly opt in. The main
+   * process re-checks this from the trusted on-disk manifest before publishing,
+   * so the renderer's UI gating alone is never trusted.
+   */
+  shareable?: boolean
 }
 
 /** The parsed `manifest.json` of an installed plugin. */
@@ -50,4 +58,6 @@ export interface ViewerContribution {
   entry: string
   icon: string
   editable: boolean
+  /** Whether this kind may be published as a read-only share (manifest opt-in). */
+  shareable: boolean
 }

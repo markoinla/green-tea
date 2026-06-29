@@ -11,6 +11,7 @@ import {
 } from '@renderer/components/ui/dropdown-menu'
 import { cn } from '@renderer/lib/utils'
 import { publishCanvasShare } from '../editor/canvas-share'
+import { publishPluginShare } from '../editor/plugin-share'
 import type { DocumentKind } from '../../../../main/database/types'
 
 interface ShareState {
@@ -63,11 +64,20 @@ function describeExpiry(expiresAt: string | undefined): ExpiryInfo | null {
 export function ShareControl({
   docId,
   canShare,
+  statusEligible,
   docKind,
   docTitle
 }: {
   docId: string | null
+  /** Whether a NEW share can be created for the active doc (kind is shareable now). */
   canShare: boolean
+  /**
+   * Whether the active doc is a real Document that could carry an EXISTING share —
+   * broader than `canShare`. A plugin artifact published while shareable, then made
+   * non-shareable (plugin disabled / `shareable:false`), is no longer `canShare` but
+   * must still expose Copy/Unshare so the live public link can be revoked.
+   */
+  statusEligible: boolean
   /** The active doc's kind; a canvas publishes via a renderer-prerendered page. */
   docKind?: DocumentKind
   /** The active doc's title, used for the canvas page's `<title>`. */
@@ -76,23 +86,27 @@ export function ShareControl({
   const [state, setState] = useState<ShareState>({ shared: false })
   const [busy, setBusy] = useState(false)
 
-  // Publish/update funnel. A canvas can't be rendered server-side (no DOM), so it
-  // goes through the renderer exporter (exportToSvg → static HTML) which then
-  // calls share.publishCanvas; every other shareable kind renders main-side.
+  // Publish/update funnel. Neither a canvas nor a plugin artifact can be rendered
+  // server-side (no DOM): a canvas goes through the renderer exporter (exportToSvg
+  // → static HTML), and a plugin pulls a self-contained snapshot from its live
+  // viewer; both then call the same prerendered-publish IPC (share.publishCanvas).
+  // Every other shareable kind (notes, html) renders main-side via share.publish.
   const runPublish = useCallback((): Promise<{
     url: string
     slug: string
     expiresAt: string
   }> => {
     if (!docId) return Promise.reject(new Error('No document'))
-    return docKind === 'canvas'
-      ? publishCanvasShare(docId, docTitle ?? 'Canvas')
-      : window.api.share.publish(docId)
+    if (docKind === 'canvas') return publishCanvasShare(docId, docTitle ?? 'Canvas')
+    if (docKind?.startsWith('plugin:')) return publishPluginShare(docId)
+    return window.api.share.publish(docId)
   }, [docId, docKind, docTitle])
 
-  // Refresh share status whenever the active document changes.
+  // Refresh share status whenever the active document changes. Gated on
+  // `statusEligible` (any real doc), NOT `canShare`, so an existing live share on a
+  // now-non-shareable artifact still loads and stays revocable.
   useEffect(() => {
-    if (!docId || !canShare) {
+    if (!docId || !statusEligible) {
       setState({ shared: false })
       return
     }
@@ -108,7 +122,7 @@ export function ShareControl({
     return () => {
       cancelled = true
     }
-  }, [docId, canShare])
+  }, [docId, statusEligible])
 
   const handlePublish = useCallback(async () => {
     if (!docId) return
@@ -178,7 +192,7 @@ export function ShareControl({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          disabled={!canShare}
+          disabled={!canShare && !state.shared}
           className={cn(
             'relative rounded-sm p-1 transition-colors hover:bg-muted shrink-0 disabled:opacity-40 disabled:pointer-events-none',
             state.shared ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
@@ -222,26 +236,30 @@ export function ShareControl({
               </div>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={busy}
-              onSelect={(e) => {
-                e.preventDefault()
-                void handleUpdate()
-              }}
-            >
-              {busy ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="size-3.5" />
-              )}
-              {busy
-                ? expiry?.expired
-                  ? 'Republishing…'
-                  : 'Updating…'
-                : expiry?.expired
-                  ? 'Republish to restore'
-                  : 'Update published version'}
-            </DropdownMenuItem>
+            {/* Re-publishing needs the kind to still be shareable — hide it when an
+                existing share lingers on a now-non-shareable artifact (Unshare stays). */}
+            {canShare && (
+              <DropdownMenuItem
+                disabled={busy}
+                onSelect={(e) => {
+                  e.preventDefault()
+                  void handleUpdate()
+                }}
+              >
+                {busy ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5" />
+                )}
+                {busy
+                  ? expiry?.expired
+                    ? 'Republishing…'
+                    : 'Updating…'
+                  : expiry?.expired
+                    ? 'Republish to restore'
+                    : 'Update published version'}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onSelect={(e) => {
                 e.preventDefault()
