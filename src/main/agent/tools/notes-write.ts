@@ -262,12 +262,9 @@ export function notesProposeMetadata(
     if (workspaceId && doc.workspace_id !== workspaceId) {
       return { content: '', error: `Document not in current workspace: ${edit.document_id}` }
     }
-    if (doc.kind && doc.kind !== 'note') {
-      return {
-        content: '',
-        error: `"${doc.title}" is a ${doc.kind} artifact, not a markdown note — it has no frontmatter to set.`
-      }
-    }
+    // Artifacts carry user-authored properties in `artifact_properties` (SQLite),
+    // not frontmatter. updateFrontmatter (the apply-time chokepoint) already routes
+    // artifacts there, so we let them through here too rather than hard-rejecting.
 
     // Strip reserved keys here too so the model learns immediately; the
     // updateFrontmatter chokepoint enforces it again at apply time (M2).

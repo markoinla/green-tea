@@ -8,6 +8,7 @@ import { computeMountedIds } from '@renderer/hooks/tab-state'
 import { isFileTabId, parseFileTabId } from '@renderer/lib/tab-ids'
 import { useDocuments } from '@renderer/hooks/useDocuments'
 import { viewerForKind } from '@renderer/components/artifacts/registry'
+import { ArtifactPropertiesBar } from '@renderer/components/artifacts/ArtifactPropertiesBar'
 import { OutlinerEditor } from './OutlinerEditor'
 import { HtmlViewer } from './HtmlViewer'
 import { FileConflictDialog } from './FileConflictDialog'
@@ -213,7 +214,12 @@ export function TabbedEditorHost({
                   onQuoteSelection={onQuoteSelection}
                 />
               ) : ArtifactViewer && artifactDoc ? (
-                <ArtifactViewer doc={artifactDoc} onQuoteSelection={onQuoteSelection} />
+                <div className="flex flex-col flex-1 min-h-0">
+                  <ArtifactPropertiesBar doc={artifactDoc} />
+                  <div className="flex flex-col flex-1 min-h-0">
+                    <ArtifactViewer doc={artifactDoc} onQuoteSelection={onQuoteSelection} />
+                  </div>
+                </div>
               ) : (
                 <DocumentEditor
                   documentId={id}
