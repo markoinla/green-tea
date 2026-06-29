@@ -80,7 +80,7 @@ so **restart the app** once after creating or changing a plugin.)
   "id": "my-plugin",
   "name": "My Plugin",
   "version": "1.0.0",
-  "minAppVersion": "6.2.0",
+  "minAppVersion": "0.6.0",
   "description": "Render and edit my file type",
   "author": "Green Tea",
   "contributes": {
@@ -105,7 +105,7 @@ Top-level fields:
   `plugin:`** (that prefix is reserved by the host for namespacing). Match the folder name.
 - `name` — human-readable display name.
 - `version` — semver string, e.g. `"1.0.0"`.
-- `minAppVersion` — minimum Green Tea version, e.g. `"6.2.0"`.
+- `minAppVersion` — minimum Green Tea version, e.g. `"0.6.0"`.
 - `description` — one line on what the plugin renders.
 
 Each entry in `contributes.artifacts[]`:
@@ -322,7 +322,7 @@ Goal: render `.csv` files as a simple editable table that saves edits back to th
   "id": "csv-table",
   "name": "CSV Table",
   "version": "1.0.0",
-  "minAppVersion": "6.2.0",
+  "minAppVersion": "0.6.0",
   "description": "View and edit CSV files as a table",
   "author": "Green Tea",
   "contributes": {
@@ -413,7 +413,7 @@ and `creatable: true` with a `templateFile` that seeds new boards:
   "id": "kanban",
   "name": "Kanban Board",
   "version": "1.0.0",
-  "minAppVersion": "6.2.0",
+  "minAppVersion": "0.6.0",
   "description": "View a kanban board, create one from a starter, and publish a read-only snapshot",
   "author": "Green Tea",
   "contributes": {
