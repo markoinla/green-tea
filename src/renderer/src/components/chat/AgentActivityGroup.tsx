@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, AlertCircle, Loader2 } from 'lucide-react'
 import { getToolDescription, getToolIcon, summarizeTools } from './ChatMessage'
 
@@ -24,6 +24,15 @@ export function AgentActivityGroup({
   showToolResults
 }: AgentActivityGroupProps) {
   const [expanded, setExpanded] = useState(false)
+  const thinkingRef = useRef<HTMLDivElement>(null)
+
+  // Keep the streaming thinking pinned to the bottom so the latest reasoning is
+  // visible without the user scrolling. Runs whenever the text grows or the
+  // section expands.
+  useEffect(() => {
+    const el = thinkingRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [thinking, expanded])
 
   const hasErrors = tools.some((t) => t.toolIsError)
   const hasPending = tools.some((t) => t.toolIsError === undefined)
@@ -74,7 +83,10 @@ export function AgentActivityGroup({
       {expanded && (
         <div className="ml-4 border-l-2 border-accent/50 pl-2.5 pb-1.5">
           {thinking && (
-            <div className="text-xs text-muted-foreground/70 py-1 px-1 whitespace-pre-wrap break-words max-h-48 overflow-y-auto italic">
+            <div
+              ref={thinkingRef}
+              className="text-xs text-muted-foreground/70 py-1 px-1 whitespace-pre-wrap break-words max-h-48 overflow-y-auto italic"
+            >
               {thinking}
             </div>
           )}
