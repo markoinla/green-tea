@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Document } from '../../../../main/database/types'
 
 interface DocumentTitleProps {
@@ -21,12 +21,28 @@ export function DocumentTitle({ document: doc }: DocumentTitleProps) {
   }, [doc.id, doc.title])
 
   // Grow the textarea to fit its content (single line by default, wraps long titles).
-  useLayoutEffect(() => {
+  const autosize = useCallback(() => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
-  }, [value])
+  }, [])
+
+  useLayoutEffect(() => {
+    autosize()
+  }, [value, autosize])
+
+  // Re-measure when the textarea's width changes, not just its value. Opening a
+  // note into a pane that was empty (all tabs closed) measures the height mid
+  // layout — at near-zero width the title wraps and locks to a too-tall height
+  // (a big gap under the title). A ResizeObserver recomputes once width settles.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const observer = new ResizeObserver(() => autosize())
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [autosize])
 
   const commit = (): void => {
     const next = value.trim()

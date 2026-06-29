@@ -36,6 +36,7 @@ import { GT_FILE_SCHEME, GT_FILE_PRIVILEGE, createGtFileHandler } from './protoc
 import { GT_PLUGIN_SCHEME, GT_PLUGIN_PRIVILEGE, createGtPluginHandler } from './protocol/gt-plugin'
 import { seedDefaultPlugins } from './plugins/manager'
 import { reloadPluginRegistry } from './plugins/registry'
+import { isQuitting, markQuitting } from './util/quit-state'
 
 // Fix PATH for macOS/Linux — Electron launched from the dock gets a minimal
 // PATH that excludes nvm, homebrew, etc. Fetch the real shell PATH so spawned
@@ -80,10 +81,6 @@ protocol.registerSchemesAsPrivileged([
   GT_FILE_PRIVILEGE,
   GT_PLUGIN_PRIVILEGE
 ])
-
-// Set true on a genuine quit (Cmd-Q / tray Quit / app-menu Quit) so the
-// close interceptor allows teardown instead of hiding the window.
-let isQuitting = false
 
 function createWindow(): BrowserWindow {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize
@@ -255,7 +252,7 @@ app.whenReady().then(() => {
     createTray(
       () => mainWindow.show(),
       () => {
-        isQuitting = true
+        markQuitting()
         app.quit()
       }
     )
@@ -278,7 +275,7 @@ app.whenReady().then(() => {
   // background; with 0 tasks the window simply hides and a dock-click re-shows
   // it. createWindow lacks `db`, so this lives here.
   mainWindow.on('close', (event) => {
-    if (isQuitting) return
+    if (isQuitting()) return
     if (process.platform !== 'darwin') return
     event.preventDefault()
     // Hiding a window that's in its own macOS fullscreen Space leaves a black
@@ -299,7 +296,7 @@ app.whenReady().then(() => {
   let flushedBeforeQuit = false
   app.on('before-quit', (event) => {
     // Safety net: a genuine quit must never be blocked by the close interceptor.
-    isQuitting = true
+    markQuitting()
     if (flushedBeforeQuit) return
     if (mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
     event.preventDefault()

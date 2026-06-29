@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { is } from '@electron-toolkit/utils'
 import { safeSend } from './util/safe-send'
+import { markQuitting } from './util/quit-state'
 
 export type UpdateStatus =
   | { state: 'idle' }
@@ -32,6 +33,11 @@ export function downloadUpdate(): void {
 }
 
 export function quitAndInstall(): void {
+  // quitAndInstall() closes all windows WITHOUT emitting `before-quit` first
+  // (documented Electron behavior). Without this flag the macOS close
+  // interceptor in index.ts would preventDefault + hide the window, so the app
+  // never quits and the update never installs. Mark the genuine quit up front.
+  markQuitting()
   autoUpdater.quitAndInstall()
 }
 
