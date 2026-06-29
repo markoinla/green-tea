@@ -44,6 +44,13 @@ export interface PluginManifest {
   description: string
   author?: string
   authorUrl?: string
+  /**
+   * Opt-in capabilities the plugin requests (the first brick of a plugin
+   * permission model, §4.9.1). Currently the only honored value is `"secrets"`,
+   * which gates the mediated `gt:secret-*` postMessage path; the main process
+   * re-checks this from the trusted on-disk manifest before serving any secret.
+   */
+  permissions?: string[]
   contributes?: {
     artifacts?: ArtifactContribution[]
   }
@@ -82,4 +89,10 @@ export interface ViewerContribution {
   newLabel?: string
   /** Plugin-dir-relative filename whose bytes seed each newly created artifact. */
   templateFile?: string
+  /**
+   * The plugin's declared `permissions` (from its trusted on-disk manifest),
+   * threaded to the renderer so `PluginViewer` can gate the `gt:secret-*` path
+   * client-side too. The main process re-checks server-side regardless.
+   */
+  permissions: string[]
 }

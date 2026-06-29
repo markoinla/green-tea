@@ -262,7 +262,19 @@ const greenteaApi = {
       ipcRenderer.invoke('plugins:toggle', id, enabled),
     marketplaceList: (): Promise<unknown[]> => ipcRenderer.invoke('plugins:marketplace:list'),
     marketplaceRefresh: (): Promise<unknown[]> => ipcRenderer.invoke('plugins:marketplace:refresh'),
-    viewers: (): Promise<unknown[]> => ipcRenderer.invoke('plugins:viewers')
+    viewers: (): Promise<unknown[]> => ipcRenderer.invoke('plugins:viewers'),
+    // Plugin-scoped secrets (§4.9.1). PluginViewer passes pluginId from its own
+    // (unforgeable) contribution.pluginId; the main process re-verifies the plugin
+    // is installed/enabled and declares the "secrets" permission, and builds the
+    // `plugin:<pluginId>:<subKey>` key server-side.
+    secretGet: (pluginId: string, subKey: string): Promise<string | null> =>
+      ipcRenderer.invoke('plugins:secret:get', pluginId, subKey),
+    secretSet: (pluginId: string, subKey: string, value: string): Promise<void> =>
+      ipcRenderer.invoke('plugins:secret:set', pluginId, subKey, value),
+    secretDelete: (pluginId: string, subKey: string): Promise<void> =>
+      ipcRenderer.invoke('plugins:secret:delete', pluginId, subKey),
+    secretList: (pluginId: string): Promise<string[]> =>
+      ipcRenderer.invoke('plugins:secret:list', pluginId)
   },
   onPluginsChanged: (callback: () => void): (() => void) => {
     const sub = (): void => callback()

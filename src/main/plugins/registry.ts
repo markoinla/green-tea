@@ -43,7 +43,10 @@ export function reloadPluginRegistry(db: Database.Database): void {
         // be created, so don't advertise it as creatable.
         creatable: (artifact.creatable ?? false) && extensions.length > 0,
         newLabel: artifact.newLabel,
-        templateFile: artifact.templateFile
+        templateFile: artifact.templateFile,
+        // Threaded from the trusted on-disk manifest so PluginViewer can gate the
+        // gt:secret-* path; the main process re-checks server-side regardless.
+        permissions: Array.isArray(plugin.manifest.permissions) ? plugin.manifest.permissions : []
       })
     }
   }

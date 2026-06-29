@@ -1,6 +1,3 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
-import { homedir } from 'os'
-import { join, dirname } from 'path'
 import { createServer } from 'http'
 import { randomBytes, createHash } from 'crypto'
 import { shell } from 'electron'
@@ -11,6 +8,16 @@ import type {
   MicrosoftServiceType
 } from './types'
 import { MS_SERVICE_SCOPES } from './types'
+import { getDatabase } from '../database/connection'
+import { getSecret, setSecret, deleteSecret } from '../secrets'
+
+/**
+ * The whole {@link MicrosoftAuthData} (tokens + scopes + enabledServices +
+ * codeVerifier) is serialized as a JSON string into the encrypted secrets store
+ * under this key (Phase 00, §4.9), replacing the old plaintext
+ * `~/Documents/Green Tea/microsoft-auth/tokens.json`.
+ */
+const SECRET_KEY = 'microsoft'
 
 const MS_CLIENT_ID = '82425e1a-be79-481e-a6be-ea29edf5adf6'
 const MS_AUTH_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
@@ -20,19 +27,11 @@ const MS_GRAPH_ME_ENDPOINT = 'https://graph.microsoft.com/v1.0/me'
 const CALLBACK_PORT = 28108
 const REDIRECT_URI = `http://127.0.0.1:${CALLBACK_PORT}/callback`
 
-function getAuthDir(): string {
-  return join(homedir(), 'Documents', 'Green Tea', 'microsoft-auth')
-}
-
-function getTokenFilePath(): string {
-  return join(getAuthDir(), 'tokens.json')
-}
-
 function loadAuthData(): MicrosoftAuthData {
-  const filePath = getTokenFilePath()
-  if (!existsSync(filePath)) return { scopes: [], enabledServices: [] }
+  const raw = getSecret(getDatabase(), SECRET_KEY)
+  if (!raw) return { scopes: [], enabledServices: [] }
   try {
-    const data = JSON.parse(readFileSync(filePath, 'utf-8')) as MicrosoftAuthData
+    const data = JSON.parse(raw) as MicrosoftAuthData
     if (!data.enabledServices) {
       data.enabledServices = []
     }
@@ -43,9 +42,7 @@ function loadAuthData(): MicrosoftAuthData {
 }
 
 function saveAuthData(data: MicrosoftAuthData): void {
-  const filePath = getTokenFilePath()
-  mkdirSync(dirname(filePath), { recursive: true })
-  writeFileSync(filePath, JSON.stringify(data, null, 2))
+  setSecret(getDatabase(), SECRET_KEY, JSON.stringify(data))
 }
 
 function generateCodeVerifier(): string {
@@ -348,10 +345,7 @@ export function hasMicrosoftAuth(): boolean {
 }
 
 export function clearMicrosoftAuth(): void {
-  const filePath = getTokenFilePath()
-  if (existsSync(filePath)) {
-    unlinkSync(filePath)
-  }
+  deleteSecret(getDatabase(), SECRET_KEY)
 }
 
 export async function getMicrosoftAccountStatus(): Promise<MicrosoftAccountStatus> {

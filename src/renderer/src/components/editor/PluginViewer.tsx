@@ -29,6 +29,12 @@ import type { Document } from '../../../../main/database/types'
  *   frame → host  {type:'gt:quote', text}                       (selection → chat)
  *   host → frame  {type:'gt:render-static'}                     (share: request snapshot)
  *   frame → host  {type:'gt:static', html}                      (self-contained, read-only)
+ *   frame → host  {type:'gt:secret-get', subKey}               (needs "secrets" permission)
+ *   host → frame  {type:'gt:secret-value', subKey, value}       (reply, origin-pinned)
+ *   frame → host  {type:'gt:secret-set', subKey, value}
+ *   frame → host  {type:'gt:secret-delete', subKey}
+ *   frame → host  {type:'gt:secret-list'}
+ *   host → frame  {type:'gt:secret-keys', subKeys}              (reply, origin-pinned)
  *
  * The `gt:render-static`/`gt:static` round-trip lets the share UI ask the LIVE
  * frame for a frozen, host-less HTML snapshot of its current state (publishing
@@ -75,6 +81,14 @@ export function PluginViewer({ contribution, doc, onQuoteSelection }: PluginView
   const [reloadKey, setReloadKey] = useState(0)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const pendingSnapshotRef = useRef<PendingSnapshot | null>(null)
+
+  // The message listener (registered once per doc) reads the live contribution —
+  // its pluginId (the trusted, host-known identity) and declared permissions —
+  // through this ref so we never honor a stale value if the prop changes.
+  const contributionRef = useRef(contribution)
+  useEffect(() => {
+    contributionRef.current = contribution
+  }, [contribution])
 
   // --- feed the (re)loaded frame the current bytes --------------------------
   // Read on each frame load (mount + manual reload + live-reload remount) and hand
@@ -155,6 +169,8 @@ export function PluginViewer({ contribution, doc, onQuoteSelection }: PluginView
         bytes?: unknown
         text?: unknown
         html?: unknown
+        subKey?: unknown
+        value?: unknown
       }
       if (!data || typeof data.type !== 'string') return
       // Handshake: the frame posts `gt:ready` once its message listener is wired
@@ -191,10 +207,61 @@ export function PluginViewer({ contribution, doc, onQuoteSelection }: PluginView
         }
         return
       }
+      // Plugin-scoped secrets (§4.9.1): a mediated, capability-gated, origin-pinned
+      // bridge. Unlike the byte/quote/snapshot messages (which carry vault-local
+      // content), these touch the encrypted secrets store, so we additionally:
+      //   - require `event.origin === gt-plugin://<pluginId>` (not just the
+      //     event.source identity check above), so a self-navigated frame at a
+      //     foreign origin can never receive secrets;
+      //   - require the plugin to have declared the "secrets" permission;
+      //   - reply with an EXPLICIT targetOrigin (never '*').
+      // The main process re-verifies all of this server-side regardless.
+      if (
+        data.type === 'gt:secret-get' ||
+        data.type === 'gt:secret-set' ||
+        data.type === 'gt:secret-delete' ||
+        data.type === 'gt:secret-list'
+      ) {
+        const c = contributionRef.current
+        const expectedOrigin = `gt-plugin://${c.pluginId}`
+        if (event.origin !== expectedOrigin) return
+        if (!(c.permissions ?? []).includes('secrets')) return
+        const frame = iframeRef.current?.contentWindow
+        if (!frame) return
+        const subKey = typeof data.subKey === 'string' ? data.subKey : undefined
+
+        if (data.type === 'gt:secret-get') {
+          if (subKey === undefined) return
+          window.api.plugins
+            .secretGet(c.pluginId, subKey)
+            .then((value) =>
+              frame.postMessage({ type: 'gt:secret-value', subKey, value }, expectedOrigin)
+            )
+            .catch((err: unknown) => console.error('[plugin] secret get failed', err))
+        } else if (data.type === 'gt:secret-set') {
+          if (subKey === undefined || typeof data.value !== 'string') return
+          window.api.plugins
+            .secretSet(c.pluginId, subKey, data.value)
+            .catch((err: unknown) => console.error('[plugin] secret set failed', err))
+        } else if (data.type === 'gt:secret-delete') {
+          if (subKey === undefined) return
+          window.api.plugins
+            .secretDelete(c.pluginId, subKey)
+            .catch((err: unknown) => console.error('[plugin] secret delete failed', err))
+        } else {
+          window.api.plugins
+            .secretList(c.pluginId)
+            .then((subKeys) =>
+              frame.postMessage({ type: 'gt:secret-keys', subKeys }, expectedOrigin)
+            )
+            .catch((err: unknown) => console.error('[plugin] secret list failed', err))
+        }
+        return
+      }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [doc.id, onQuoteSelection, initFrame])
+  }, [doc.id, onQuoteSelection, initFrame, contribution.pluginId])
 
   // Toolbar icon mirrors the file-tree icon: the plugin manifest's `icon` (a lucide
   // name) resolved through the shared resolver, so both surfaces stay consistent.

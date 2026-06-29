@@ -1,6 +1,3 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
-import { homedir } from 'os'
-import { join, dirname } from 'path'
 import { createServer } from 'http'
 import { shell } from 'electron'
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
@@ -9,6 +6,8 @@ import type {
   OAuthClientInformationMixed,
   OAuthTokens
 } from '@modelcontextprotocol/sdk/shared/auth.js'
+import { getDatabase } from '../database/connection'
+import { getSecret, setSecret, deleteSecret } from '../secrets'
 
 interface AuthData {
   tokens?: OAuthTokens
@@ -16,29 +15,31 @@ interface AuthData {
   codeVerifier?: string
 }
 
-function getAuthDir(): string {
-  return join(homedir(), 'Documents', 'Green Tea', 'mcp-auth')
-}
-
-function getAuthFilePath(serverName: string): string {
+/**
+ * Per-server secret key (Phase 00, §4.9). The whole {@link AuthData} (tokens +
+ * clientInfo + codeVerifier) is serialized as a JSON string into the encrypted
+ * secrets store under `mcp:<sanitizedServer>`, replacing the old plaintext
+ * `~/Documents/Green Tea/mcp-auth/<sanitizedServer>.json`. The sanitization
+ * matches the legacy filename derivation so a migrated file maps to the same key
+ * its runtime callers use.
+ */
+function secretKey(serverName: string): string {
   const safe = serverName.replace(/[^a-zA-Z0-9_-]/g, '_')
-  return join(getAuthDir(), `${safe}.json`)
+  return `mcp:${safe}`
 }
 
 function loadAuthData(serverName: string): AuthData {
-  const filePath = getAuthFilePath(serverName)
-  if (!existsSync(filePath)) return {}
+  const raw = getSecret(getDatabase(), secretKey(serverName))
+  if (!raw) return {}
   try {
-    return JSON.parse(readFileSync(filePath, 'utf-8'))
+    return JSON.parse(raw) as AuthData
   } catch {
     return {}
   }
 }
 
 function saveAuthData(serverName: string, data: AuthData): void {
-  const filePath = getAuthFilePath(serverName)
-  mkdirSync(dirname(filePath), { recursive: true })
-  writeFileSync(filePath, JSON.stringify(data, null, 2))
+  setSecret(getDatabase(), secretKey(serverName), JSON.stringify(data))
 }
 
 export function hasAuthData(serverName: string): boolean {
@@ -47,10 +48,7 @@ export function hasAuthData(serverName: string): boolean {
 }
 
 export function clearAuthData(serverName: string): void {
-  const filePath = getAuthFilePath(serverName)
-  if (existsSync(filePath)) {
-    unlinkSync(filePath)
-  }
+  deleteSecret(getDatabase(), secretKey(serverName))
 }
 
 export function createElectronOAuthProvider(

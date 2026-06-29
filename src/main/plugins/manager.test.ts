@@ -85,8 +85,39 @@ describe('manifest validation (via listInstalledPlugins)', () => {
   })
 
   it('accepts a manifest whose minAppVersion the app satisfies', () => {
-    writePlugin('ok-min', { ...goodManifest, id: 'okmin', minAppVersion: '1.0.0' })
+    writePlugin('okmin', { ...goodManifest, id: 'okmin', minAppVersion: '1.0.0' })
     expect(listInstalledPlugins(db).some((p) => p.id === 'okmin')).toBe(true)
+  })
+
+  it('rejects an id that does not match its install-dir name', () => {
+    // Valid charset, but the directory is named differently — this closes the
+    // "a dir hosts a plugin claiming a different (trusted) id" vector.
+    writePlugin('actual-dir', { ...goodManifest, id: 'claimed-id' })
+    expect(listInstalledPlugins(db).some((p) => p.dir.endsWith('actual-dir'))).toBe(false)
+  })
+
+  it('rejects an id with uppercase or illegal delimiter characters', () => {
+    writePlugin('UpperCase', { ...goodManifest, id: 'UpperCase' })
+    writePlugin('with:colon', { ...goodManifest, id: 'with:colon' })
+    writePlugin('with_underscore', { ...goodManifest, id: 'with_underscore' })
+    const ids = listInstalledPlugins(db).map((p) => p.id)
+    expect(ids).not.toContain('UpperCase')
+    expect(ids).not.toContain('with:colon')
+    expect(ids).not.toContain('with_underscore')
+  })
+
+  it('accepts a valid "secrets" permission and threads it through', () => {
+    writePlugin('secretful', { ...goodManifest, id: 'secretful', permissions: ['secrets'] })
+    const found = listInstalledPlugins(db).find((p) => p.id === 'secretful')
+    expect(found?.manifest.permissions).toEqual(['secrets'])
+  })
+
+  it('rejects a manifest with a non-array / malformed permissions field', () => {
+    writePlugin('badperm', { ...goodManifest, id: 'badperm', permissions: 'secrets' })
+    writePlugin('badperm2', { ...goodManifest, id: 'badperm2', permissions: [123] })
+    const ids = listInstalledPlugins(db).map((p) => p.id)
+    expect(ids).not.toContain('badperm')
+    expect(ids).not.toContain('badperm2')
   })
 })
 

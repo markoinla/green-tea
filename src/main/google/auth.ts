@@ -1,11 +1,18 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
-import { homedir } from 'os'
-import { join, dirname } from 'path'
 import { createServer } from 'http'
 import { randomBytes, createHash } from 'crypto'
 import { shell } from 'electron'
 import type { GoogleTokens, GoogleAuthData, GoogleAccountStatus, GoogleServiceType } from './types'
 import { GOOGLE_SCOPES, SERVICE_SCOPES } from './types'
+import { getDatabase } from '../database/connection'
+import { getSecret, setSecret, deleteSecret } from '../secrets'
+
+/**
+ * The whole {@link GoogleAuthData} (tokens + scopes + enabledServices +
+ * codeVerifier) is serialized as a JSON string into the encrypted secrets store
+ * under this key (Phase 00, §4.9), replacing the old plaintext
+ * `~/Documents/Green Tea/google-auth/tokens.json`.
+ */
+const SECRET_KEY = 'google'
 
 const GOOGLE_CLIENT_ID = '682092462847-656ukmupfve62gqasltc7f3nlbhinqu3.apps.googleusercontent.com'
 const GOOGLE_CLIENT_SECRET = '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'
@@ -16,19 +23,11 @@ const GOOGLE_USERINFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v2/userinfo'
 const CALLBACK_PORT = 28107
 const REDIRECT_URI = `http://127.0.0.1:${CALLBACK_PORT}/callback`
 
-function getAuthDir(): string {
-  return join(homedir(), 'Documents', 'Green Tea', 'google-auth')
-}
-
-function getTokenFilePath(): string {
-  return join(getAuthDir(), 'tokens.json')
-}
-
 function loadAuthData(): GoogleAuthData {
-  const filePath = getTokenFilePath()
-  if (!existsSync(filePath)) return { scopes: [], enabledServices: [] }
+  const raw = getSecret(getDatabase(), SECRET_KEY)
+  if (!raw) return { scopes: [], enabledServices: [] }
   try {
-    const data = JSON.parse(readFileSync(filePath, 'utf-8')) as GoogleAuthData
+    const data = JSON.parse(raw) as GoogleAuthData
     // Backward compat: if existing auth has no enabledServices but has tokens with calendar scope
     if (!data.enabledServices) {
       data.enabledServices = []
@@ -43,9 +42,7 @@ function loadAuthData(): GoogleAuthData {
 }
 
 function saveAuthData(data: GoogleAuthData): void {
-  const filePath = getTokenFilePath()
-  mkdirSync(dirname(filePath), { recursive: true })
-  writeFileSync(filePath, JSON.stringify(data, null, 2))
+  setSecret(getDatabase(), SECRET_KEY, JSON.stringify(data))
 }
 
 function generateCodeVerifier(): string {
@@ -339,10 +336,7 @@ export function hasGoogleAuth(): boolean {
 }
 
 export function clearGoogleAuth(): void {
-  const filePath = getTokenFilePath()
-  if (existsSync(filePath)) {
-    unlinkSync(filePath)
-  }
+  deleteSecret(getDatabase(), SECRET_KEY)
 }
 
 export async function getAccountStatus(): Promise<GoogleAccountStatus> {

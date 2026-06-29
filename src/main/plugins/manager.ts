@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { app } from 'electron'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { basename, join } from 'path'
 import type { InstalledPlugin, PluginManifest } from './types'
 import { downloadFromGitHub } from '../util/github-download'
 import { getAgentBaseDir } from '../agent/paths'
@@ -60,8 +60,20 @@ function loadManifest(dir: string): PluginManifest {
   if (!manifest.id || typeof manifest.id !== 'string') {
     throw new Error('Plugin manifest is missing a valid "id"')
   }
-  if (manifest.id.includes('plugin:') || /\s/.test(manifest.id)) {
-    throw new Error(`Plugin id "${manifest.id}" is invalid (no whitespace or "plugin:" allowed)`)
+  // Strict, delimiter-free charset. This is the SOURCE of the `plugin:<id>:<subKey>`
+  // secret-key grammar (§4.9.1): forbidding `:`, `%`, `_`, whitespace and uppercase
+  // here closes the key-collision / enumeration vectors before `id` is ever used to
+  // build a storage key. Must run BEFORE any pluginId-derived key is constructed.
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(manifest.id)) {
+    throw new Error(
+      `Plugin id "${manifest.id}" is invalid (must match /^[a-z0-9][a-z0-9-]{0,63}$/)`
+    )
+  }
+  // The id must equal the install-dir name, so a directory can never host a plugin
+  // claiming a different (e.g. already-trusted) id, and removal/lookup by id is sound.
+  const dirName = basename(dir)
+  if (manifest.id !== dirName) {
+    throw new Error(`Plugin id "${manifest.id}" must equal its install directory name "${dirName}"`)
   }
   if (!manifest.name || typeof manifest.name !== 'string') {
     throw new Error(`Plugin "${manifest.id}" is missing a valid "name"`)
@@ -71,6 +83,16 @@ function loadManifest(dir: string): PluginManifest {
   }
   if (!manifest.description || typeof manifest.description !== 'string') {
     throw new Error(`Plugin "${manifest.id}" is missing a valid "description"`)
+  }
+  if (manifest.permissions !== undefined) {
+    if (
+      !Array.isArray(manifest.permissions) ||
+      manifest.permissions.some((p) => typeof p !== 'string' || p.length === 0 || p.length > 64)
+    ) {
+      throw new Error(
+        `Plugin "${manifest.id}" has an invalid "permissions" (must be an array of non-empty strings)`
+      )
+    }
   }
 
   if (manifest.minAppVersion) {

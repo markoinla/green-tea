@@ -246,6 +246,10 @@ interface GreenteaApi {
     marketplaceList(): Promise<MarketplacePluginInfo[]>
     marketplaceRefresh(): Promise<MarketplacePluginInfo[]>
     viewers(): Promise<ViewerContribution[]>
+    secretGet(pluginId: string, subKey: string): Promise<string | null>
+    secretSet(pluginId: string, subKey: string, value: string): Promise<void>
+    secretDelete(pluginId: string, subKey: string): Promise<void>
+    secretList(pluginId: string): Promise<string[]>
   }
   onPluginsChanged(callback: () => void): () => void
   mcp: {

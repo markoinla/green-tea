@@ -34,6 +34,8 @@ import {
 import { getPythonBinDir } from './python'
 import { GT_FILE_SCHEME, GT_FILE_PRIVILEGE, createGtFileHandler } from './protocol/gt-file'
 import { GT_PLUGIN_SCHEME, GT_PLUGIN_PRIVILEGE, createGtPluginHandler } from './protocol/gt-plugin'
+import { reEncryptPlaintextSecrets } from './secrets'
+import { migrateOAuthSecrets } from './secrets/migrate-oauth'
 import { seedDefaultPlugins } from './plugins/manager'
 import { reloadPluginRegistry } from './plugins/registry'
 import { isQuitting, markQuitting } from './util/quit-state'
@@ -182,6 +184,20 @@ app.whenReady().then(() => {
   // Serve plugin viewer assets via gt-plugin://<id>/ protocol.
   // Traversal-guarded + CSP-headed; see src/main/protocol/gt-plugin.ts.
   protocol.handle(GT_PLUGIN_SCHEME, createGtPluginHandler(db))
+
+  // Phase 00 (§4.9): relocate plaintext OAuth tokens into the encrypted secrets
+  // store. Runs synchronously HERE — after getDatabase() (schema ready) and after
+  // app 'ready' (safeStorage usable), but BEFORE registerIpcHandlers/createWindow
+  // so integrations read tokens from the store. reEncrypt first so any prior
+  // plaintext-fallback rows are upgraded before the migration's unlink pass
+  // considers them secure. Wrapped so any failure degrades to "not yet migrated"
+  // (retried next launch), mirroring migrateLegacyVaultLayout below.
+  try {
+    reEncryptPlaintextSecrets(db)
+    migrateOAuthSecrets(db)
+  } catch (err) {
+    console.error('[secrets] OAuth migration failed', err)
+  }
 
   // One-time: move notes from the old `vaults/` tree into the unified
   // `workspaces/` tree. Runs before ensureUserDirs so it can rename the whole

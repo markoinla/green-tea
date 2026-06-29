@@ -444,6 +444,24 @@ export function runMigrations(db: Database.Database): void {
     )
   `)
 
+  // Migration: encrypted secrets store (Phase 00, §4.9). A dedicated, namespaced
+  // table for secrets (OAuth refresh tokens, plugin secrets) so they NEVER leak
+  // through the dumpable `db:settings:*` IPC. `value` holds Electron safeStorage
+  // ciphertext as a BLOB; `encrypted` records the encoding (1 = safeStorage,
+  // 0 = plaintext fallback when no secure backend is available) so reads can
+  // branch on it. This is SCHEMA ONLY — safeStorage.encryptString is never called
+  // from runMigrations (it requires app 'ready'); the data migration runs later
+  // inside app.whenReady(). The secrets table is excluded from any reset/rebuild
+  // path: safeStorage ciphertext is device-bound, so secrets are per-device.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS secrets (
+      key TEXT PRIMARY KEY,
+      value BLOB,
+      encrypted INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
 }
 
 /**
