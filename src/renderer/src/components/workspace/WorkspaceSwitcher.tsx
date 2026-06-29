@@ -9,6 +9,8 @@ import {
   MoreHorizontal,
   Type,
   SquarePen,
+  FileText,
+  Shapes,
   FolderPlus,
   Folder,
   Leaf
@@ -48,6 +50,7 @@ interface WorkspaceSwitcherProps {
   selectedWorkspaceId: string | null
   onSelectWorkspace: (id: string) => void
   onNewDocument?: () => void
+  onNewCanvas?: () => void
   onNewFolder?: () => void
 }
 
@@ -55,6 +58,7 @@ export function WorkspaceSwitcher({
   selectedWorkspaceId,
   onSelectWorkspace,
   onNewDocument,
+  onNewCanvas,
   onNewFolder
 }: WorkspaceSwitcherProps) {
   const { workspaces, createWorkspace, deleteWorkspace, updateWorkspace } = useWorkspaces()
@@ -119,13 +123,28 @@ export function WorkspaceSwitcher({
           </button>
 
           {onNewDocument && (
-            <button
-              onClick={onNewDocument}
-              className="h-7 w-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-              title="New Document"
-            >
-              <SquarePen className="h-3.5 w-3.5" />
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="h-7 w-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+                  title="New"
+                >
+                  <SquarePen className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="bottom">
+                <DropdownMenuItem onSelect={onNewDocument}>
+                  <FileText className="h-4 w-4" />
+                  New Note
+                </DropdownMenuItem>
+                {onNewCanvas && (
+                  <DropdownMenuItem onSelect={onNewCanvas}>
+                    <Shapes className="h-4 w-4" />
+                    New Canvas
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {onNewFolder && (
             <button

@@ -10,6 +10,8 @@ import {
   DropdownMenuSeparator
 } from '@renderer/components/ui/dropdown-menu'
 import { cn } from '@renderer/lib/utils'
+import { publishCanvasShare } from '../editor/canvas-share'
+import type { DocumentKind } from '../../../../main/database/types'
 
 interface ShareState {
   shared: boolean
@@ -51,15 +53,42 @@ function describeExpiry(expiresAt: string | undefined): ExpiryInfo | null {
 }
 
 /**
- * Share affordance for the unified document header (covers both notes and `html`
- * artifacts, since AppLayout's header renders for the active tab regardless of
- * kind). Fetches publish status on doc change; offers Create-link / Copy /
- * Unshare. `publish`/`unpublish` reject on failure, so every call is guarded and
- * surfaces the error message via toast (e.g. "Share publish token not configured").
+ * Share affordance for the unified document header (covers notes, `html`
+ * artifacts, and canvases, since AppLayout's header renders for the active tab
+ * regardless of kind). Fetches publish status on doc change; offers Create-link /
+ * Copy / Unshare. `publish`/`unpublish` reject on failure, so every call is
+ * guarded and surfaces the message via toast (e.g. "Share publish token not
+ * configured"). A canvas publishes through the renderer exporter ({@link runPublish}).
  */
-export function ShareControl({ docId, canShare }: { docId: string | null; canShare: boolean }) {
+export function ShareControl({
+  docId,
+  canShare,
+  docKind,
+  docTitle
+}: {
+  docId: string | null
+  canShare: boolean
+  /** The active doc's kind; a canvas publishes via a renderer-prerendered page. */
+  docKind?: DocumentKind
+  /** The active doc's title, used for the canvas page's `<title>`. */
+  docTitle?: string
+}) {
   const [state, setState] = useState<ShareState>({ shared: false })
   const [busy, setBusy] = useState(false)
+
+  // Publish/update funnel. A canvas can't be rendered server-side (no DOM), so it
+  // goes through the renderer exporter (exportToSvg → static HTML) which then
+  // calls share.publishCanvas; every other shareable kind renders main-side.
+  const runPublish = useCallback((): Promise<{
+    url: string
+    slug: string
+    expiresAt: string
+  }> => {
+    if (!docId) return Promise.reject(new Error('No document'))
+    return docKind === 'canvas'
+      ? publishCanvasShare(docId, docTitle ?? 'Canvas')
+      : window.api.share.publish(docId)
+  }, [docId, docKind, docTitle])
 
   // Refresh share status whenever the active document changes.
   useEffect(() => {
@@ -85,7 +114,7 @@ export function ShareControl({ docId, canShare }: { docId: string | null; canSha
     if (!docId) return
     setBusy(true)
     try {
-      const { url, slug, expiresAt } = await window.api.share.publish(docId)
+      const { url, slug, expiresAt } = await runPublish()
       setState({ shared: true, url, slug, expiresAt })
       // The link is live regardless of whether the clipboard write succeeds, so
       // isolate it: a clipboard rejection must not read as a share failure.
@@ -100,7 +129,7 @@ export function ShareControl({ docId, canShare }: { docId: string | null; canSha
     } finally {
       setBusy(false)
     }
-  }, [docId])
+  }, [docId, runPublish])
 
   // Re-push the current document content to the existing share. The main
   // process reuses the stored slug, so the public URL stays the same.
@@ -108,7 +137,7 @@ export function ShareControl({ docId, canShare }: { docId: string | null; canSha
     if (!docId) return
     setBusy(true)
     try {
-      const { url, slug, expiresAt } = await window.api.share.publish(docId)
+      const { url, slug, expiresAt } = await runPublish()
       setState({ shared: true, url, slug, expiresAt })
       toast.success('Published version updated')
     } catch (e) {
@@ -116,7 +145,7 @@ export function ShareControl({ docId, canShare }: { docId: string | null; canSha
     } finally {
       setBusy(false)
     }
-  }, [docId])
+  }, [docId, runPublish])
 
   const handleCopy = useCallback(async () => {
     if (!state.url) return
@@ -242,11 +271,7 @@ export function ShareControl({ docId, canShare }: { docId: string | null; canSha
               void handlePublish()
             }}
           >
-            {busy ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Share2 className="size-3.5" />
-            )}
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Share2 className="size-3.5" />}
             {busy ? 'Publishing…' : 'Create public link'}
           </DropdownMenuItem>
         )}

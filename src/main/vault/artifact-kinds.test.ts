@@ -32,6 +32,12 @@ describe('kindForExt', () => {
     expect(kindForExt('Doc.PDF')).toBe('pdf')
   })
 
+  it('maps excalidraw to the canvas kind', () => {
+    expect(kindForExt('board.excalidraw')).toBe('canvas')
+    expect(kindForExt('Board.EXCALIDRAW')).toBe('canvas')
+    expect(kindForRow('/v/board.excalidraw')).toBe('canvas')
+  })
+
   it('leaves unmapped binary extensions unindexed', () => {
     expect(kindForExt('a.heic')).toBeNull()
     expect(kindForExt('a.tiff')).toBeNull()
@@ -61,6 +67,7 @@ describe('maxBytesForKind', () => {
     expect(maxBytesForKind('note')).toBe(MAX_NOTE_BYTES)
     expect(maxBytesForKind('html')).toBe(MAX_ARTIFACT_BYTES)
     expect(maxBytesForKind('csv')).toBe(MAX_ARTIFACT_BYTES)
+    expect(maxBytesForKind('canvas')).toBe(MAX_ARTIFACT_BYTES)
   })
 })
 

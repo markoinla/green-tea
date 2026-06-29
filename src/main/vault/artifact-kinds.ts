@@ -28,7 +28,8 @@ const EXT_TO_KIND: Record<string, DocumentKind> = {
   gif: 'image',
   webp: 'image',
   svg: 'image',
-  pdf: 'pdf'
+  pdf: 'pdf',
+  excalidraw: 'canvas'
 }
 
 /** The kind for a file path, or `null` when its extension isn't indexed at all. */

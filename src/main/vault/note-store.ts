@@ -199,22 +199,31 @@ export function readNote(filePath: string, persistBackfill = true): VaultNote {
 }
 
 /**
- * Write a note to disk atomically: serialize, write to a temp file in the same
+ * Write `contents` to `filePath` atomically: write a temp file in the same
  * directory, then rename over the target. The rename is atomic on POSIX, so a
- * crash mid-write never leaves a half-written note and the watcher never
- * observes a partial file.
+ * crash mid-write never leaves a half-written file and the watcher never
+ * observes a partial one. Does NOT record a self-write — callers that need the
+ * vault watcher to ignore their own bytes must `markSelfWrite` first (writeNote
+ * does; the artifact write-back path does too).
  */
-export function writeNote(filePath: string, note: NoteFile): void {
+export function atomicWriteFile(filePath: string, contents: string): void {
   const dir = dirname(filePath)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const tmp = join(dir, `.${basename(filePath)}.tmp-${randomUUID()}`)
+  writeFileSync(tmp, contents, 'utf-8')
+  renameSync(tmp, filePath)
+}
 
+/**
+ * Write a note to disk atomically: serialize, mark the self-write so the vault
+ * watcher recognizes its own bytes and doesn't echo-loop, then atomic-write.
+ */
+export function writeNote(filePath: string, note: NoteFile): void {
   const contents = serializeNoteFile(note)
   // Record this write (final path + exact bytes) so the vault watcher recognizes
   // the resulting filesystem event as our own and doesn't echo-loop on it.
   markSelfWrite(filePath, contents)
-  const tmp = join(dir, `.${basename(filePath)}.tmp-${randomUUID()}`)
-  writeFileSync(tmp, contents, 'utf-8')
-  renameSync(tmp, filePath)
+  atomicWriteFile(filePath, contents)
 }
 
 // ---------------------------------------------------------------------------

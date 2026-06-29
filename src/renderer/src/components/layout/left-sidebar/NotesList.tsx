@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FilePlus, FolderPlus, RefreshCw } from 'lucide-react'
+import { FilePlus, FolderPlus, RefreshCw, Shapes } from 'lucide-react'
 import {
   dropTargetForElements,
   monitorForElements
@@ -33,6 +33,8 @@ interface NotesListProps {
   selectedDocId: string | null
   onSelectDoc: (id: string, opts?: { newTab?: boolean }) => void
   onNewDocument: () => void
+  /** Create a new canvas artifact at the root. */
+  onNewCanvas: () => void
   onNewFolder: () => void
   onRenameDoc: (id: string, newTitle: string) => void
   onDeleteDoc: (id: string) => void
@@ -41,6 +43,8 @@ interface NotesListProps {
   onDeleteFolder: (id: string) => void
   onToggleFolder: (id: string, collapsed: number) => void
   onNewDocInFolder: (folderId: string) => void
+  /** Create a new canvas artifact inside the given folder. */
+  onNewCanvasInFolder: (folderId: string) => void
   /** Create a subfolder under the given folder. */
   onNewSubfolder: (folderId: string) => void
   /** Move a document into a folder (id) or out to the root (null). */
@@ -93,6 +97,7 @@ export function NotesList({
   selectedDocId,
   onSelectDoc,
   onNewDocument,
+  onNewCanvas,
   onNewFolder,
   onRenameDoc,
   onDeleteDoc,
@@ -101,6 +106,7 @@ export function NotesList({
   onDeleteFolder,
   onToggleFolder,
   onNewDocInFolder,
+  onNewCanvasInFolder,
   onNewSubfolder,
   onMoveDocument,
   onRefresh
@@ -180,6 +186,7 @@ export function NotesList({
                       onDeleteFolder={onDeleteFolder}
                       onToggleFolder={onToggleFolder}
                       onNewDocInFolder={onNewDocInFolder}
+                      onNewCanvasInFolder={onNewCanvasInFolder}
                       onNewSubfolder={onNewSubfolder}
                     />
                   ))}
@@ -210,6 +217,10 @@ export function NotesList({
         <ContextMenuItem onClick={onNewDocument}>
           <FilePlus className="h-3.5 w-3.5 mr-2" />
           New Note
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onNewCanvas}>
+          <Shapes className="h-3.5 w-3.5 mr-2" />
+          New Canvas
         </ContextMenuItem>
         <ContextMenuItem onClick={onNewFolder}>
           <FolderPlus className="h-3.5 w-3.5 mr-2" />

@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { Document } from '../../../main/database/types'
+import type { Document, DocumentKind } from '../../../main/database/types'
 
 interface UseDocumentsResult {
   documents: Document[]
   loading: boolean
   createDocument: (data: {
     title: string
+    workspace_id?: string
+    folder_id?: string | null
+  }) => Promise<Document>
+  createArtifact: (data: {
+    title: string
+    kind: DocumentKind
     workspace_id?: string
     folder_id?: string | null
   }) => Promise<Document>
@@ -72,6 +78,23 @@ export function useDocuments(workspaceId?: string | null): UseDocumentsResult {
     [refresh, workspaceId]
   )
 
+  const createArtifact = useCallback(
+    async (data: {
+      title: string
+      kind: DocumentKind
+      workspace_id?: string
+      folder_id?: string | null
+    }) => {
+      const doc = await window.api.documents.createArtifact({
+        ...data,
+        workspace_id: data.workspace_id ?? workspaceId ?? undefined
+      })
+      await refresh()
+      return doc
+    },
+    [refresh, workspaceId]
+  )
+
   const updateDocument = useCallback(
     async (
       id: string,
@@ -105,6 +128,7 @@ export function useDocuments(workspaceId?: string | null): UseDocumentsResult {
     documents,
     loading,
     createDocument,
+    createArtifact,
     updateDocument,
     updateFrontmatter,
     deleteDocument,

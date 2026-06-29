@@ -3,16 +3,18 @@ import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 import { existsSync, renameSync, rmSync, statSync } from 'fs'
 import { dirname, extname, join, relative, sep } from 'path'
-import type { Document } from '../database/types'
+import type { Document, DocumentKind } from '../database/types'
 import { sanitizeWorkspaceName, getDefaultWorkspaceDir } from '../agent/paths'
 import { getWorkspace, normalizePath } from '../database/repositories/workspaces'
 import { maybeCreateAutoVersion } from '../database/repositories/document-versions'
 import type { TTDoc, TTNode } from '../markdown/tiptap-markdown'
 import { getWorkspaceVaultDir, ensureVaultDir } from './paths'
 import { kindForRow } from './artifact-kinds'
+import { markSelfWrite } from './self-write'
 import {
   readNote,
   writeNote,
+  atomicWriteFile,
   listVaultNotes,
   slugifyTitle,
   titleFromFilename,
@@ -752,6 +754,79 @@ export function createDocument(
     })
     deriveMetadata(db, id, workspaceId, frontmatter)
     reindexDerived(db, { id, title: data.title, workspace_id: workspaceId }, doc)
+  })()
+  return rowToDocument(getRow(db, id)!)
+}
+
+/**
+ * Empty Excalidraw scene (pretty-printed so the agent can target individual
+ * `elements` with the `edit` tool rather than regex one long line). The shape is
+ * the minimal valid `.excalidraw` document the viewer loads as `initialData`.
+ */
+const EMPTY_CANVAS_SCENE = JSON.stringify(
+  {
+    type: 'excalidraw',
+    version: 2,
+    source: 'green-tea',
+    elements: [],
+    appState: { viewBackgroundColor: '#ffffff' },
+    files: {}
+  },
+  null,
+  2
+)
+
+/** Per-kind on-disk extension + seed contents for an in-app-created artifact. */
+const ARTIFACT_TEMPLATES: Partial<Record<DocumentKind, { ext: string; contents: string }>> = {
+  canvas: { ext: '.excalidraw', contents: EMPTY_CANVAS_SCENE }
+}
+
+/**
+ * Create a standalone artifact (v2): its own file in the vault, opened in a
+ * kind-specific viewer. Parallel to `createDocument` — NOT a branch inside it —
+ * because artifacts carry no frontmatter and no TipTap body (`content` stays
+ * null), and their identity is path-based. Mirrors the indexing (`upsertRow` +
+ * `reindexDerived`) but writes the kind's seed template via the same atomic-write
+ * + `markSelfWrite` path the write-back IPC uses, so the watcher ignores its own
+ * bytes. The id is fresh; `kind` is derived from the file extension in
+ * `rowToDocument`.
+ */
+export function createArtifact(
+  db: Database.Database,
+  data: { title: string; kind: DocumentKind; workspace_id?: string; folder_id?: string | null }
+): Document {
+  const template = ARTIFACT_TEMPLATES[data.kind]
+  if (!template) throw new Error(`Cannot create an artifact of kind: ${data.kind}`)
+
+  const workspaceId = data.workspace_id ?? defaultWorkspaceId(db)
+  const id = randomUUID()
+  const folder = data.folder_id ?? null
+
+  const dir = resolveDir(db, workspaceId, folder)
+  const filePath = uniqueArtifactPath(dir, slugifyTitle(data.title), template.ext)
+  const created = nowIso()
+
+  // Atomic write + self-write mark: identical to the write-back IPC, so a crash
+  // mid-write can't corrupt the file and the vault watcher stays silent on it.
+  markSelfWrite(filePath, template.contents)
+  atomicWriteFile(filePath, template.contents)
+
+  // Display title tracks the filename (artifacts carry no title override), so it
+  // matches what a reindex would derive — no flap.
+  const title = titleFromFilename(filePath)
+  db.transaction(() => {
+    upsertRow(db, {
+      id,
+      title,
+      content: null,
+      workspace_id: workspaceId,
+      folder_id: folder,
+      file_path: filePath,
+      created_at: created,
+      updated_at: created,
+      frontmatter: null
+    })
+    reindexDerived(db, { id, title, workspace_id: workspaceId }, null)
   })()
   return rowToDocument(getRow(db, id)!)
 }

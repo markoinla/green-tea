@@ -20,6 +20,25 @@ interface Pending {
 const pending = new Map<string, Pending>()
 const conflicted = new Set<string>()
 
+// Generic flushers for non-note autosavers (e.g. the canvas viewer, which saves
+// `.excalidraw` bytes through documents:writeArtifact, not documents.update).
+// Registering here makes flushAll() — and therefore the quit handshake — await
+// them too, so an editable artifact gets the same "flushed before exit" guarantee
+// notes do. Keyed by the same id the autosaver uses (a document id).
+const flushers = new Map<string, () => Promise<void>>()
+
+/**
+ * Register a custom flush function (returns once its pending write settles).
+ * Returns an unregister fn; call it on unmount. The latest registration for an
+ * id wins, and unregister only removes the entry if it's still the same fn.
+ */
+export function registerFlusher(id: string, fn: () => Promise<void>): () => void {
+  flushers.set(id, fn)
+  return () => {
+    if (flushers.get(id) === fn) flushers.delete(id)
+  }
+}
+
 export function hasUnsavedEdits(id: string): boolean {
   return pending.has(id)
 }
@@ -77,7 +96,18 @@ export function flush(id: string): Promise<void> {
 /** Flush every pending autosave (conflict-respecting) and await them all. */
 export function flushAll(): Promise<void> {
   const ids = [...pending.keys()]
-  return Promise.all(ids.map((id) => flush(id))).then(() => {})
+  return Promise.all([
+    ...ids.map((id) => flush(id)),
+    // A custom flusher is isolated: a sync throw or async rejection from one is
+    // caught here so it can't abort the others (or the quit handshake's await).
+    ...[...flushers.values()].map((fn) =>
+      Promise.resolve()
+        .then(fn)
+        .catch((err) => {
+          console.error('[autosave] flusher failed', err)
+        })
+    )
+  ]).then(() => {})
 }
 
 export function useAutosave(documentId: string) {
