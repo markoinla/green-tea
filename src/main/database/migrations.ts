@@ -436,4 +436,37 @@ export function runMigrations(db: Database.Database): void {
       prefix = '2 3 4'
     )
   `)
+
+  // artifact_properties — user-authored EAV properties for non-note artifacts
+  // (PNG/PDF/.csv/.excalidraw/.html/…), which can't carry YAML frontmatter so
+  // SQLite is their source of truth (unlike notes, where frontmatter is canonical
+  // and document_properties is a derived index). Mirrors document_properties:
+  // same column shape, NO PRIMARY KEY / UNIQUE (list elements may repeat),
+  // integrity via delete-by-document_id-then-reinsert in one transaction. Shares
+  // the per-workspace property_types registry with notes.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS artifact_properties (
+      document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      value_fold TEXT NOT NULL,
+      value_type TEXT NOT NULL,
+      conforms INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_artprops_key_fold ON artifact_properties(key, value_fold);
+    CREATE INDEX IF NOT EXISTS idx_artprops_doc ON artifact_properties(document_id);
+  `)
+
+  // documents.missing_at — tombstone marker. A missing artifact that carries
+  // user-authored artifact_properties is NOT hard-deleted on prune (that would
+  // lose properties SQLite is the source of truth for); instead its row is
+  // tombstoned with an ISO timestamp and excluded from queries. Cleared when a
+  // file reappears at the same path (same-path id reuse on reconcile/upsert).
+  const hasMissingAtCol = db
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('documents') WHERE name = 'missing_at'")
+    .get() as { cnt: number }
+
+  if (hasMissingAtCol.cnt === 0) {
+    db.exec('ALTER TABLE documents ADD COLUMN missing_at TEXT')
+  }
 }

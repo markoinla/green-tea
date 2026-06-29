@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync, mkdirSync } from 'fs'
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  utimesSync,
+  mkdirSync
+} from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import type Database from 'better-sqlite3'
@@ -16,6 +24,7 @@ import {
   reindexWorkspace,
   listDocuments
 } from './documents-service'
+import { getArtifactProperties } from '../database/repositories/artifact-properties'
 
 let db: Database.Database
 let base: string
@@ -224,10 +233,13 @@ describe('artifact getDocument / updateDocument / updateFrontmatter', () => {
     expect(readFileSync(newPath, 'utf-8').startsWith('---')).toBe(false)
   })
 
-  it('updateFrontmatter refuses an artifact (no markdown rewrite)', () => {
+  it('updateFrontmatter writes artifact properties to SQLite (no markdown rewrite)', () => {
     const id = indexArtifact()
-    expect(() => updateFrontmatter(db, id, { tags: ['x'] })).toThrow(/artifact/i)
-    // The file is still pristine HTML.
+    const out = updateFrontmatter(db, id, { team: 'Platform' })
+    expect(out.rejectedKeys).toEqual([])
+    // The file is still pristine HTML — properties live in SQLite, not the file.
     expect(readFileSync(join(vault, 'Report.html'), 'utf-8')).toBe(HTML)
+    const rows = getArtifactProperties(db, id)
+    expect(rows.map((r) => [r.key, r.value])).toEqual([['team', 'Platform']])
   })
 })

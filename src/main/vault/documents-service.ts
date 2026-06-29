@@ -29,6 +29,11 @@ import {
   RESERVED_KEYS,
   type PropertyType
 } from './metadata'
+import {
+  setArtifactProperties,
+  getArtifactProperties,
+  hasArtifactProperties
+} from '../database/repositories/artifact-properties'
 
 /**
  * The vault-backed documents service. Markdown files are the source of truth;
@@ -55,6 +60,8 @@ interface IndexRow {
   updated_at: string
   /** Parsed frontmatter cached as JSON (fidelity + change-detection fingerprint). */
   frontmatter: string | null
+  /** Tombstone marker (ISO) for a missing artifact whose properties we preserve. */
+  missing_at?: string | null
 }
 
 function nowIso(): string {
@@ -132,7 +139,7 @@ function upsertRow(db: Database.Database, row: IndexRow): void {
      ON CONFLICT(id) DO UPDATE SET
        title = @title, title_fold = @title_fold, content = @content, workspace_id = @workspace_id,
        folder_id = @folder_id, file_path = @file_path, updated_at = @updated_at,
-       frontmatter = @frontmatter`
+       frontmatter = @frontmatter, missing_at = NULL`
   ).run({ ...row, title_fold: fold(row.title) })
 }
 
@@ -149,7 +156,7 @@ function upsertRow(db: Database.Database, row: IndexRow): void {
  * Resolve the registry type for (workspace, key), auto-seeding from the inferred
  * type when absent (user_set=0). Never re-seeds or changes a user_set=1 row.
  */
-function resolvePropertyType(
+export function resolvePropertyType(
   db: Database.Database,
   workspaceId: string,
   key: string,
@@ -188,6 +195,34 @@ function deriveMetadata(
   for (const r of rows) {
     insert.run(docId, r.key, r.value, r.value_fold, r.value_type, r.conforms)
   }
+}
+
+/**
+ * Reconstruct a raw property object from an artifact's EAV rows so the field-merge
+ * write path can overlay changed keys. Keys with multiple rows — or a list/tags
+ * type — fold back into an array; a single scalar row stays a scalar. This is the
+ * inverse of deriveProperties for the round-trip merge; values stay strings (the
+ * stored TEXT form), which re-derives identically.
+ */
+function mergeArtifactProperties(
+  rows: { key: string; value: string; value_type: PropertyType }[]
+): Record<string, unknown> {
+  const byKey = new Map<string, { values: string[]; isList: boolean }>()
+  for (const r of rows) {
+    const entry = byKey.get(r.key)
+    const isList = r.value_type === 'list' || r.value_type === 'tags'
+    if (entry) {
+      entry.values.push(r.value)
+      entry.isList = entry.isList || isList
+    } else {
+      byKey.set(r.key, { values: [r.value], isList })
+    }
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, { values, isList }] of byKey) {
+    out[key] = isList || values.length > 1 ? values : values[0]
+  }
+  return out
 }
 
 /**
@@ -456,6 +491,22 @@ export function setPropertyType(
     for (const doc of affected) {
       deriveMetadata(db, doc.id, workspaceId, parseFrontmatterColumn(doc.frontmatter))
     }
+
+    // Artifacts share the same registry — re-derive every artifact that carries
+    // this key so its value_type/conforms reflect the new user-set type. Their
+    // EAV rows ARE the source of truth, so we re-derive from the stored rows.
+    const affectedArtifacts = db
+      .prepare(
+        `SELECT DISTINCT document_id FROM artifact_properties WHERE document_id IN
+         (SELECT id FROM documents WHERE workspace_id = ?) AND key = ?`
+      )
+      .all(workspaceId, key) as { document_id: string }[]
+    for (const { document_id } of affectedArtifacts) {
+      const props = mergeArtifactProperties(getArtifactProperties(db, document_id))
+      setArtifactProperties(db, document_id, props, (k, inferred) =>
+        resolvePropertyType(db, workspaceId, k, inferred)
+      )
+    }
   })()
 }
 
@@ -541,14 +592,23 @@ export function listByProperty(
   key: string,
   valueFold: string
 ): Document[] {
+  const folded = fold(valueFold)
+  // UNION the note index (document_properties) and the artifact store
+  // (artifact_properties) so a single property query returns matching notes AND
+  // artifacts. Tombstoned rows (a missing artifact whose properties we preserve)
+  // are excluded via `missing_at IS NULL`.
   const rows = db
     .prepare(
       `SELECT DISTINCT d.* FROM documents d
        JOIN document_properties p ON p.document_id = d.id
-       WHERE d.workspace_id = ? AND p.key = ? AND p.value_fold = ?
-       ORDER BY d.updated_at DESC`
+       WHERE d.workspace_id = ? AND p.key = ? AND p.value_fold = ? AND d.missing_at IS NULL
+       UNION
+       SELECT DISTINCT d.* FROM documents d
+       JOIN artifact_properties a ON a.document_id = d.id
+       WHERE d.workspace_id = ? AND a.key = ? AND a.value_fold = ? AND d.missing_at IS NULL
+       ORDER BY updated_at DESC`
     )
-    .all(workspaceId, key, fold(valueFold)) as IndexRow[]
+    .all(workspaceId, key, folded, workspaceId, key, folded) as IndexRow[]
   return rows.map(rowToDocument)
 }
 
@@ -598,12 +658,18 @@ function ensureFolderRow(db: Database.Database, workspaceId: string, name: strin
 // ---------------------------------------------------------------------------
 
 export function listDocuments(db: Database.Database, workspaceId?: string): Document[] {
+  // Exclude tombstoned artifacts (file gone, properties preserved): they are
+  // meant to be invisible-but-recoverable, not phantom rows in the sidebar/tabs.
   const rows = (
     workspaceId
       ? db
-          .prepare('SELECT * FROM documents WHERE workspace_id = ? ORDER BY updated_at DESC')
+          .prepare(
+            'SELECT * FROM documents WHERE workspace_id = ? AND missing_at IS NULL ORDER BY updated_at DESC'
+          )
           .all(workspaceId)
-      : db.prepare('SELECT * FROM documents ORDER BY updated_at DESC').all()
+      : db
+          .prepare('SELECT * FROM documents WHERE missing_at IS NULL ORDER BY updated_at DESC')
+          .all()
   ) as IndexRow[]
   return rows.map(rowToDocument)
 }
@@ -612,16 +678,29 @@ export function getDocument(db: Database.Database, id: string): Document | undef
   const row = getRow(db, id)
   if (!row) return undefined
 
-  // The file is the source of truth. If it vanished, drop the stale index row.
+  // The file is the source of truth. If it vanished, prune the stale index row.
+  // pruneIndexRow TOMBSTONES a property-bearing artifact (preserving its
+  // artifact_properties) instead of hard-deleting; surface that tombstoned row
+  // below so its properties survive and clear-on-reappear still works. A note or
+  // property-less artifact is hard-deleted and returns undefined.
   if (!row.file_path || !existsSync(row.file_path)) {
-    deleteIndexRow(db, id)
-    return undefined
+    pruneIndexRow(db, id)
+    const tombstoned = getRow(db, id)
+    if (!tombstoned) return undefined
+    const doc = rowToDocument(tombstoned)
+    doc.frontmatter = mergeArtifactProperties(getArtifactProperties(db, id))
+    return doc
   }
 
   // Artifact: never markdown-parse, never write back. The row IS the metadata
   // (content stays null); the file's bytes are served by the gt-file protocol.
+  // User-authored properties live in `artifact_properties` (SQLite, not in-file),
+  // so surface them through `frontmatter` — the same field notes carry — and the
+  // existing Properties UI reads them with no artifact-specific branch.
   if (isArtifactRow(row)) {
-    return rowToDocument(row)
+    const doc = rowToDocument(row)
+    doc.frontmatter = mergeArtifactProperties(getArtifactProperties(db, id))
+    return doc
   }
 
   const note = readNote(row.file_path)
@@ -674,6 +753,7 @@ export function searchDocuments(
         `SELECT d.*, w.name AS workspace_name
          FROM documents d
          JOIN workspaces w ON d.workspace_id = w.id
+         WHERE d.missing_at IS NULL
          ORDER BY d.updated_at DESC
          LIMIT 50`
       )
@@ -688,7 +768,7 @@ export function searchDocuments(
        FROM documents d
        JOIN workspaces w ON d.workspace_id = w.id
        JOIN notes_fts f ON f.id = d.id
-       WHERE notes_fts MATCH ?
+       WHERE notes_fts MATCH ? AND d.missing_at IS NULL
        ORDER BY bm25(notes_fts, 10.0, 1.0)
        LIMIT 50`
     )
@@ -898,9 +978,10 @@ export function updateDocument(
 
   // The file is the source of truth. If it vanished externally, drop the stale
   // row rather than recreating the note from an empty doc (which would destroy
-  // content on a title/folder-only edit).
+  // content on a title/folder-only edit). pruneIndexRow tombstones a missing
+  // artifact that carries authored properties instead of cascade-deleting them.
   if (!existsSync(row.file_path)) {
-    deleteIndexRow(db, id)
+    pruneIndexRow(db, id)
     throw new Error(`Document file missing, removed from index: ${id}`)
   }
 
@@ -986,14 +1067,44 @@ export function updateFrontmatter(
   if (!row || !row.file_path) throw new Error(`Document not found: ${id}`)
 
   if (!existsSync(row.file_path)) {
-    deleteIndexRow(db, id)
+    // pruneIndexRow tombstones a property-bearing artifact instead of deleting,
+    // so its preserved artifact_properties survive a missing-file edit attempt.
+    pruneIndexRow(db, id)
     throw new Error(`Document file missing, removed from index: ${id}`)
   }
 
   // Artifacts have no frontmatter — readNote+writeNote here would parse an .html
-  // as a note and rewrite it with a `---` block. Reject loudly instead.
+  // as a note and rewrite it with a `---` block. Instead persist user-authored
+  // properties to the `artifact_properties` EAV table (SQLite is their source of
+  // truth) and bump `updated_at`. RESERVED_KEYS are field-rejected so the caller
+  // can never overwrite the app-managed identity/timestamp keys; the rest are
+  // merged over the artifact's current properties (null/undefined deletes a key).
   if (isArtifactRow(row)) {
-    throw new Error(`Cannot set metadata on an artifact: ${id}`)
+    const current = mergeArtifactProperties(getArtifactProperties(db, id))
+    const rejectedKeys: string[] = []
+    const merged: Record<string, unknown> = { ...current }
+    for (const key of Object.keys(changedKeys)) {
+      if (RESERVED_KEYS.has(key)) {
+        rejectedKeys.push(key)
+        continue
+      }
+      const value = changedKeys[key]
+      if (value === null || value === undefined) {
+        delete merged[key]
+      } else {
+        merged[key] = value
+      }
+    }
+
+    const updated = nowIso()
+    db.transaction(() => {
+      setArtifactProperties(db, id, merged, (key, inferred) =>
+        resolvePropertyType(db, row.workspace_id, key, inferred)
+      )
+      db.prepare('UPDATE documents SET updated_at = ? WHERE id = ?').run(updated, id)
+    })()
+
+    return { document: rowToDocument(getRow(db, id)!), rejectedKeys }
   }
 
   // Read WITHOUT persist-backfill: a pre-write backfill would emit a stray FS
@@ -1048,6 +1159,23 @@ function deleteIndexRow(db: Database.Database, id: string): void {
   db.prepare('DELETE FROM notes_fts WHERE id = ?').run(id)
   db.prepare('DELETE FROM note_links WHERE source_id = ?').run(id)
   db.prepare('DELETE FROM documents WHERE id = ?').run(id)
+}
+
+/**
+ * Prune the index row for a file that is gone from disk. An ARTIFACT that carries
+ * user-authored `artifact_properties` (SQLite is the source of truth for those —
+ * they can't live in the file) is TOMBSTONED instead of deleted: its row and EAV
+ * rows survive, marked `missing_at`, so re-adding the file at the same path
+ * restores its properties (upsertRow clears the tombstone via same-path id reuse).
+ * Notes and property-less artifacts keep the existing hard-delete behaviour.
+ */
+function pruneIndexRow(db: Database.Database, id: string): void {
+  const row = getRow(db, id)
+  if (row && isArtifactRow(row) && hasArtifactProperties(db, id)) {
+    db.prepare('UPDATE documents SET missing_at = ? WHERE id = ?').run(nowIso(), id)
+    return
+  }
+  deleteIndexRow(db, id)
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,7 +1287,7 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
     id: string
   }[]
   for (const { id } of rows) {
-    if (!seen.has(id)) deleteIndexRow(db, id)
+    if (!seen.has(id)) pruneIndexRow(db, id)
   }
 
   // Drop folder rows whose subdirectory is gone (no notes were found in it).
@@ -1201,7 +1329,7 @@ export function pruneMissingFolders(db: Database.Database, workspaceId: string):
     const docs = db.prepare('SELECT id FROM documents WHERE folder_id = ?').all(folder.id) as {
       id: string
     }[]
-    for (const doc of docs) deleteIndexRow(db, doc.id)
+    for (const doc of docs) pruneIndexRow(db, doc.id)
     db.prepare('DELETE FROM folders WHERE id = ?').run(folder.id)
     changed = true
   }
@@ -1303,7 +1431,7 @@ export function deleteIndexRowByPath(db: Database.Database, absPathRaw: string):
     | { id: string }
     | undefined
   if (!row) return null
-  deleteIndexRow(db, row.id)
+  pruneIndexRow(db, row.id)
   return row.id
 }
 
@@ -1358,6 +1486,7 @@ export function reindexFile(db: Database.Database, absPathRaw: string): ReindexR
       | undefined
     if (
       existing &&
+      !existing.missing_at &&
       existing.title === title &&
       existing.folder_id === folderId &&
       existing.workspace_id === workspaceId &&
