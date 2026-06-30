@@ -179,7 +179,7 @@ export function getModelConfig(
         'No Claude account connected. Open Settings → Accounts to connect Claude (Pro/Max).'
       )
     }
-    const modelId = overrideModel || getSetting(db, 'anthropicOAuthModel') || 'claude-sonnet-4-6'
+    const modelId = overrideModel || getSetting(db, 'anthropicOAuthModel') || 'claude-sonnet-5'
     model = getModel('anthropic', modelId as Parameters<typeof getModel>[1])
     if (!reasoningMode) {
       model = { ...model, reasoning: false }
@@ -203,7 +203,7 @@ export function getModelConfig(
     }
     authStorage.setRuntimeApiKey('anthropic', anthropicApiKey)
 
-    const modelId = overrideModel || getSetting(db, 'anthropicModel') || 'claude-sonnet-4-6'
+    const modelId = overrideModel || getSetting(db, 'anthropicModel') || 'claude-sonnet-5'
     model = getModel('anthropic', modelId as Parameters<typeof getModel>[1])
     if (!reasoningMode) {
       model = { ...model, reasoning: false }

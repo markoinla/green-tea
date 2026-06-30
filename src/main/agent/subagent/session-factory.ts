@@ -237,7 +237,7 @@ export async function createSubagentSession(
     } else {
       if (!anthropicApiKey) throw new Error('No Anthropic API key configured.')
       authStorage.setRuntimeApiKey('anthropic', anthropicApiKey)
-      const modelId = getSetting(db, 'anthropicModel') || 'claude-sonnet-4-6'
+      const modelId = getSetting(db, 'anthropicModel') || 'claude-sonnet-5'
       model = getModel('anthropic', modelId as Parameters<typeof getModel>[1])
       if (!reasoningMode) {
         model = { ...model, reasoning: false }

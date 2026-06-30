@@ -30,9 +30,9 @@ export interface Settings {
 const DEFAULTS: Settings = {
   theme: 'light',
   aiProvider: 'default',
-  anthropicModel: 'claude-sonnet-4-6',
+  anthropicModel: 'claude-sonnet-5',
   anthropicApiKey: '',
-  anthropicOAuthModel: 'claude-sonnet-4-6',
+  anthropicOAuthModel: 'claude-sonnet-5',
   codexModel: 'gpt-5.5',
   togetherModel: 'moonshotai/Kimi-K2.5',
   togetherApiKey: '',

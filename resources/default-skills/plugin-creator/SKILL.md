@@ -22,14 +22,16 @@ tools — a plugin is sandboxed and only ever sees its own file's bytes.
    per-workspace scratch dir, so relative paths resolve to the wrong place and the `cp` fails:
 
    ```bash
-   mkdir -p ~/Documents/Green\ Tea/plugins/my-plugin
-   cp ~/Documents/Green\ Tea/skills/plugin-creator/template/manifest.json ~/Documents/Green\ Tea/plugins/my-plugin/
-   cp ~/Documents/Green\ Tea/skills/plugin-creator/template/viewer.html   ~/Documents/Green\ Tea/plugins/my-plugin/
+   mkdir -p ~/Documents/Green\ Tea/.settings/plugins/my-plugin
+   cp ~/Documents/Green\ Tea/.settings/skills/plugin-creator/template/manifest.json ~/Documents/Green\ Tea/.settings/plugins/my-plugin/
+   cp ~/Documents/Green\ Tea/.settings/skills/plugin-creator/template/viewer.html   ~/Documents/Green\ Tea/.settings/plugins/my-plugin/
    ```
 
-   (If you've relocated your Green Tea base folder, substitute it for `~/Documents/Green Tea` in
-   both paths — the templates live in `<base>/skills/plugin-creator/template/`. If the template
-   source isn't found, write the two files by hand from the manifest + viewer examples below.)
+   (`.settings/` is a **hidden** folder under your Green Tea base dir — both `plugins/` and
+   `skills/` live inside it. If you've relocated your Green Tea base folder, substitute it for
+   `~/Documents/Green Tea` in both paths — the templates live in
+   `<base>/.settings/skills/plugin-creator/template/`. If the template source isn't found, write
+   the two files by hand from the manifest + viewer examples below.)
 
 2. Edit `manifest.json` — set `id`, `name`, the `contributes.artifacts[0].kind`, the
    `extensions` your plugin claims, and `editable`. If you want the user to be able to create new
@@ -48,21 +50,43 @@ bridge by hand.
 
 ## WHERE to write plugin files
 
-Write plugins to the **absolute** path under your Green Tea base folder:
+Write plugins to the **absolute** path under your Green Tea base folder, inside the **hidden
+`.settings/`** folder:
 
 ```
-<base>/plugins/<id>/
+<base>/.settings/plugins/<id>/
 ```
 
 `<base>` defaults to `~/Documents/Green Tea` but is configurable (the `agentBaseDir` setting), so
-for the default install that's `~/Documents/Green Tea/plugins/<id>/`. If unsure, the plugins
-folder is the `plugins/` sibling of this `skills/` folder. `<id>` must match the `id` in
-`manifest.json`. Each plugin is its own subfolder containing at least `manifest.json` and the
-entry HTML.
+for the default install that's `~/Documents/Green Tea/.settings/plugins/<id>/`. The `.settings/`
+folder is hidden (note the leading dot) and holds all consolidated config — `plugins/`, `skills/`,
+agents, `mcp.json`, etc. If unsure, the plugins folder is the `plugins/` sibling of this
+`skills/` folder (both under `.settings/`). `<id>` must match the `id` in `manifest.json`. Each
+plugin is its own subfolder containing `manifest.json`, the entry HTML, and any other assets it
+references (see [Multi-file viewers](#multi-file-viewers) below).
 
-> **Always use the absolute `<base>/plugins/...` path, not a relative one.** The agent's working
-> directory is a per-workspace scratch dir, so a relative path like `./plugins/...` lands in the
-> wrong place and the plugin will never load. Expand `~` to the real home directory.
+> **Always use the absolute `<base>/.settings/plugins/...` path, not a relative one.** The agent's
+> working directory is a per-workspace scratch dir, so a relative path like `./plugins/...` lands
+> in the wrong place and the plugin will never load. Expand `~` to the real home directory.
+
+### Multi-file viewers
+
+The entry HTML does **not** have to contain everything inline. Every file inside the plugin folder
+is served to the sandboxed iframe over the `gt-plugin://<id>/` protocol, so your viewer can be split
+across multiple local files that reference each other with **relative URLs**:
+
+```html
+<link rel="stylesheet" href="./styles.css" />
+<script type="module" src="./app.js"></script>
+```
+
+Any sibling asset works — `.js` / `.mjs`, `.css`, `.json`, `.svg` / `.png` / `.jpg` / `.gif` /
+`.webp`, fonts (`.woff2`, `.ttf`, …), etc. — resolved relative to the plugin folder and clamped to
+it (a path escaping the folder is rejected). You can **also** pull **remote** assets over `https:`
+(e.g. `https://esm.sh/...` or a CDN stylesheet) — see [Capabilities and hard limits](#capabilities-and-hard-limits).
+The single-file `viewer.html` in the worked examples below is just the simplest shape, not a
+requirement. Whatever you split out, keep the `gt:ready` handshake wiring in the entry HTML (or in
+a module it imports) so the listener is attached before `gt:ready` is posted.
 
 ### HOT-RELOAD
 
@@ -306,7 +330,10 @@ Hard limits — do not attempt to work around these, they are the security bound
   unavailable / useless).
 - **Inline scripts and styles are allowed**, and **`https:` scripts are allowed**, so you MAY
   import libraries from a CDN (e.g. `https://esm.sh/...` or `https://cdn.jsdelivr.net/...`).
-  Keep everything else self-contained in the entry HTML.
+  You may also split the viewer across **multiple local files** in the plugin folder — `.js`,
+  `.css`, images, fonts, etc. — referenced with relative URLs and served over `gt-plugin://`
+  (see [Multi-file viewers](#multi-file-viewers)). What you can't do is reach **outside** the
+  plugin folder or load assets over any scheme other than `https:` and `gt-plugin://`.
 
 If a task needs anything beyond rendering/editing a single file's bytes (reading other notes,
 calling the app, talking to the system), it is **not** a plugin — stop and tell the user.
@@ -315,7 +342,7 @@ calling the app, talking to the system), it is **not** a plugin — stop and tel
 
 Goal: render `.csv` files as a simple editable table that saves edits back to the file.
 
-**1. Create the folder and manifest** at `~/Documents/Green Tea/plugins/csv-table/manifest.json`:
+**1. Create the folder and manifest** at `~/Documents/Green Tea/.settings/plugins/csv-table/manifest.json`:
 
 ```json
 {
@@ -405,7 +432,7 @@ Goal: render a `.kanban` JSON file (`{ "columns": [{ "title", "cards": ["…"] }
 let the **user** create a fresh board from a starter template, and let the **user** publish a
 frozen, read-only snapshot of it.
 
-**1. Manifest** at `~/Documents/Green Tea/plugins/kanban/manifest.json` — note `shareable: true`
+**1. Manifest** at `~/Documents/Green Tea/.settings/plugins/kanban/manifest.json` — note `shareable: true`
 and `creatable: true` with a `templateFile` that seeds new boards:
 
 ```json
@@ -434,7 +461,7 @@ and `creatable: true` with a `templateFile` that seeds new boards:
 }
 ```
 
-**2. Starter template** at `~/Documents/Green Tea/plugins/kanban/new.kanban` — this file ships
+**2. Starter template** at `~/Documents/Green Tea/.settings/plugins/kanban/new.kanban` — this file ships
 **alongside** `manifest.json` and `viewer.html` in the plugin folder; its bytes seed every board
 the user creates from the "New kanban board" menu item:
 
@@ -523,7 +550,7 @@ user's actions; the plugin only ships the starter and provides the snapshot when
 
 ## Checklist before finishing
 
-- [ ] Files are under `~/Documents/Green Tea/plugins/<id>/` (absolute path), folder name = `id`.
+- [ ] Files are under `~/Documents/Green Tea/.settings/plugins/<id>/` (absolute path), folder name = `id`.
 - [ ] `id` has no whitespace and does not contain `plugin:`.
 - [ ] `extensions` are lowercase, without the leading dot.
 - [ ] `icon` is a valid lucide-react PascalCase name.

@@ -35,7 +35,7 @@ export const PROVIDERS: ProviderDef[] = [
     description: 'Claude models by Anthropic.',
     models: [
       { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+      { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
       { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
       { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' }
     ],
@@ -49,7 +49,7 @@ export const PROVIDERS: ProviderDef[] = [
     description: 'Use your Claude subscription. Connect in Settings → Accounts.',
     models: [
       { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+      { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
       { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
       { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' }
     ],
@@ -107,7 +107,7 @@ export const PROVIDERS: ProviderDef[] = [
     models: [
       { id: 'glm-5.2', name: 'GLM-5.2' },
       { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+      { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
       { id: 'gpt-5.5', name: 'GPT-5.5' },
       { id: 'gpt-5.2', name: 'GPT-5.2' },
       { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro' },

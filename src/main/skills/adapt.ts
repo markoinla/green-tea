@@ -113,7 +113,7 @@ async function callOpenAI(
 async function callAnthropic(db: Database.Database, content: string): Promise<string> {
   const apiKey = getSetting(db, 'anthropicApiKey')
   if (!apiKey) throw new Error('No Anthropic API key configured')
-  const modelId = getSetting(db, 'anthropicModel') || 'claude-sonnet-4-6'
+  const modelId = getSetting(db, 'anthropicModel') || 'claude-sonnet-5'
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
