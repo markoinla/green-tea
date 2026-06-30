@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
-import { resolve, sep } from 'path'
+import { join, resolve, sep } from 'path'
 import type { Workspace } from '../types'
+import { getAgentBaseDir, RESERVED_WORKSPACE_NAMES } from '../../agent/paths'
 
 export function listWorkspaces(db: Database.Database): Workspace[] {
   return db.prepare('SELECT * FROM workspaces ORDER BY created_at ASC').all() as Workspace[]
@@ -37,6 +38,21 @@ export function findByPath(db: Database.Database, path: string): Workspace | und
  */
 export function assertNoOverlap(db: Database.Database, path: string): void {
   const target = normalizePath(path)
+
+  // Reserve app-managed config paths: a workspace folder may not be (or live
+  // inside) the hidden config dirs (`.settings/`, `.greentea/`, legacy
+  // `workspaces/`) or a config item (skills/plugins/agents/mcp.json/theme.json)
+  // under the base dir. Compared case-insensitively so `.Settings` collides with
+  // `.settings` on a default (case-insensitive) macOS filesystem.
+  const base = getAgentBaseDir(db)
+  const targetCI = target.toLowerCase()
+  for (const name of RESERVED_WORKSPACE_NAMES) {
+    const reserved = normalizePath(join(base, name)).toLowerCase()
+    if (targetCI === reserved || targetCI.startsWith(reserved + sep)) {
+      throw new Error(`"${name}" is reserved for Green Tea and can't be used as a workspace folder.`)
+    }
+  }
+
   for (const w of listWorkspaces(db)) {
     if (!w.path) continue
     const existing = normalizePath(w.path)

@@ -12,11 +12,15 @@ import { initAutoUpdater } from './auto-updater'
 import { seedDefaultSkills } from './skills/manager'
 import { ensureUserDirs } from './agent/paths'
 import { reindexAllWorkspaces } from './vault/documents-service'
-import { migrateLegacyVaultLayout } from './vault/paths'
+import { migrateGlobalConfigToSettings, migrateLegacyVaultLayout } from './vault/paths'
 import { startVaultWatcher, stopVaultWatcher } from './vault/vault-watcher'
 import { ensureWorkspaceDocs } from './vault/workspace-docs'
 import { backfillWorkspaceDocs } from './database/migrations'
 import { listWorkspaces } from './database/repositories/workspaces'
+import { ensureWorkspaceRepo } from './git/workspace-git'
+import { startAutoCommit, stopAutoCommit } from './git/auto-commit'
+import { ensureSettingsRepo, commitSettingsChange } from './git/settings-git'
+import { startSettingsWatcher, stopSettingsWatcher } from './git/settings-watcher'
 import { startPluginWatcher, stopPluginWatcher } from './plugins/watcher'
 import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
@@ -210,7 +214,26 @@ app.whenReady().then(() => {
     console.error('[migration] legacy vault layout move failed', err)
   }
 
-  // Ensure base user directories exist (re-creates if deleted)
+  // Phase 0 (§4.2/§6): consolidate the global config items
+  // {skills, plugins, agents, mcp.json, theme.json} under `<base>/.settings/`.
+  // CRITICAL STARTUP ORDERING: this runs HERE, at the migrateLegacyVaultLayout
+  // slot, BEFORE ensureUserDirs (and before seedDefaultPlugins/reloadPluginRegistry,
+  // ensureThemeFile/migrateAppearanceToTheme, seedDefaultSkills, and the first
+  // lazy loadMcpConfig at session/IPC time) — all of which create the
+  // `.settings/<item>` destinations. Running first keeps those destinations absent
+  // so each item takes the atomic whole-tree rename path instead of the
+  // never-overwrite merge path. Allowlist-only, non-destructive, idempotent with no
+  // global flag (self-heals on a later launch), mirroring migrateLegacyVaultLayout
+  // above; guarded so a filesystem error degrades to "not yet moved".
+  try {
+    migrateGlobalConfigToSettings(db)
+  } catch (err) {
+    console.error('[migration] global config -> .settings move failed', err)
+  }
+
+  // Ensure base user directories exist (re-creates if deleted). Runs AFTER the
+  // .settings consolidation above so it (re)creates `.settings/skills` etc. only
+  // once the move has had its chance to relocate any legacy content into them.
   ensureUserDirs(db)
 
   // Seed bundled default plugins (re-seeds if deleted) and build the plugin
@@ -242,6 +265,26 @@ app.whenReady().then(() => {
   // Rebuild the derived documents index from the markdown files on disk
   // (files are the source of truth; the SQLite rows are a disposable cache).
   reindexAllWorkspaces(db)
+
+  // Ensure each present workspace folder is a git repo (+ managed .gitignore) for
+  // vault-wide version history (Phase 1). Idempotent and serialized per dir;
+  // fire-and-forget per workspace so a single bad folder never blocks startup.
+  for (const ws of listWorkspaces(db)) {
+    ensureWorkspaceRepo(db, ws.id).catch((err) =>
+      console.error('[git] ensureRepo failed at startup for workspace', ws.id, err)
+    )
+  }
+
+  // Global-config repo (Phase 4, §4.1/§6): a DISTINCT git repo rooted at the
+  // consolidated `.settings/` folder (never nested in/merged with a workspace
+  // repo). Init it (+ config-only `.gitignore`), then commit a baseline so the
+  // current skills/plugins/agents/mcp.json/theme.json state is captured on first
+  // launch. Both are idempotent (commit is a no-op once HEAD matches); ongoing
+  // config edits are committed by the settings watcher below. Fire-and-forget so a
+  // git error never blocks startup. ensureUserDirs above already created the dir.
+  ensureSettingsRepo(db)
+    .then(() => commitSettingsChange(db, 'config: initial import'))
+    .catch((err) => console.error('[git] settings repo init/baseline failed at startup', err))
 
   // Ensure theme.json exists (re-creates with defaults if deleted)
   ensureThemeFile(db)
@@ -332,6 +375,11 @@ app.whenReady().then(() => {
   // Watch theme.json for live theme overrides
   startThemeWatcher(db, mainWindow)
 
+  // Debounced git auto-commit (Phase 2, §4.5): the vault-watcher feeds it dirty
+  // paths; after an idle window it commits exactly those files as a safety net.
+  // Started before the watcher so no early dirty event is dropped.
+  startAutoCommit()
+
   // Watch the vault for external .md changes (Phase 5): external editors,
   // Obsidian, sync, or the agent writing files → live-reload the open note.
   startVaultWatcher(db, mainWindow)
@@ -341,6 +389,11 @@ app.whenReady().then(() => {
   // rebuild the plugin registry and notify the renderer so new artifact viewers
   // appear without an app restart.
   startPluginWatcher(db, mainWindow)
+
+  // Watch `.settings/` and commit config changes to the global-config repo
+  // (Phase 4, §6): skills/plugins/agents/mcp.json/theme.json edits → a debounced
+  // commit. Same engine as the vault auto-committer, pointed at `.settings/`.
+  startSettingsWatcher(db)
 
   // Prune old document versions at startup and hourly
   pruneVersions(db)
@@ -362,6 +415,8 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopThemeWatcher()
   stopVaultWatcher()
+  stopAutoCommit()
+  stopSettingsWatcher()
   stopPluginWatcher()
   getMcpManager().disconnectAll()
   if (process.platform !== 'darwin') {

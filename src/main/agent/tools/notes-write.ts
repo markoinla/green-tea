@@ -155,7 +155,7 @@ export function getCurrentMarkdown(
   return { markdown, title: doc.title }
 }
 
-export function notesProposeEdit(
+export async function notesProposeEdit(
   db: Database.Database,
   params: {
     document_id: string
@@ -163,7 +163,7 @@ export function notesProposeEdit(
     new_text: string
   },
   autoApprove?: boolean
-): ToolResult & { log?: AgentLog } {
+): Promise<ToolResult & { log?: AgentLog }> {
   if (!params.document_id) {
     return { content: '', error: 'document_id is required' }
   }
@@ -220,7 +220,7 @@ export function notesProposeEdit(
   })
 
   if (autoApprove) {
-    applyEdit(db, log.id)
+    await applyEdit(db, log.id)
     return {
       content: `Edit applied successfully. Log ID: ${log.id}.`,
       log

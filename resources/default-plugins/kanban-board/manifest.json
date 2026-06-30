@@ -1,11 +1,12 @@
 {
   "id": "kanban-board",
   "name": "Kanban Board",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minAppVersion": "0.6.0",
   "description": "View and edit .kanban files (JSON) as an interactive Kanban board with drag-and-drop",
   "author": "Green Tea",
   "contributes": {
+    "skills": ["skills"],
     "artifacts": [
       {
         "kind": "kanban-board",

@@ -11,11 +11,14 @@ import { registerMcpHandlers } from './register-mcp-handlers'
 import { registerGoogleHandlers } from './register-google-handlers'
 import { registerMicrosoftHandlers } from './register-microsoft-handlers'
 import { registerShareHandlers } from './register-share-handlers'
+import { registerGitHandlers } from './register-git-handlers'
+import { registerLlmAuthHandlers } from './register-llm-auth-handlers'
 
 export function registerIpcHandlers(db: Database.Database, mainWindow?: BrowserWindow): void {
   const context = { db, mainWindow }
 
   registerDbHandlers(context)
+  registerGitHandlers(context)
   registerAgentHandlers(context)
   registerSkillsHandlers(context)
   registerPluginHandlers(context)
@@ -25,5 +28,6 @@ export function registerIpcHandlers(db: Database.Database, mainWindow?: BrowserW
   registerMcpHandlers(context)
   registerGoogleHandlers(context)
   registerMicrosoftHandlers(context)
+  registerLlmAuthHandlers(context)
   registerShareHandlers(context)
 }

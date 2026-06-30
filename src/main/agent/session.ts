@@ -3,7 +3,7 @@ import { type BrowserWindow } from 'electron'
 import { mkdirSync } from 'fs'
 import {
   createAgentSession,
-  AuthStorage,
+  type AuthStorage,
   type AgentSessionEventListener,
   SessionManager,
   DefaultResourceLoader,
@@ -13,6 +13,7 @@ import {
 import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { Model } from '@earendil-works/pi-ai'
 import { getBuiltinModel as getModel } from '@earendil-works/pi-ai/providers/all'
+import { getPiAuthStorage } from '../llm-auth'
 import { createNotesTools } from './tools/notes-tools'
 import { getCurrentMarkdown } from './tools/notes-write'
 import {
@@ -30,7 +31,9 @@ import { readWorkspaceDoc } from '../vault/workspace-docs'
 import { markdownToTiptap } from '../markdown/tiptap-markdown'
 import { getSetting } from '../database/repositories/settings'
 import { getSkillsDir } from '../skills/manager'
+import { loadPluginSkills, pluginSkillId } from '../plugins/skills'
 import { getAgentBaseDir, getAgentWorkDir, getWorkspaceDir } from './paths'
+import { commitDocumentPreImage, commitAgentTurn } from '../git/workspace-git'
 import { buildSystemPrompt } from './system-prompt'
 import { getMcpManager } from '../mcp'
 import { getEnabledServices } from '../google'
@@ -43,7 +46,7 @@ export function getModelConfig(db: Database.Database): {
   model: Model<any>
   authStorage: AuthStorage
 } {
-  const authStorage = AuthStorage.create()
+  const authStorage = getPiAuthStorage(db)
   const aiProvider = getSetting(db, 'aiProvider') || 'default'
   const reasoningMode = getSetting(db, 'reasoningMode') === 'true'
 
@@ -158,6 +161,32 @@ export function getModelConfig(db: Database.Database): {
       maxTokens: 16384,
       compat: zenlayerCompat
     } satisfies Model<'openai-completions'>
+  } else if (aiProvider === 'anthropic-oauth') {
+    // Claude Pro/Max via a connected account. Auth is the OAuth credential
+    // stored under the `anthropic` provider in the encrypted secrets store;
+    // pi resolves it through authStorage and injects the OAuth + Claude Code
+    // identity headers itself (no runtime key, no API key needed).
+    if (authStorage.get('anthropic')?.type !== 'oauth') {
+      throw new Error(
+        'No Claude account connected. Open Settings → Accounts to connect Claude (Pro/Max).'
+      )
+    }
+    const modelId = getSetting(db, 'anthropicOAuthModel') || 'claude-sonnet-4-6'
+    model = getModel('anthropic', modelId as Parameters<typeof getModel>[1])
+    if (!reasoningMode) {
+      model = { ...model, reasoning: false }
+    }
+  } else if (aiProvider === 'openai-codex') {
+    // ChatGPT Plus/Pro (Codex) via a connected account. The openai-codex
+    // provider loads its OAuth credential from authStorage and derives the
+    // chatgpt-account-id from the access token JWT at request time.
+    if (authStorage.get('openai-codex')?.type !== 'oauth') {
+      throw new Error(
+        'No ChatGPT account connected. Open Settings → Accounts to connect ChatGPT (Codex).'
+      )
+    }
+    const modelId = getSetting(db, 'codexModel') || 'gpt-5.5'
+    model = getModel('openai-codex', modelId as Parameters<typeof getModel>[1])
   } else {
     if (!anthropicApiKey) {
       throw new Error(
@@ -178,7 +207,7 @@ export function getModelConfig(db: Database.Database): {
 
 // ---- Shared Edit Application ----
 
-export function applyEdit(db: Database.Database, logId: string): void {
+export async function applyEdit(db: Database.Database, logId: string): Promise<void> {
   const log = db.prepare('SELECT * FROM agent_logs WHERE id = ?').get(logId) as
     | {
         id: string
@@ -247,6 +276,18 @@ export function applyEdit(db: Database.Database, logId: string): void {
   }
   const contentMarkdown = lines.slice(contentStart).join('\n')
   const newDoc = markdownToTiptap(contentMarkdown)
+
+  // Before-agent-patch git boundary (§4.5): commit the CURRENT on-disk bytes so
+  // each agent change becomes a discrete, revertible commit. This MUST be awaited
+  // BEFORE updateDocument overwrites the file — isomorphic-git is async while the
+  // rest of this function is sync, so awaiting here is what guarantees git.add
+  // captures the pre-edit (not post-edit) bytes. Never blocks the edit on a git
+  // failure: a commit error is logged and the edit proceeds.
+  try {
+    await commitDocumentPreImage(db, log.document_id, 'agent: before patch')
+  } catch (err) {
+    console.error('[git] pre-patch commit failed for document', log.document_id, err)
+  }
 
   // Write the agent's edit to the .md file (the source of truth) via the vault
   // service, which also refreshes the index and version history.
@@ -362,8 +403,35 @@ export async function createNotesAgentSession(
       getEnabledMicrosoftServices()
     ),
     skillsOverride: () => {
-      const { skills, diagnostics } = loadSkillsFromDir({ dir: skillsDir, source: 'user' })
-      return { skills: skills.filter((s) => !disabledSkills.includes(s.name)), diagnostics }
+      // User skills (from the managed skills dir) take precedence; their names are
+      // the disabled-list keys. Plugin-bundled skills load in place from each enabled
+      // plugin and are tracked by a plugin-namespaced id so they can never collide
+      // with a same-named user skill in the flat `disabledSkills` list.
+      const { skills: userSkills, diagnostics } = loadSkillsFromDir({
+        dir: skillsDir,
+        source: 'user'
+      })
+      const enabledUserSkills = userSkills.filter((s) => !disabledSkills.includes(s.name))
+
+      const taken = new Set(userSkills.map((s) => s.name))
+      const pluginSkills: typeof userSkills = []
+      for (const { skill, pluginId } of loadPluginSkills(db)) {
+        // User-precedence de-dup: a plugin skill whose name already exists is dropped
+        // with a diagnostic, since the agent's skill registry keys on name.
+        if (taken.has(skill.name)) {
+          diagnostics.push({
+            type: 'warning',
+            message: `Plugin "${pluginId}" skill "${skill.name}" is shadowed by an existing skill of the same name`,
+            path: skill.baseDir
+          })
+          continue
+        }
+        taken.add(skill.name)
+        if (disabledSkills.includes(pluginSkillId(pluginId, skill.name))) continue
+        pluginSkills.push(skill)
+      }
+
+      return { skills: [...enabledUserSkills, ...pluginSkills], diagnostics }
     }
   })
   await resourceLoader.reload()
@@ -445,6 +513,16 @@ export async function createNotesAgentSession(
           // stats may not be available yet
         }
         window.webContents.send('agent:event', { type: 'agent_end', conversationId, tokens })
+        // Turn-end safety net (§4.5 / MUST-FIX): the agent's built-in write/edit
+        // tools stay active inside the workspace vault dir, so a note can be
+        // rewritten with no propose_edit (and thus no before-patch commit). Commit
+        // any such residual changes at turn end so they remain revertible. Whole-
+        // tree reconcile (not the lossy watcher dirty set); a no-op when clean.
+        if (workspaceId) {
+          commitAgentTurn(db, workspaceId).catch((err) =>
+            console.error('[git] agent turn-end commit failed for workspace', workspaceId, err)
+          )
+        }
         break
       }
     }
@@ -608,8 +686,8 @@ export function abortAgent(conversationId: string, window?: BrowserWindow): void
   }
 }
 
-export function approveEdit(db: Database.Database, logId: string): string {
-  applyEdit(db, logId)
+export async function approveEdit(db: Database.Database, logId: string): Promise<string> {
+  await applyEdit(db, logId)
   const log = db.prepare('SELECT document_id FROM agent_logs WHERE id = ?').get(logId) as
     | { document_id: string }
     | undefined

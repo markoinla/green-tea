@@ -80,6 +80,13 @@ export function PluginsTab() {
                 {plugin.description && (
                   <p className="text-sm text-muted-foreground">{plugin.description}</p>
                 )}
+                {plugin.bundlesSkills && (
+                  <p className="text-xs text-muted-foreground rounded-lg border border-border bg-muted/50 px-3 py-2">
+                    This plugin adds agent skills — instructions that guide the AI agent when
+                    working with its files. They run with the existing sandboxed agent tools and are
+                    enabled and removed together with the plugin.
+                  </p>
+                )}
               </div>
             </div>
           )
@@ -134,6 +141,11 @@ export function PluginsTab() {
                       className={`size-1.5 rounded-full shrink-0 ${plugin.enabled ? 'bg-green-500' : 'bg-foreground/20'}`}
                     />
                     <p className="text-sm font-medium truncate">{plugin.name}</p>
+                    {plugin.bundlesSkills && (
+                      <span className="ml-auto text-[10px] text-muted-foreground shrink-0">
+                        +skills
+                      </span>
+                    )}
                   </div>
                   {plugin.description && (
                     <p className="text-xs text-muted-foreground line-clamp-1 mt-1">

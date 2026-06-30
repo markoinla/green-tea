@@ -26,7 +26,10 @@ import { PICKER_BOOTSTRAP_SCRIPT } from './picker-bootstrap'
  * It is modeled on the older gt-image handler but corrected: gt-file has real
  * path-traversal protection (realpath clamp to the file's own directory) and is
  * NOT registered bypassCSP — a real Content-Security-Policy response header is
- * emitted on every response so the CSP actually governs the document.
+ * emitted on HTML document responses (and 404s) so the CSP actually governs the
+ * document. Non-HTML subresources (js/css/images) and binary viewers (PDF) are
+ * served without it: a subresource's own CSP is ignored by the browser, and a
+ * `default-src 'none'` PDF response would break Chromium's built-in viewer.
  */
 
 export const GT_FILE_SCHEME = 'gt-file'

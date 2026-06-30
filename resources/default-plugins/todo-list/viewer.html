@@ -5,9 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Todo List</title>
     <script>
-      // Prevent theme flash: set initial theme from system preference before render
-      document.documentElement.setAttribute('data-theme',
-        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      // Prevent theme flash: apply stored/system theme before render
+      (function () {
+        var stored = localStorage.getItem('todo-theme')
+        var dark = stored ? stored === 'dark'
+          : window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (dark) document.documentElement.classList.add('dark')
+      })()
     </script>
     <style>
       :root {
@@ -27,7 +31,7 @@
         --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
         --radius: 10px;
       }
-      :root[data-theme="dark"] {
+      :root.dark {
         --bg: #09090b;
         --card-bg: #18181b;
         --border: #27272a;
@@ -119,10 +123,24 @@
         border-color: var(--accent);
         box-shadow: 0 0 0 3px var(--accent-light), var(--shadow);
       }
-      #theme-btn {
-        font-size: 16px;
-        padding: 6px 8px;
+      .theme-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border: none;
+        background: none;
+        cursor: pointer;
+        border-radius: 6px;
+        color: var(--muted);
+        transition: background .15s, color .15s;
       }
+      .theme-toggle:hover { background: var(--hover-bg); color: var(--text); }
+      .theme-toggle svg { display: block; }
+      .theme-toggle .icon-sun { display: none; }
+      :root.dark .theme-toggle .icon-moon { display: none; }
+      :root.dark .theme-toggle .icon-sun { display: block; }
       .header-check {
         display: inline-flex;
         align-items: center;
@@ -416,7 +434,10 @@
             Todo List
           </h1>
           <div class="header-buttons">
-            <button id="theme-btn" class="btn-icon" title="Toggle theme">🌓</button>
+            <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
+              <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
             <button id="add-day-btn" class="btn btn-primary">+ New Day</button>
           </div>
         </div>
@@ -429,7 +450,7 @@
     <script type="module">
       const viewEl    = document.getElementById('view-inner')
       const addDayBtn = document.getElementById('add-day-btn')
-      const themeBtn  = document.getElementById('theme-btn')
+      const themeToggle = document.getElementById('theme-toggle')
 
       let editable = false
       let data = { days: [] }
@@ -493,7 +514,7 @@
 
       /* ── Data parse / serialize ── */
       function normalize(raw) {
-        const d = { days: [], theme: 'auto' }
+        const d = { days: [] }
         if (raw && Array.isArray(raw.days)) {
           d.days = raw.days.map(day => ({
             id: day.id || uid(),
@@ -502,9 +523,6 @@
               ? day.todos.map(t => ({ id: t.id || uid(), text: String(t.text || ''), done: Boolean(t.done) }))
               : []
           }))
-        }
-        if (raw && (raw.theme === 'light' || raw.theme === 'dark' || raw.theme === 'auto')) {
-          d.theme = raw.theme
         }
         return d
       }
@@ -515,28 +533,21 @@
       function serialize() { return JSON.stringify(data, null, 2) }
 
       /* ── Theme ── */
-      const THEME_ICONS  = { auto: '🌓', light: '☀️', dark: '🌙' }
-      const THEME_LABELS = { auto: 'Auto (system)', light: 'Light', dark: 'Dark' }
-      const mql = window.matchMedia('(prefers-color-scheme: dark)')
+      const THEME_KEY = 'todo-theme'
 
-      function resolvedTheme() {
-        if (data.theme === 'auto') return mql.matches ? 'dark' : 'light'
-        return data.theme
+      function applyTheme(theme) {
+        document.documentElement.classList.toggle('dark', theme === 'dark')
       }
-      function applyTheme() {
-        document.documentElement.setAttribute('data-theme', resolvedTheme())
-        if (themeBtn) {
-          themeBtn.textContent = THEME_ICONS[data.theme] || THEME_ICONS.auto
-          themeBtn.title = `Theme: ${THEME_LABELS[data.theme] || 'Auto'} — click to switch`
+
+      ;(function initTheme() {
+        const stored = localStorage.getItem(THEME_KEY)
+        if (stored === 'light' || stored === 'dark') {
+          applyTheme(stored)
+        } else {
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          applyTheme(prefersDark ? 'dark' : 'light')
         }
-      }
-      function cycleTheme() {
-        const order = ['auto', 'light', 'dark']
-        data.theme = order[(order.indexOf(data.theme) + 1) % order.length]
-        applyTheme()
-        scheduleSave()
-      }
-      mql.addEventListener('change', () => { if (data.theme === 'auto') applyTheme() })
+      })()
 
       /* ── Save ── */
       let saveTimer = null
@@ -730,7 +741,12 @@
       /* ── Events: buttons & interactions ── */
 
       addDayBtn.addEventListener('click', () => { if (editable) addDay() })
-      themeBtn.addEventListener('click', cycleTheme)
+      themeToggle.addEventListener('click', () => {
+        const isDark = document.documentElement.classList.contains('dark')
+        const next = isDark ? 'light' : 'dark'
+        applyTheme(next)
+        localStorage.setItem(THEME_KEY, next)
+      })
 
       viewEl.addEventListener('click', (e) => {
         // Empty-state "New Day" button
@@ -927,8 +943,8 @@
                 </div>`
             }).join('')
 
-        const snapshotTheme = resolvedTheme()
-        return `<!doctype html><html lang="en" data-theme="${snapshotTheme}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><style>${css}
+        const snapshotDark = document.documentElement.classList.contains('dark')
+        return `<!doctype html><html lang="en" class="${snapshotDark ? 'dark' : ''}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><style>${css}
 #view{overflow:visible;padding:20px;max-width:680px;margin:0 auto;height:auto}
 #app{height:auto}
 #header{display:none}
@@ -943,7 +959,6 @@
           editable = Boolean(msg.editable)
           addDayBtn.style.display = editable ? '' : 'none'
           render(typeof msg.bytes === 'string' ? msg.bytes : '')
-          applyTheme()
         } else if (msg.type === 'gt:render-static') {
           post({ type: 'gt:static', html: renderStatic() })
         }

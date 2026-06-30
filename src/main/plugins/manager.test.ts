@@ -47,9 +47,9 @@ afterEach(() => {
 })
 
 describe('getPluginsDir', () => {
-  it('returns <agentBaseDir>/plugins and creates it', () => {
+  it('returns <agentBaseDir>/.settings/plugins and creates it', () => {
     const dir = getPluginsDir(db)
-    expect(dir).toBe(join(baseDir, 'plugins'))
+    expect(dir).toBe(join(baseDir, '.settings', 'plugins'))
     expect(existsSync(dir)).toBe(true)
   })
 })

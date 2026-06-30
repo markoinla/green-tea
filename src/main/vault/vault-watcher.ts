@@ -13,6 +13,7 @@ import {
 } from './documents-service'
 import { consumeSelfWrite, hasSelfWrite } from './self-write'
 import { kindForExt } from './artifact-kinds'
+import { recordDirtyPath } from '../git/auto-commit'
 
 /**
  * The vault watcher. Observes every workspace folder for external `.md`/artifact
@@ -124,7 +125,7 @@ function scheduleFolderReconcile(forPath: string): void {
   )
 }
 
-function handlePath(abs: string): void {
+function handlePath(root: string, abs: string): void {
   if (!alive()) return
   const db = storedDb!
 
@@ -158,7 +159,13 @@ function handlePath(abs: string): void {
         broadcast(reindexFile(storedDb!, abs))
       } else {
         const removed = deleteIndexRowByPath(storedDb!, abs)
-        if (removed) broadcast(result)
+        if (removed) {
+          broadcast(result)
+          // Feed the confirmed deletion to the debounced auto-committer (git.remove
+          // stages it). Only after the absence holds, so a delete+recreate flap
+          // doesn't queue a spurious removal.
+          recordDirtyPath(root, abs)
+        }
         // The file may have vanished because its whole folder was deleted; prune
         // any now-missing folder rows (no-op if the folder still exists on disk).
         scheduleFolderReconcile(abs)
@@ -167,6 +174,10 @@ function handlePath(abs: string): void {
     settleTimers.add(t)
     return
   }
+  // A real (external / agent) content change — feed the dirty path to the debounced
+  // auto-commit safety net (§4.5). Self-writes already returned above, so this only
+  // ever sees edits the app didn't make itself; 'unchanged'/'ignored' are skipped.
+  if (result.kind === 'created' || result.kind === 'updated') recordDirtyPath(root, abs)
   broadcast(result)
 }
 
@@ -195,7 +206,7 @@ function onEvent(root: string, _eventType: string, filename: string | Buffer | n
     abs,
     setTimeout(() => {
       timers.delete(abs)
-      handlePath(abs)
+      handlePath(root, abs)
     }, DEBOUNCE_MS)
   )
 }

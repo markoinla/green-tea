@@ -1,0 +1,13 @@
+# Green Tea — managed (git-backed versioning, §4.6). Flat list; no negation rules.
+.greentea/
+.obsidian/
+.trash/
+.DS_Store
+node_modules/
+attachments/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal

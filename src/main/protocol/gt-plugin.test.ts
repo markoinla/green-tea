@@ -31,7 +31,7 @@ beforeEach(() => {
   outsideDir = mkdtempSync(join(tmpdir(), 'gt-plugin-out-'))
   setSetting(db, 'agentBaseDir', baseDir)
 
-  pluginsDir = join(baseDir, 'plugins')
+  pluginsDir = join(baseDir, '.settings', 'plugins')
   pluginDir = join(pluginsDir, PLUGIN_ID)
   mkdirSync(pluginDir, { recursive: true })
 

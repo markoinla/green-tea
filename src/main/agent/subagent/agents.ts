@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, mkdirSync, writeFileSync, existsSync } from 
 import { join } from 'path'
 import type Database from 'better-sqlite3'
 import { parseFrontmatter } from '@earendil-works/pi-coding-agent'
-import { getAgentBaseDir } from '../paths'
+import { getSettingsDir } from '../paths'
 
 export interface AgentConfig {
   name: string
@@ -25,7 +25,7 @@ interface AgentFrontmatter extends Record<string, unknown> {
 }
 
 function getAgentsDir(db: Database.Database): string {
-  return join(getAgentBaseDir(db), 'agents')
+  return join(getSettingsDir(db), 'agents')
 }
 
 // NOTE: seedDefaultAgents only writes these when the agents dir is EMPTY, so

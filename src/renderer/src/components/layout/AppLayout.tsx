@@ -12,6 +12,8 @@ import { ShareControl } from './ShareControl'
 import { cn } from '@renderer/lib/utils'
 import { UpdateBanner } from './UpdateBanner'
 import { VersionHistoryPanel } from '../VersionHistoryPanel'
+import { NoteHistoryPanel } from '../NoteHistoryPanel'
+import { VaultHistoryPanel } from '../VaultHistoryPanel'
 import { toast } from 'sonner'
 import { useDocuments } from '@renderer/hooks/useDocuments'
 import {
@@ -267,6 +269,14 @@ export function AppLayout({
               onCloseAll={onCloseAll}
               onReorder={onReorderTab}
             />
+            {selectedWorkspaceId && (
+              <div
+                className="flex items-center shrink-0 ml-1"
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              >
+                <VaultHistoryPanel workspaceId={selectedWorkspaceId} />
+              </div>
+            )}
             {hasDoc && (
               <div
                 className="flex items-center shrink-0 ml-1"
@@ -282,6 +292,7 @@ export function AppLayout({
                   docTitle={activeDoc?.title}
                 />
                 <VersionHistoryButton onClick={() => onVersionHistoryOpenChange(true)} />
+                <NoteHistoryPanel documentId={activeDocId} />
               </div>
             )}
           </header>

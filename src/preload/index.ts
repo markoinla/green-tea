@@ -161,6 +161,23 @@ const greenteaApi = {
       ipcRenderer.removeListener('document-versions:changed', sub)
     }
   },
+  // Per-workspace git engine (vault-wide version history; sits beside the per-note
+  // documentVersions quick-undo layer). All read/restore ops key off a documentId.
+  git: {
+    log: (documentId: string): Promise<unknown[]> => ipcRenderer.invoke('git:log', documentId),
+    diff: (documentId: string, ref: string): Promise<string> =>
+      ipcRenderer.invoke('git:diff', documentId, ref),
+    restore: (documentId: string, ref: string): Promise<unknown> =>
+      ipcRenderer.invoke('git:restore', documentId, ref),
+    checkpoint: (workspaceId: string, message?: string): Promise<string | null> =>
+      ipcRenderer.invoke('git:checkpoint', workspaceId, message),
+    // Vault-level history (Phase 2): whole-workspace commit list + non-destructive
+    // restore of the entire vault to a commit.
+    vaultLog: (workspaceId: string): Promise<unknown[]> =>
+      ipcRenderer.invoke('git:vault-log', workspaceId),
+    vaultRestore: (workspaceId: string, ref: string): Promise<unknown> =>
+      ipcRenderer.invoke('git:vault-restore', workspaceId, ref)
+  },
   onDocumentsChanged: (callback: () => void): (() => void) => {
     const sub = (): void => callback()
     ipcRenderer.on('documents:changed', sub)
@@ -233,13 +250,30 @@ const greenteaApi = {
       ipcRenderer.invoke('db:agent-logs:list', filter)
   },
   skills: {
-    list: (): Promise<{ name: string; description: string; enabled: boolean }[]> =>
-      ipcRenderer.invoke('skills:list'),
-    install: (url: string): Promise<{ name: string; description: string; enabled: boolean }> =>
-      ipcRenderer.invoke('skills:install', url),
-    remove: (name: string): Promise<void> => ipcRenderer.invoke('skills:remove', name),
-    toggle: (name: string, enabled: boolean): Promise<void> =>
-      ipcRenderer.invoke('skills:toggle', name, enabled),
+    list: (): Promise<
+      {
+        id: string
+        name: string
+        description: string
+        enabled: boolean
+        source: string
+        removable: boolean
+      }[]
+    > => ipcRenderer.invoke('skills:list'),
+    install: (
+      url: string
+    ): Promise<{
+      id: string
+      name: string
+      description: string
+      enabled: boolean
+      source: string
+      removable: boolean
+    }> => ipcRenderer.invoke('skills:install', url),
+    // `id` is a user-skill name or a plugin-skill composite id (`plugin:<id>:<name>`).
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('skills:remove', id),
+    toggle: (id: string, enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke('skills:toggle', id, enabled),
     marketplaceList: (): Promise<
       { name: string; description: string; author: string; version: string; path: string }[]
     > => ipcRenderer.invoke('skills:marketplace:list'),
@@ -342,6 +376,21 @@ const greenteaApi = {
     ipcRenderer.on('microsoft:changed', sub)
     return () => {
       ipcRenderer.removeListener('microsoft:changed', sub)
+    }
+  },
+  llmAuth: {
+    connect: (providerId: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('llm-auth:connect', providerId),
+    disconnect: (providerId: string): Promise<void> =>
+      ipcRenderer.invoke('llm-auth:disconnect', providerId),
+    getStatus: (): Promise<Record<string, { connected: boolean }>> =>
+      ipcRenderer.invoke('llm-auth:get-status')
+  },
+  onLlmAuthChanged: (callback: () => void): (() => void) => {
+    const sub = (): void => callback()
+    ipcRenderer.on('llm-auth:changed', sub)
+    return () => {
+      ipcRenderer.removeListener('llm-auth:changed', sub)
     }
   },
   dialog: {

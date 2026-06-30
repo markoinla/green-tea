@@ -28,6 +28,7 @@ import { createWebFetchTool } from './web-fetch'
 import { createSubagentTool } from '../subagent/tool'
 import { createScheduledTaskTool } from './scheduled-task-tool'
 import { createUpdateShareTool } from './share-tool'
+import { createNotesGitTools } from './notes-git-tools'
 import { createMcpProxyTool } from '../../mcp'
 import {
   createCalendarTools,
@@ -194,7 +195,7 @@ export function createNotesTools(
     async execute(_toolCallId, params) {
       const p = params as { document_id: string; old_text: string; new_text: string }
       const shouldAutoApprove = autoApprove ?? getSetting(db, 'autoApproveEdits') !== 'false'
-      const result = notesProposeEdit(db, p, shouldAutoApprove)
+      const result = await notesProposeEdit(db, p, shouldAutoApprove)
       if (result.error) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
@@ -504,6 +505,7 @@ export function createNotesTools(
     notesUpdateWorkspaceMemoryTool,
     workspaceAddFileTool,
     createUpdateShareTool(db),
+    ...createNotesGitTools(db, workspaceId),
     webSearchTool,
     webFetchTool,
     subagentTool

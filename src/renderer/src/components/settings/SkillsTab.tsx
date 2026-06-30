@@ -42,9 +42,9 @@ export function SkillsTab() {
           setSkillToDelete(null)
         }}
       />
-      {selectedSkill && skills.find((s) => s.name === selectedSkill) ? (
+      {selectedSkill && skills.find((s) => s.id === selectedSkill) ? (
         (() => {
-          const skill = skills.find((s) => s.name === selectedSkill)!
+          const skill = skills.find((s) => s.id === selectedSkill)!
           return (
             <div className="space-y-4">
               <button
@@ -57,28 +57,42 @@ export function SkillsTab() {
               </button>
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-base font-medium">{skill.name}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-medium">{skill.name}</h3>
+                    {skill.source !== 'user' && (
+                      <span className="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 bg-muted text-muted-foreground border border-border">
+                        from {skill.source}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={skill.enabled}
-                        onCheckedChange={(v) => toggleSkill(skill.name, v)}
+                        onCheckedChange={(v) => toggleSkill(skill.id, v)}
                       />
                       <span className="text-xs text-muted-foreground">
                         {skill.enabled ? 'Enabled' : 'Disabled'}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-red-500"
-                      onClick={() => setSkillToDelete(skill.name)}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
+                    {skill.removable && (
+                      <button
+                        type="button"
+                        className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-red-500"
+                        onClick={() => setSkillToDelete(skill.id)}
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
                 {skill.description && (
                   <p className="text-sm text-muted-foreground">{skill.description}</p>
+                )}
+                {skill.source !== 'user' && (
+                  <p className="text-xs text-muted-foreground">
+                    Provided by the “{skill.source}” plugin. Remove the plugin to remove this skill.
+                  </p>
                 )}
               </div>
             </div>
@@ -124,16 +138,21 @@ export function SkillsTab() {
             <div className="grid grid-cols-2 gap-2">
               {skills.map((skill) => (
                 <button
-                  key={skill.name}
+                  key={skill.id}
                   type="button"
                   className={`rounded-lg border border-border bg-muted p-3 text-left hover:border-foreground/20 transition-colors ${!skill.enabled ? 'opacity-60' : ''}`}
-                  onClick={() => setSelectedSkill(skill.name)}
+                  onClick={() => setSelectedSkill(skill.id)}
                 >
                   <div className="flex items-center gap-2">
                     <span
                       className={`size-1.5 rounded-full shrink-0 ${skill.enabled ? 'bg-green-500' : 'bg-foreground/20'}`}
                     />
                     <p className="text-sm font-medium truncate">{skill.name}</p>
+                    {skill.source !== 'user' && (
+                      <span className="ml-auto text-[10px] text-muted-foreground shrink-0">
+                        plugin
+                      </span>
+                    )}
                   </div>
                   {skill.description && (
                     <p className="text-xs text-muted-foreground line-clamp-1 mt-1">

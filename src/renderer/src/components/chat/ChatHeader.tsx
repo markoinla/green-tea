@@ -25,6 +25,7 @@ import {
 import { cn } from '@renderer/lib/utils'
 import { formatTokenCount } from '@renderer/hooks/chat-types'
 import { PROVIDERS, isModelEnabled } from '@renderer/lib/models'
+import { useLlmAccounts } from '@renderer/hooks/useLlmAccounts'
 import type { Settings } from '@renderer/hooks/useSettings'
 import type { Conversation } from '../../../../main/database/types'
 
@@ -61,6 +62,21 @@ export function ChatHeader({
   onClear,
   documentId
 }: ChatHeaderProps) {
+  const llm = useLlmAccounts()
+
+  // The model label shown on the selector trigger, derived from the active
+  // provider's modelField so every provider (API-key and OAuth) is covered.
+  const activeProvider = PROVIDERS.find((p) => p.id === settings.aiProvider)
+  const activeModelLabel =
+    settings.aiProvider === 'default' || !activeProvider?.modelField
+      ? 'Green Tea'
+      : ((settings[activeProvider.modelField as keyof Settings] as string) || '').split('/').pop()
+
+  function providerReady(provider: (typeof PROVIDERS)[number]): boolean {
+    if (provider.authKind === 'oauth') return llm.isConnected(provider.connectionId as string)
+    return !!provider.keyField && !!(settings[provider.keyField as keyof Settings] as string)
+  }
+
   return (
     <div className={cn('py-3 border-b border-border/40', documentId ? 'px-3' : 'px-48')}>
       {/* Tab bar */}
@@ -112,18 +128,7 @@ export function ChatHeader({
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-1.5 text-xs font-medium text-foreground/80 hover:text-foreground transition-colors outline-none px-2 py-1.5 rounded-md hover:bg-muted/50">
               <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-              {settings.aiProvider === 'default'
-                ? 'Green Tea'
-                : (settings.aiProvider === 'anthropic'
-                    ? settings.anthropicModel
-                    : settings.aiProvider === 'openrouter'
-                      ? settings.openrouterModel
-                      : settings.aiProvider === 'zenlayer'
-                        ? settings.zenlayerModel
-                        : settings.togetherModel
-                  )
-                    .split('/')
-                    .pop()}
+              {activeModelLabel}
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
@@ -137,11 +142,10 @@ export function ChatHeader({
               <DropdownMenuRadioItem value="default">Green Tea</DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
             {PROVIDERS.filter((p) => p.id !== 'default').map((provider) => {
-              const keyField = provider.keyField as keyof Settings
-              const hasKey = !!(settings[keyField] as string)
+              const ready = providerReady(provider)
               const modelField = provider.modelField as keyof Settings
               const enabledModels = provider.models.filter(
-                (m) => hasKey && isModelEnabled(settings.enabledModels, m.id)
+                (m) => ready && isModelEnabled(settings.enabledModels, m.id)
               )
               if (enabledModels.length === 0) return null
               return (

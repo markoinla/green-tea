@@ -1,12 +1,36 @@
-import { ShieldCheck, LogIn, LogOut, Loader2, Calendar, Mail, HardDrive } from 'lucide-react'
+import {
+  ShieldCheck,
+  LogIn,
+  LogOut,
+  Loader2,
+  Calendar,
+  Mail,
+  HardDrive,
+  Sparkles
+} from 'lucide-react'
 import { useGoogleAccount } from '@renderer/hooks/useGoogleAccount'
 import { useMicrosoftAccount } from '@renderer/hooks/useMicrosoftAccount'
+import { useLlmAccounts } from '@renderer/hooks/useLlmAccounts'
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger
 } from '@renderer/components/ui/accordion'
+
+const LLM_ACCOUNTS = [
+  {
+    id: 'anthropic',
+    name: 'Claude (Pro / Max)',
+    description:
+      'Power the agent with your Claude subscription. Usage is billed per token as extra usage, separate from Claude.ai plan limits.'
+  },
+  {
+    id: 'openai-codex',
+    name: 'ChatGPT (Codex)',
+    description: 'Power the agent with your ChatGPT Plus/Pro subscription via Codex.'
+  }
+] as const
 
 const GOOGLE_SERVICES = [
   {
@@ -122,13 +146,43 @@ function ConnectionDot({ connected }: { connected: boolean }) {
 export function AccountsTab() {
   const google = useGoogleAccount()
   const microsoft = useMicrosoftAccount()
+  const llm = useLlmAccounts()
 
   const googleConnected = google.status.authenticated && google.status.enabledServices.length > 0
   const microsoftConnected =
     microsoft.status.authenticated && microsoft.status.enabledServices.length > 0
+  const anyLlmConnected = LLM_ACCOUNTS.some((a) => llm.isConnected(a.id))
 
   return (
     <Accordion type="multiple" defaultValue={[]}>
+      <AccordionItem value="ai-models">
+        <AccordionTrigger>
+          <span className="flex items-center gap-2">
+            AI model subscriptions
+            <ConnectionDot connected={anyLlmConnected} />
+          </span>
+        </AccordionTrigger>
+        <AccordionContent>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Connect a subscription to power the agent, then pick its models in Model settings.
+            </p>
+            {LLM_ACCOUNTS.map((account) => (
+              <ServiceCard
+                key={account.id}
+                service={{ ...account, icon: Sparkles }}
+                isConnected={llm.isConnected(account.id)}
+                isConnecting={llm.connecting === account.id}
+                anyConnecting={llm.connecting !== null}
+                loading={llm.loading}
+                onConnect={llm.connect}
+                onDisconnect={llm.disconnect}
+              />
+            ))}
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+
       <AccordionItem value="google">
         <AccordionTrigger>
           <span className="flex items-center gap-2">

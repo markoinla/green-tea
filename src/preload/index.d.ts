@@ -15,6 +15,11 @@ import type {
 import type { PropertyType } from '../main/vault/metadata'
 import type { PropertyTypeEntry, Backlink, OutgoingLink } from '../main/vault/documents-service'
 import type { InstalledPlugin, ViewerContribution } from '../main/plugins/types'
+import type {
+  GitLogEntry,
+  RestoreResult as GitRestoreResult,
+  VaultRestoreResult as GitVaultRestoreResult
+} from '../main/git/git-service'
 
 interface PluginListItem extends InstalledPlugin {
   name: string
@@ -34,9 +39,15 @@ interface MarketplacePluginInfo {
 }
 
 interface SkillInfo {
+  /** Stable identity: the skill name for user skills, `plugin:<id>:<name>` for bundled. */
+  id: string
   name: string
   description: string
   enabled: boolean
+  /** `'user'` for user-installed skills, or the contributing plugin's id. */
+  source: string
+  /** Whether the skill can be individually removed (false for plugin-bundled skills). */
+  removable: boolean
 }
 
 interface MarketplaceSkillInfo {
@@ -202,6 +213,14 @@ interface GreenteaApi {
     restore(id: string): Promise<void>
     delete(id: string): Promise<void>
   }
+  git: {
+    log(documentId: string): Promise<GitLogEntry[]>
+    diff(documentId: string, ref: string): Promise<string>
+    restore(documentId: string, ref: string): Promise<GitRestoreResult>
+    checkpoint(workspaceId: string, message?: string): Promise<string | null>
+    vaultLog(workspaceId: string): Promise<GitLogEntry[]>
+    vaultRestore(workspaceId: string, ref: string): Promise<GitVaultRestoreResult>
+  }
   onDocumentVersionsChanged(callback: () => void): () => void
   onDocumentsChanged(callback: () => void): () => void
   onDocumentContentChanged(callback: (data: { id: string }) => void): () => void
@@ -287,6 +306,12 @@ interface GreenteaApi {
     }>
   }
   onMicrosoftChanged(callback: () => void): () => void
+  llmAuth: {
+    connect(providerId: string): Promise<{ success: boolean; error?: string }>
+    disconnect(providerId: string): Promise<void>
+    getStatus(): Promise<Record<string, { connected: boolean }>>
+  }
+  onLlmAuthChanged(callback: () => void): () => void
   dialog: {
     pickFolder(): Promise<string | null>
   }

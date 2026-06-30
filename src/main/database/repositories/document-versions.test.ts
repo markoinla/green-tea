@@ -5,12 +5,11 @@ import {
   createVersion,
   listVersions,
   getVersion,
-  restoreVersion,
   deleteVersion,
   maybeCreateAutoVersion,
   pruneVersions
 } from './document-versions'
-import { createDocument, getDocument } from './documents'
+import { createDocument } from './documents'
 import { createWorkspace } from './workspaces'
 
 let db: Database.Database
@@ -81,28 +80,6 @@ describe('document-versions repository', () => {
 
     const versions = listVersions(db, doc.id, 3)
     expect(versions.length).toBe(3)
-  })
-
-  it('restoreVersion overwrites document and creates pre-restore snapshot', () => {
-    const { doc } = setup()
-    const v = createVersion(db, {
-      document_id: doc.id,
-      title: 'Old Title',
-      content: 'old content',
-      source: 'manual'
-    })
-
-    restoreVersion(db, v.id)
-
-    const restored = getDocument(db, doc.id)!
-    expect(restored.title).toBe('Old Title')
-    expect(restored.content).toBe('old content')
-
-    // Should have created a 'restore' snapshot of state before restoring
-    const versions = listVersions(db, doc.id)
-    const restoreSnap = versions.find((v) => v.source === 'restore')
-    expect(restoreSnap).toBeDefined()
-    expect(restoreSnap!.content).toBe('initial')
   })
 
   it('deleteVersion removes a version', () => {

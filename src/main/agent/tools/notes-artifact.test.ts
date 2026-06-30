@@ -58,9 +58,9 @@ describe('agent rules for artifacts', () => {
     expect(res.error).toMatch(/artifact/i)
   })
 
-  it('notes_propose_edit refuses a non-note artifact', () => {
+  it('notes_propose_edit refuses a non-note artifact', async () => {
     const id = indexArtifact()
-    const res = notesProposeEdit(db, { document_id: id, old_text: 'x', new_text: 'y' })
+    const res = await notesProposeEdit(db, { document_id: id, old_text: 'x', new_text: 'y' })
     expect(res.error).toBeDefined()
     expect(res.error).toMatch(/artifact/i)
   })

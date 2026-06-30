@@ -1,9 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 
 interface SkillInfo {
+  /** Stable identity: the skill name for user skills, `plugin:<id>:<name>` for bundled. */
+  id: string
   name: string
   description: string
   enabled: boolean
+  /** `'user'` for user-installed skills, or the contributing plugin's id. */
+  source: string
+  /** Whether the skill can be individually removed (false for plugin-bundled skills). */
+  removable: boolean
 }
 
 export function useSkills() {
@@ -36,19 +42,19 @@ export function useSkills() {
     }
   }, [])
 
-  const removeSkill = useCallback(async (name: string) => {
+  const removeSkill = useCallback(async (id: string) => {
     setError(null)
     try {
-      await window.api.skills.remove(name)
+      await window.api.skills.remove(id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
   }, [])
 
-  const toggleSkill = useCallback(async (name: string, enabled: boolean) => {
+  const toggleSkill = useCallback(async (id: string, enabled: boolean) => {
     setError(null)
     try {
-      await window.api.skills.toggle(name, enabled)
+      await window.api.skills.toggle(id, enabled)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }

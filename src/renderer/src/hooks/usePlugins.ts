@@ -7,6 +7,8 @@ interface PluginInfo {
   version: string
   author?: string
   enabled: boolean
+  /** Whether the plugin ships bundled agent skills (`contributes.skills`). */
+  bundlesSkills: boolean
 }
 
 interface MarketplacePlugin {
@@ -33,7 +35,9 @@ export function usePlugins() {
         description: p.description ?? p.manifest?.description ?? '',
         version: p.version ?? p.manifest?.version ?? '',
         author: p.author ?? p.manifest?.author,
-        enabled: p.enabled
+        enabled: p.enabled,
+        bundlesSkills:
+          Array.isArray(p.manifest?.contributes?.skills) && p.manifest.contributes.skills.length > 0
       }))
     )
     setLoading(false)

@@ -6,6 +6,7 @@ import { fetchPluginRegistry, pluginUrl } from '../plugins/marketplace'
 import { reloadPluginRegistry, getPluginViewerContributions } from '../plugins/registry'
 import { pluginSecretKey, pluginSecretPrefix, sanitizePluginSubKey } from '../plugins/secret-key'
 import { reindexAllWorkspaces } from '../vault/documents-service'
+import { resetSession } from '../agent/session'
 import { getSecret, setSecret, deleteSecret, listSecretKeys } from '../secrets'
 import { getMainWindow } from './context'
 import type { IpcHandlerContext } from './context'
@@ -17,10 +18,20 @@ export function registerPluginHandlers({ db, mainWindow }: IpcHandlerContext): v
   const afterMutation = (): void => {
     reloadPluginRegistry(db)
     reindexAllWorkspaces(db)
+    // A plugin may contribute bundled skills, so its enabled-state change alters the
+    // agent's loaded skill set — reset the session so the next prompt sees them. Async
+    // and fire-and-forget: the reload finishes well before any new agent turn, and
+    // afterMutation runs from both sync (toggle) and async (install/remove) handlers.
+    void resetSession().catch((err: unknown) =>
+      console.error('[plugin] session reset after mutation failed', err)
+    )
     const win = getMainWindow(mainWindow)
     win?.webContents.send('plugins:changed')
     win?.webContents.send('documents:changed')
     win?.webContents.send('folders:changed')
+    // Skills surface in the Skills tab too — tell it to refetch so bundled skills
+    // appear/disappear alongside the plugin.
+    win?.webContents.send('skills:changed')
   }
 
   ipcMain.handle('plugins:list', () => {

@@ -71,8 +71,8 @@ export function registerAgentHandlers({ db, mainWindow }: IpcHandlerContext): vo
     await resetSession(conversationId)
   })
 
-  ipcMain.handle('agent:approve-edit', (_event, logId: string) => {
-    const docId = approveEdit(db, logId)
+  ipcMain.handle('agent:approve-edit', async (_event, logId: string) => {
+    const docId = await approveEdit(db, logId)
     if (docId) {
       safeSend(mainWindow, 'documents:content-changed', { id: docId })
     }

@@ -1,7 +1,6 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 import type { DocumentVersion } from '../types'
-import { getDocument } from './documents'
 
 // In-memory throttle: document_id -> last auto-version timestamp (ms)
 const autoVersionThrottle = new Map<string, number>()
@@ -36,26 +35,12 @@ export function getVersion(db: Database.Database, id: string): DocumentVersion |
     | undefined
 }
 
-export function restoreVersion(db: Database.Database, versionId: string): void {
-  const version = getVersion(db, versionId)
-  if (!version) throw new Error(`Version not found: ${versionId}`)
-
-  const doc = getDocument(db, version.document_id)
-  if (!doc) throw new Error(`Document not found: ${version.document_id}`)
-
-  // Snapshot current state before restoring
-  createVersion(db, {
-    document_id: doc.id,
-    title: doc.title,
-    content: doc.content,
-    source: 'restore'
-  })
-
-  // Overwrite document with the version's content and title
-  db.prepare(
-    "UPDATE documents SET title = ?, content = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(version.title, version.content, version.document_id)
-}
+// NOTE: a DB-only `restoreVersion()` used to live here but was dead and unsafe —
+// it wrote only the `documents` row, which the next file-backed `getDocument()`
+// read (files are the source of truth) immediately clobbered. The real per-note
+// restore is file-backed via `updateDocument` in the `db:document-versions:restore`
+// IPC handler; vault-wide restore is git-backed via `git:restore`. Do not
+// reintroduce a DB-only restore.
 
 export function deleteVersion(db: Database.Database, id: string): void {
   db.prepare('DELETE FROM document_versions WHERE id = ?').run(id)

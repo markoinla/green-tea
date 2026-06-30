@@ -53,6 +53,17 @@ export interface PluginManifest {
   permissions?: string[]
   contributes?: {
     artifacts?: ArtifactContribution[]
+    /**
+     * Plugin-dir-relative directory paths, each a skill root (or a parent that
+     * `loadSkillsFromDir` recurses into for `SKILL.md`). Bundled skills load
+     * IN PLACE from the plugin dir — never copied into the user skills dir and
+     * never run through the adaptation rewrite — and their lifecycle is tied to
+     * the plugin's enabled state. Each path is clamped to the plugin dir before
+     * loading; a path escaping it (`..`, absolute) is rejected. A bundled skill
+     * carries the same trust as a standalone skill (instructions + sandboxed
+     * bash), NOT an in-process agent tool.
+     */
+    skills?: string[]
   }
 }
 

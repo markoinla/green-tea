@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, watch, existsSync, mkdirSync, type FSWatch
 import { join, dirname } from 'path'
 import type { BrowserWindow } from 'electron'
 import type Database from 'better-sqlite3'
-import { getAgentBaseDir } from './agent/paths'
+import { getSettingsDir } from './agent/paths'
 import { safeSend } from './util/safe-send'
 
 const THEME_FILENAME = 'theme.json'
@@ -120,7 +120,7 @@ export interface ThemeData {
 }
 
 function getThemePath(db: Database.Database): string {
-  return join(getAgentBaseDir(db), THEME_FILENAME)
+  return join(getSettingsDir(db), THEME_FILENAME)
 }
 
 function writeThemeFile(path: string, data: ThemeData): void {
@@ -246,10 +246,10 @@ let storedWindow: BrowserWindow | null = null
 function startWatchingDir(db: Database.Database, mainWindow: BrowserWindow): void {
   stopWatcher()
 
-  const baseDir = getAgentBaseDir(db)
-  watchedDir = baseDir
+  const settingsDir = getSettingsDir(db)
+  watchedDir = settingsDir
   try {
-    watcher = watch(baseDir, (_eventType, filename) => {
+    watcher = watch(settingsDir, (_eventType, filename) => {
       if (filename !== THEME_FILENAME) return
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
@@ -282,7 +282,7 @@ export function startThemeWatcher(db: Database.Database, mainWindow: BrowserWind
 
 export function restartThemeWatcher(): void {
   if (!storedDb || !storedWindow || storedWindow.isDestroyed()) return
-  const newDir = getAgentBaseDir(storedDb)
+  const newDir = getSettingsDir(storedDb)
   if (newDir === watchedDir) return
   // Ensure theme.json exists in the new directory
   ensureThemeFile(storedDb)

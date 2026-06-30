@@ -11,6 +11,14 @@ export interface ProviderDef {
   keyField: string | null
   keyPlaceholder?: string
   modelField?: string
+  /**
+   * How the provider authenticates. 'apiKey' (default) reads `keyField` from
+   * settings; 'oauth' is gated on a connected account (`connectionId`) managed
+   * in Settings → Accounts rather than an API key.
+   */
+  authKind?: 'apiKey' | 'oauth'
+  /** For oauth providers: the llm-auth account id used to check connection. */
+  connectionId?: string
 }
 
 export const PROVIDERS: ProviderDef[] = [
@@ -34,6 +42,36 @@ export const PROVIDERS: ProviderDef[] = [
     keyField: 'anthropicApiKey',
     keyPlaceholder: 'sk-ant-...',
     modelField: 'anthropicModel'
+  },
+  {
+    id: 'anthropic-oauth',
+    name: 'Claude (Pro / Max)',
+    description: 'Use your Claude subscription. Connect in Settings → Accounts.',
+    models: [
+      { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+      { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' }
+    ],
+    keyField: null,
+    modelField: 'anthropicOAuthModel',
+    authKind: 'oauth',
+    connectionId: 'anthropic'
+  },
+  {
+    id: 'openai-codex',
+    name: 'ChatGPT (Codex)',
+    description: 'Use your ChatGPT Plus/Pro subscription. Connect in Settings → Accounts.',
+    models: [
+      { id: 'gpt-5.5', name: 'GPT-5.5' },
+      { id: 'gpt-5.4', name: 'GPT-5.4' },
+      { id: 'gpt-5.4-mini', name: 'GPT-5.4 mini' },
+      { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' }
+    ],
+    keyField: null,
+    modelField: 'codexModel',
+    authKind: 'oauth',
+    connectionId: 'openai-codex'
   },
   {
     id: 'together',

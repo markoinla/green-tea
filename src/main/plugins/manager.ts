@@ -1,14 +1,14 @@
 import type Database from 'better-sqlite3'
 import { app } from 'electron'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
-import { basename, join } from 'path'
+import { basename, isAbsolute, join } from 'path'
 import type { InstalledPlugin, PluginManifest } from './types'
 import { downloadFromGitHub } from '../util/github-download'
-import { getAgentBaseDir } from '../agent/paths'
+import { getSettingsDir } from '../agent/paths'
 import { getSetting } from '../database/repositories/settings'
 
 export function getPluginsDir(db: Database.Database): string {
-  const dir = join(getAgentBaseDir(db), 'plugins')
+  const dir = join(getSettingsDir(db), 'plugins')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
@@ -91,6 +91,28 @@ function loadManifest(dir: string): PluginManifest {
     ) {
       throw new Error(
         `Plugin "${manifest.id}" has an invalid "permissions" (must be an array of non-empty strings)`
+      )
+    }
+  }
+
+  // `contributes.skills` is a list of plugin-dir-relative skill directories. Validate
+  // shape here and reject any path that could escape the plugin dir BEFORE it is ever
+  // resolved against the filesystem (the loader re-clamps too — defense in depth).
+  const skillPaths = manifest.contributes?.skills
+  if (skillPaths !== undefined) {
+    if (
+      !Array.isArray(skillPaths) ||
+      skillPaths.some(
+        (p) =>
+          typeof p !== 'string' ||
+          p.length === 0 ||
+          p.length > 256 ||
+          isAbsolute(p) ||
+          p.split(/[/\\]/).includes('..')
+      )
+    ) {
+      throw new Error(
+        `Plugin "${manifest.id}" has an invalid "contributes.skills" (must be relative paths inside the plugin)`
       )
     }
   }

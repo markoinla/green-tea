@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
-import { homedir } from 'os'
 import { join, dirname } from 'path'
+import { getDatabase } from '../database/connection'
+import { getSettingsDir } from '../agent/paths'
 
 export interface McpServerConfig {
   command?: string
@@ -17,8 +18,14 @@ export interface McpConfig {
   mcpServers: Record<string, McpServerConfig>
 }
 
+/**
+ * Path to the global MCP config, now consolidated under the hidden `.settings/`
+ * folder (§4.2). Resolves via `getSettingsDir(getDatabase())` so it respects the
+ * `agentBaseDir` override (the old hardcoded-homedir path ignored it). Reads the
+ * DB singleton internally to keep the public signature unchanged for callers.
+ */
 export function getMcpConfigPath(): string {
-  return join(homedir(), 'Documents', 'Green Tea', 'mcp.json')
+  return join(getSettingsDir(getDatabase()), 'mcp.json')
 }
 
 const DEFAULT_CONFIG: McpConfig = {

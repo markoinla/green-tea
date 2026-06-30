@@ -2,9 +2,18 @@ import { useState, useEffect, useCallback } from 'react'
 
 export interface Settings {
   theme: 'light' | 'dark'
-  aiProvider: 'default' | 'anthropic' | 'together' | 'openrouter' | 'zenlayer'
+  aiProvider:
+    | 'default'
+    | 'anthropic'
+    | 'anthropic-oauth'
+    | 'openai-codex'
+    | 'together'
+    | 'openrouter'
+    | 'zenlayer'
   anthropicModel: string
   anthropicApiKey: string
+  anthropicOAuthModel: string
+  codexModel: string
   togetherModel: string
   togetherApiKey: string
   openrouterModel: string
@@ -27,6 +36,8 @@ const DEFAULTS: Settings = {
   aiProvider: 'default',
   anthropicModel: 'claude-sonnet-4-6',
   anthropicApiKey: '',
+  anthropicOAuthModel: 'claude-sonnet-4-6',
+  codexModel: 'gpt-5.5',
   togetherModel: 'moonshotai/Kimi-K2.5',
   togetherApiKey: '',
   openrouterModel: 'minimax/minimax-m2.1',
@@ -53,6 +64,8 @@ export function useSettings() {
       aiProvider: (all.aiProvider as Settings['aiProvider']) || DEFAULTS.aiProvider,
       anthropicModel: all.anthropicModel || DEFAULTS.anthropicModel,
       anthropicApiKey: all.anthropicApiKey || DEFAULTS.anthropicApiKey,
+      anthropicOAuthModel: all.anthropicOAuthModel || DEFAULTS.anthropicOAuthModel,
+      codexModel: all.codexModel || DEFAULTS.codexModel,
       togetherModel: all.togetherModel || DEFAULTS.togetherModel,
       togetherApiKey: all.togetherApiKey || DEFAULTS.togetherApiKey,
       openrouterModel: all.openrouterModel || DEFAULTS.openrouterModel,

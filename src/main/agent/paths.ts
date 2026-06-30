@@ -11,21 +11,59 @@ export function getAgentBaseDir(db: Database.Database): string {
   return getSetting(db, 'agentBaseDir') || DEFAULT_BASE_DIR
 }
 
+/** Hidden folder name (under the base dir) holding consolidated global config. */
+export const SETTINGS_SUBDIR = '.settings'
+
+/**
+ * The hidden `.settings/` folder under the base dir that holds all consolidated
+ * global config/extensions (skills/, plugins/, agents/, mcp.json, theme.json).
+ * Single helper consumed by every config path constructor so the watched dir and
+ * the read path can never drift (§4.2). Its own future git repo (§4.1).
+ */
+export function getSettingsDir(db: Database.Database): string {
+  return join(getAgentBaseDir(db), SETTINGS_SUBDIR)
+}
+
+/**
+ * Names a workspace folder may NOT take, so a user-created workspace can never
+ * collide with app-managed global config — the hidden config folders themselves
+ * (`.settings`, `.greentea`, legacy `workspaces`) or a config item now living
+ * under `.settings/` (skills/plugins/agents/mcp.json/theme.json). Compared
+ * case-insensitively (default macOS is case-insensitive). See assertNoOverlap for
+ * the path-level guard at workspace creation.
+ */
+export const RESERVED_WORKSPACE_NAMES = new Set([
+  '.settings',
+  '.greentea',
+  'workspaces',
+  'skills',
+  'plugins',
+  'agents',
+  'mcp.json',
+  'theme.json'
+])
+
 export function sanitizeWorkspaceName(name: string): string {
-  return (
+  const sanitized =
     name
       .replace(/[<>:"/\\|?*]/g, '_')
       .replace(/\s+/g, ' ')
       .trim() || 'default'
-  )
+  // Reserve app-managed names: a workspace folder named e.g. ".settings" or
+  // "skills" would collide with global config, so suffix it to disambiguate.
+  if (RESERVED_WORKSPACE_NAMES.has(sanitized.toLowerCase())) {
+    return `${sanitized}_`
+  }
+  return sanitized
 }
 
 export function ensureUserDirs(db: Database.Database): void {
-  const baseDir = getAgentBaseDir(db)
-  // Only the global, shared siblings are app-managed now. Workspace folders are
-  // arbitrary user-chosen paths (or default-location folders) created on demand.
+  const settingsDir = getSettingsDir(db)
+  // Only the global, shared siblings are app-managed now, all consolidated under
+  // the hidden `.settings/` folder (§4.2). Workspace folders are arbitrary
+  // user-chosen paths (or default-location folders) created on demand.
   for (const sub of ['skills', 'agents']) {
-    const dir = join(baseDir, sub)
+    const dir = join(settingsDir, sub)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   }
 }
@@ -38,7 +76,8 @@ export function ensureUserDirs(db: Database.Database): void {
  *
  * Default-location workspaces sit directly under the global base:
  *   ~/Documents/Green Tea/<sanitized-workspace-name>/
- * The global `skills/` + `mcp.json` siblings stay shared across all workspaces.
+ * The global config (skills/, plugins/, agents/, mcp.json, theme.json) is
+ * consolidated under the hidden `.settings/` sibling, shared across workspaces.
  */
 
 /** Hidden subfolder (inside the workspace dir) for the agent's scratch files. */

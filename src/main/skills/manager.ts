@@ -14,7 +14,7 @@ import { join } from 'path'
 import { loadSkillsFromDir, type Skill } from '@earendil-works/pi-coding-agent'
 import { downloadSkillFromGitHub } from './github'
 import { adaptSkillForGreenTea } from './adapt'
-import { getAgentBaseDir } from '../agent/paths'
+import { getSettingsDir } from '../agent/paths'
 
 /**
  * Restore .original backup files created during adaptation.
@@ -37,7 +37,7 @@ function restoreOriginals(skillDir: string): void {
 }
 
 export function getSkillsDir(db: Database.Database): string {
-  const dir = join(getAgentBaseDir(db), 'skills')
+  const dir = join(getSettingsDir(db), 'skills')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }

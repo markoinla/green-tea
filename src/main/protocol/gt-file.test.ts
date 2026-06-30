@@ -127,12 +127,16 @@ describe('createGtFileHandler', () => {
     expect(body).toContain('chart.js')
   })
 
-  it('serves a sibling asset with correct mime + CSP header', async () => {
+  it('serves a sibling asset with correct mime and no CSP (only HTML documents carry it)', async () => {
     const handle = createGtFileHandler(db)
     const res = await handle(req('/chart.js'))
     expect(res.status).toBe(200)
     expect(res.headers.get('Content-Type')).toBe('text/javascript')
-    expect(res.headers.get('Content-Security-Policy')).toBe(buildGtFileCsp())
+    // Non-HTML subresources are served without the CSP header: a subresource's
+    // own CSP is ignored by the browser, and applying `default-src 'none'` to a
+    // PDF/binary response breaks Chromium's built-in viewer (see
+    // createGtFileHandler). Only HTML document responses (and 404s) carry it.
+    expect(res.headers.get('Content-Security-Policy')).toBeNull()
     expect(await res.text()).toBe('console.log(1)')
   })
 

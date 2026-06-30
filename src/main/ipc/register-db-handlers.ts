@@ -20,10 +20,12 @@ import {
 import type { DocumentKind } from '../database/types'
 import { patchHtmlText } from '../protocol/html-text-patch'
 import { getWorkspaceVaultDir, ensureVaultDir } from '../vault/paths'
+import { ensureWorkspaceRepo } from '../git/workspace-git'
 import { deserializeMarkdown } from '../markdown/deserialize'
 import { tiptapToMarkdown, type TTDoc } from '../markdown/tiptap-markdown'
 import { restartThemeWatcher } from '../theme-watcher'
 import { restartVaultWatcher } from '../vault/vault-watcher'
+import { restartSettingsWatcher } from '../git/settings-watcher'
 import { resetSession } from '../agent/session'
 import { getDefaultWorkspaceDir } from '../agent/paths'
 import type { IpcHandlerContext } from './context'
@@ -96,6 +98,12 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
       }
       // A new workspace folder must be picked up by the (multi-root) watcher.
       restartVaultWatcher()
+      // Initialize the per-workspace git repo (+ managed .gitignore). Idempotent
+      // and serialized internally; fire-and-forget so workspace creation isn't
+      // blocked on git init (commits self-heal via ensureRepo if this loses a race).
+      ensureWorkspaceRepo(db, workspace.id).catch((err) =>
+        console.error('[git] ensureRepo failed for new workspace', workspace.id, err)
+      )
       mainWindow?.webContents.send('workspaces:changed')
       return workspace
     }
@@ -110,6 +118,9 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     ensureVaultDir(getWorkspaceVaultDir(db, id))
     documents.reindexWorkspace(db, id)
     restartVaultWatcher()
+    ensureWorkspaceRepo(db, id).catch((err) =>
+      console.error('[git] ensureRepo failed for relocated workspace', id, err)
+    )
     mainWindow?.webContents.send('workspaces:changed')
     mainWindow?.webContents.send('documents:changed')
     mainWindow?.webContents.send('folders:changed')
@@ -540,6 +551,7 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     if (key === 'agentBaseDir') {
       restartThemeWatcher()
       restartVaultWatcher()
+      restartSettingsWatcher()
     }
   })
 
