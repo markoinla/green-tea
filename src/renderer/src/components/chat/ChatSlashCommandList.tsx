@@ -3,6 +3,7 @@ import { ReactRenderer } from '@tiptap/react'
 import type { SuggestionProps, SuggestionKeyDownProps } from '@tiptap/suggestion'
 import { Zap } from 'lucide-react'
 import type { ChatSlashCommandItem } from './chat-slash-commands'
+import { positionPopup } from './popup-position'
 
 interface ChatSlashCommandListProps {
   items: ChatSlashCommandItem[]
@@ -31,7 +32,7 @@ export const ChatSlashCommandList = forwardRef<ChatSlashCommandListRef, ChatSlas
           setSelectedIndex((prev) => (prev + 1) % items.length)
           return true
         }
-        if (event.key === 'Enter') {
+        if (event.key === 'Enter' || event.key === 'Tab') {
           const item = items[selectedIndex]
           if (item) {
             command(item)
@@ -95,21 +96,18 @@ export function renderChatSlashSuggestion(onActiveChange: (active: boolean) => v
       document.body.appendChild(popup)
       popup.appendChild(component.element)
 
-      const rect = props.clientRect?.()
-      if (rect && popup) {
-        popup.style.left = `${rect.left}px`
-        popup.style.top = `${rect.top - popup.offsetHeight}px`
-      }
+      // Defer to next frame so the popup has laid out before measuring it.
+      requestAnimationFrame(() => {
+        const rect = props.clientRect?.()
+        if (rect && popup) positionPopup(popup, rect)
+      })
     },
 
     onUpdate: (props: SuggestionProps<ChatSlashCommandItem>) => {
       component?.updateProps(props)
 
       const rect = props.clientRect?.()
-      if (rect && popup) {
-        popup.style.left = `${rect.left}px`
-        popup.style.top = `${rect.top - popup.offsetHeight}px`
-      }
+      if (rect && popup) positionPopup(popup, rect)
     },
 
     onKeyDown: (props: SuggestionKeyDownProps) => {

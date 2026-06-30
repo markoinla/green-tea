@@ -9,13 +9,10 @@ import * as workspaces from '../database/repositories/workspaces'
 import * as settings from '../database/repositories/settings'
 import * as conversations from '../database/repositories/conversations'
 import * as documents from '../vault/documents-service'
+import * as documentViewState from '../database/repositories/document-view-state'
 import { MAX_ARTIFACT_BYTES, atomicWriteFile } from '../vault/note-store'
 import { markSelfWrite } from '../vault/self-write'
-import {
-  readWorkspaceDoc,
-  writeWorkspaceDoc,
-  ensureWorkspaceDocs
-} from '../vault/workspace-docs'
+import { readWorkspaceDoc, writeWorkspaceDoc, ensureWorkspaceDocs } from '../vault/workspace-docs'
 import type { DocumentKind } from '../database/types'
 import { patchHtmlText } from '../protocol/html-text-patch'
 import { getWorkspaceVaultDir, ensureVaultDir } from '../vault/paths'
@@ -318,6 +315,44 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
       atomicWriteFile(doc.file_path, contents)
     }
   )
+
+  // Table-schema sidecar (`<name>.csv.meta.json`) for a `csv` artifact: column
+  // types/formats that the .csv text can't express. Stored beside the .csv so it
+  // versions + syncs with the data. NOT a document (excluded from the index by its
+  // unmapped extension), so it's addressed via its host doc id, never its own.
+  // No markSelfWrite needed: the watcher never reports a non-indexed path, so
+  // there's no echo to suppress; atomicWriteFile is for torn-write safety only.
+  const metaPathFor = (csvPath: string): string => `${csvPath}.meta.json`
+
+  ipcMain.handle('documents:readTableMeta', async (_event, id: string): Promise<string | null> => {
+    const doc = documents.getDocument(db, id)
+    if (!doc || !doc.file_path) throw new Error(`Document not found: ${id}`)
+    if (doc.kind !== 'csv') throw new Error(`Not a table artifact: ${id}`)
+    const metaPath = metaPathFor(doc.file_path)
+    if (!existsSync(metaPath)) return null
+    return readFile(metaPath, 'utf-8')
+  })
+
+  ipcMain.handle(
+    'documents:writeTableMeta',
+    async (_event, id: string, contents: string): Promise<void> => {
+      const doc = documents.getDocument(db, id)
+      if (!doc || !doc.file_path) throw new Error(`Document not found: ${id}`)
+      if (doc.kind !== 'csv') throw new Error(`Not a table artifact: ${id}`)
+      atomicWriteFile(metaPathFor(doc.file_path), contents)
+    }
+  )
+
+  // Per-document table VIEW-STATE (column widths + sort) — local UI state stored in
+  // SQLite, not on disk (so its churn never hits git/sync). Opaque JSON, keyed by
+  // the host doc id; returns null when none saved.
+  ipcMain.handle('documents:readViewState', (_event, id: string): string | null => {
+    return documentViewState.getViewState(db, id)
+  })
+
+  ipcMain.handle('documents:writeViewState', (_event, id: string, viewState: string): void => {
+    documentViewState.setViewState(db, id, viewState)
+  })
 
   // Inline text edit-and-save for HTML artifacts. The sandboxed viewer's picker
   // bootstrap sends an edit-commit (child-index path + oldText + newHTML); we

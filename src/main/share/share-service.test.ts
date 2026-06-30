@@ -8,7 +8,16 @@ import { setSetting } from '../database/repositories/settings'
 import { createWorkspace } from '../database/repositories/workspaces'
 import { createDocument } from '../vault/documents-service'
 import { upsertShare } from '../database/repositories/shares'
+import { getDeviceCredential } from './device-credential'
 import { updateSharedVersion } from './share-service'
+
+// resolveToken now uses SHARE_PUBLISH_TOKEN (admin/dev override) or the
+// per-device credential. Mock the credential module so tests never touch the
+// network; the env override covers the "token present" cases without it.
+vi.mock('./device-credential', () => ({
+  getDeviceCredential: vi.fn()
+}))
+const mockedGetDeviceCredential = vi.mocked(getDeviceCredential)
 
 // The frontmatter UUID is the note's docKey identity (see computeDocKey). Tests
 // that pre-seed a share row must key it the same way the service will look it up.
@@ -29,12 +38,13 @@ beforeEach(() => {
 afterEach(() => {
   db.close()
   rmSync(base, { recursive: true, force: true })
+  delete process.env.SHARE_PUBLISH_TOKEN
   vi.restoreAllMocks()
 })
 
 describe('updateSharedVersion — update-only safety', () => {
   it('reports not-shared and never contacts the worker when the doc has no share', async () => {
-    setSetting(db, 'share.publishToken', 'tok')
+    process.env.SHARE_PUBLISH_TOKEN = 'tok'
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const doc = createDocument(db, { title: 'Note', workspace_id: workspaceId })
 
@@ -44,7 +54,9 @@ describe('updateSharedVersion — update-only safety', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('reports no-token (and skips the worker) when no publish token is configured', async () => {
+  it('reports no-token (and skips the worker) when the credential cannot be resolved', async () => {
+    // No env override; device registration fails (e.g. offline).
+    mockedGetDeviceCredential.mockRejectedValue(new Error('offline'))
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const doc = createDocument(db, { title: 'Note', workspace_id: workspaceId })
     // Even an already-shared doc must not be touched without a token.
@@ -65,7 +77,7 @@ describe('updateSharedVersion — update-only safety', () => {
   })
 
   it('reports unsupported for a missing document', async () => {
-    setSetting(db, 'share.publishToken', 'tok')
+    process.env.SHARE_PUBLISH_TOKEN = 'tok'
     const result = await updateSharedVersion(db, 'does-not-exist')
     expect(result.status).toBe('unsupported')
   })

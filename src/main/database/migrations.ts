@@ -459,13 +459,30 @@ export function runMigrations(db: Database.Database): void {
   // keep working unchanged. When set, the executor builds the model from these
   // instead of the global aiProvider/*Model settings (see getModelConfig override).
   const hasProviderCol = db
-    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('scheduled_tasks') WHERE name = 'provider'")
+    .prepare(
+      "SELECT COUNT(*) as cnt FROM pragma_table_info('scheduled_tasks') WHERE name = 'provider'"
+    )
     .get() as { cnt: number }
 
   if (hasProviderCol.cnt === 0) {
     db.exec('ALTER TABLE scheduled_tasks ADD COLUMN provider TEXT')
     db.exec('ALTER TABLE scheduled_tasks ADD COLUMN model TEXT')
   }
+
+  // Per-document VIEW-STATE for the table artifact (column widths + sort): local,
+  // volatile UI state that deliberately does NOT live on disk (unlike the schema
+  // sidecar) so its churn never touches git or sync. Keyed by the artifact's
+  // document id; FK CASCADE (foreign_keys=ON, see connection.ts) drops the row
+  // when the document is deleted. `view_state` is an opaque JSON blob owned by the
+  // renderer. Excluded from the rebuild model — it's losable (a DB wipe takes the
+  // widths with it, which is acceptable for view-state).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS document_view_state (
+      document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+      view_state TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
 }
 
 /**

@@ -300,3 +300,27 @@ export function listVaultNotes(vaultDir: string): VaultNoteSummary[] {
   walk(vaultDir)
   return out
 }
+
+/**
+ * List every (non-ignored) subdirectory in a vault as a POSIX slash-path relative
+ * to the root, including EMPTY ones that `listVaultNotes` can't surface (it only
+ * emits file entries). The indexer uses this so a folder with no notes still gets
+ * a row — and so an empty subfolder survives a folder move/rename, where the
+ * directory is relocated on disk but no note exists to re-derive its path.
+ */
+export function listVaultFolders(vaultDir: string): string[] {
+  const out: string[] = []
+  if (!existsSync(vaultDir)) return out
+
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || isIgnored(entry.name)) continue
+      const full = join(dir, entry.name)
+      out.push(toPosix(relative(vaultDir, full)))
+      walk(full)
+    }
+  }
+
+  walk(vaultDir)
+  return out
+}

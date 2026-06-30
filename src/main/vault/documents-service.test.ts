@@ -28,8 +28,10 @@ import {
   updateDocument,
   deleteDocument,
   createFolder,
+  renameFolder,
   reindexWorkspace
 } from './documents-service'
+import { listFolders } from '../database/repositories/folders'
 
 let db: Database.Database
 let base: string
@@ -140,6 +142,35 @@ describe('folders as subdirectories', () => {
     const vault = getWorkspaceVaultDir(db, workspaceId)
     expect(existsSync(join(vault, 'Projects', 'Plan.md'))).toBe(true)
     expect(getDocument(db, doc.id)?.folder_id).toBe(folder.id)
+  })
+
+  it('moves a folder (and its notes) on disk when nested into another folder', () => {
+    const alpha = createFolder(db, { name: 'Alpha', workspace_id: workspaceId })
+    createDocument(db, { title: 'Plan', workspace_id: workspaceId, folder_id: alpha.id })
+    const vault = getWorkspaceVaultDir(db, workspaceId)
+    expect(existsSync(join(vault, 'Alpha', 'Plan.md'))).toBe(true)
+
+    // Nest Alpha under a (new) parent path — the drag-to-folder gesture.
+    renameFolder(db, alpha.id, 'Projects/Alpha')
+
+    expect(existsSync(join(vault, 'Alpha'))).toBe(false)
+    expect(existsSync(join(vault, 'Projects', 'Alpha', 'Plan.md'))).toBe(true)
+    expect(listFolders(db, workspaceId).map((f) => f.name)).toContain('Projects/Alpha')
+  })
+
+  it('keeps an EMPTY subfolder after its parent is moved', () => {
+    const alpha = createFolder(db, { name: 'Alpha', workspace_id: workspaceId })
+    createDocument(db, { title: 'Plan', workspace_id: workspaceId, folder_id: alpha.id })
+    // Alpha/Sub holds no notes — only the indexer's directory walk can surface it.
+    createFolder(db, { name: 'Alpha/Sub', workspace_id: workspaceId })
+    const vault = getWorkspaceVaultDir(db, workspaceId)
+    expect(existsSync(join(vault, 'Alpha', 'Sub'))).toBe(true)
+
+    renameFolder(db, alpha.id, 'Projects/Alpha')
+
+    // The empty subdirectory rode along on disk and still has an index row.
+    expect(existsSync(join(vault, 'Projects', 'Alpha', 'Sub'))).toBe(true)
+    expect(listFolders(db, workspaceId).map((f) => f.name)).toContain('Projects/Alpha/Sub')
   })
 })
 

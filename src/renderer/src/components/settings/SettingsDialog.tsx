@@ -14,7 +14,6 @@ import { SkillsTab } from './SkillsTab'
 import { PluginsTab } from './PluginsTab'
 import { AccountsTab } from './AccountsTab'
 import { McpServersTab } from './McpServersTab'
-import { ShareTab } from './ShareTab'
 import { useSettings } from '@renderer/hooks/useSettings'
 
 interface SettingsDialogProps {
@@ -54,7 +53,6 @@ export function SettingsDialog({ open, onOpenChange, defaultTab }: SettingsDialo
               <TabsTrigger value="skills">Skills</TabsTrigger>
               <TabsTrigger value="plugins">Plugins</TabsTrigger>
               <TabsTrigger value="accounts">Accounts</TabsTrigger>
-              <TabsTrigger value="share">Share</TabsTrigger>
               <TabsTrigger value="mcp">MCP Servers</TabsTrigger>
             </TabsList>
           </div>
@@ -99,18 +97,6 @@ export function SettingsDialog({ open, onOpenChange, defaultTab }: SettingsDialo
                 </p>
               </div>
               <AccountsTab />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="share" className="min-h-[480px] p-6 overflow-y-auto max-h-[70vh]">
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-sm font-medium">Share</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Publish notes and artifacts to a public link.
-                </p>
-              </div>
-              <ShareTab settings={settings} updateSetting={updateSetting} />
             </div>
           </TabsContent>
 

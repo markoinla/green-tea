@@ -11,7 +11,7 @@ import {
   Table2,
   Trash2
 } from 'lucide-react'
-import { dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
+import { draggable, dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
 import { SidebarMenuButton, SidebarMenuItem, SidebarMenu } from '@renderer/components/ui/sidebar'
 import { Collapsible, CollapsibleContent } from '@renderer/components/ui/collapsible'
 import {
@@ -29,7 +29,7 @@ import {
   subscribePluginViewers
 } from '@renderer/components/artifacts/registry'
 import { DocumentMenuItem } from './DocumentMenuItem'
-import { DROP_TYPE_FOLDER, isDocumentDragData } from './dnd'
+import { DRAG_TYPE_FOLDER, DROP_TYPE_FOLDER, isDocumentDragData, isFolderDragData } from './dnd'
 import type { FolderNode } from './folderTree'
 import type { DocumentKind } from '../../../../../main/database/types'
 
@@ -83,7 +83,9 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
   const isReal = folder !== null
 
   const dropRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<HTMLButtonElement>(null)
   const [isDraggedOver, setIsDraggedOver] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
 
   // Rename edits only the last path segment; the parent prefix is preserved so a
   // nested folder keeps its place (its subdirectory is moved, not flattened).
@@ -118,17 +120,44 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
     else onTogglePath(node.path)
   }
 
+  // The folder header is a drag source: dragging it nests this folder into
+  // another (or out to root). Only real folders move — a synthetic intermediate
+  // has no row — and never while its rename input is open.
+  useEffect(() => {
+    const el = dragRef.current
+    if (!el || !folder) return
+    return draggable({
+      element: el,
+      canDrag: () => !isEditing,
+      getInitialData: () => ({ type: DRAG_TYPE_FOLDER, folderId: folder.id, path: folder.name }),
+      onDragStart: () => setIsDragging(true),
+      onDrop: () => setIsDragging(false)
+    })
+  }, [folder, isEditing])
+
   // One drop target spans the folder header AND its children, so dropping
   // anywhere within the folder (including onto a child document) resolves to
   // this folder. Only real folders are drop targets — a synthetic intermediate
-  // has no row to move a document into.
+  // has no row to move into. Accepts a document (move the doc in) or another
+  // folder (nest it in), rejecting no-ops and any move that would put a folder
+  // inside itself or its own descendant (a cycle).
   useEffect(() => {
     const el = dropRef.current
     if (!el || !folder) return
     return dropTargetForElements({
       element: el,
-      canDrop: ({ source }) =>
-        isDocumentDragData(source.data) && source.data.folderId !== folder.id,
+      canDrop: ({ source }) => {
+        const data = source.data
+        if (isDocumentDragData(data)) return data.folderId !== folder.id
+        if (isFolderDragData(data)) {
+          if (data.path === folder.name) return false // onto itself
+          if (folder.name.startsWith(data.path + '/')) return false // into own descendant
+          const slash = data.path.lastIndexOf('/')
+          const parentPath = slash === -1 ? '' : data.path.slice(0, slash)
+          return parentPath !== folder.name // already a direct child → no-op
+        }
+        return false
+      },
       getData: () => ({ type: DROP_TYPE_FOLDER, folderId: folder.id }),
       onDragEnter: () => setIsDraggedOver(true),
       onDragLeave: () => setIsDraggedOver(false),
@@ -148,10 +177,12 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
           <ContextMenu>
             <ContextMenuTrigger asChild disabled={!isReal}>
               <SidebarMenuButton
+                ref={dragRef}
                 onClick={toggle}
                 onDoubleClick={isReal ? startEditing : undefined}
                 tooltip={node.name}
                 size="sm"
+                className={isDragging ? 'opacity-50' : undefined}
               >
                 <ChevronRight
                   className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`}

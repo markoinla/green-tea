@@ -8,7 +8,7 @@ import { sanitizeWorkspaceName, getDefaultWorkspaceDir } from '../agent/paths'
 import { getWorkspace, normalizePath } from '../database/repositories/workspaces'
 import type { TTDoc, TTNode } from '../markdown/tiptap-markdown'
 import { getWorkspaceVaultDir, ensureVaultDir } from './paths'
-import { kindForRow } from './artifact-kinds'
+import { kindForExt, kindForRow } from './artifact-kinds'
 import { markSelfWrite } from './self-write'
 import { getPluginViewerContribution } from '../plugins/registry'
 import { getPluginsDir } from '../plugins/manager'
@@ -18,6 +18,7 @@ import {
   writeNote,
   atomicWriteFile,
   listVaultNotes,
+  listVaultFolders,
   slugifyTitle,
   titleFromFilename,
   uniqueNotePath,
@@ -900,7 +901,20 @@ function updateArtifact(
     const targetDir = resolveDir(db, workspaceId, folder)
     const stem = data.title !== undefined ? slugifyTitle(data.title) : titleFromFilename(oldPath)
     filePath = uniqueArtifactPath(targetDir, stem, extname(oldPath))
-    if (filePath !== oldPath) renameSync(oldPath, filePath)
+    if (filePath !== oldPath) {
+      renameSync(oldPath, filePath)
+      // Carry a table-schema sidecar (`<name>.csv.meta.json`) with its .csv so
+      // column types survive an in-app rename/move. Best-effort: absence is normal
+      // (plain tables have none) and a failure must not abort the rename.
+      const oldMeta = `${oldPath}.meta.json`
+      if (existsSync(oldMeta)) {
+        try {
+          renameSync(oldMeta, `${filePath}.meta.json`)
+        } catch (err) {
+          console.warn(`[vault] failed to move table sidecar for ${oldPath}: ${err}`)
+        }
+      }
+    }
   }
 
   const updated = nowIso()
@@ -1070,6 +1084,16 @@ export async function deleteDocument(db: Database.Database, id: string): Promise
   if (row?.file_path && existsSync(row.file_path)) {
     // Move the note to the OS trash so it stays recoverable from Finder.
     await shell.trashItem(row.file_path)
+    // Trash a table-schema sidecar alongside its .csv (best-effort; absence is
+    // normal). Trashed (not rmSync'd) to match the host file's recoverability.
+    const metaPath = `${row.file_path}.meta.json`
+    if (existsSync(metaPath)) {
+      try {
+        await shell.trashItem(metaPath)
+      } catch (err) {
+        console.warn(`[vault] failed to trash table sidecar for ${row.file_path}: ${err}`)
+      }
+    }
   }
   deleteIndexRow(db, id)
 }
@@ -1104,7 +1128,13 @@ export function renameFolder(db: Database.Database, id: string, name: string): v
   const vault = getWorkspaceVaultDir(db, folder.workspace_id)
   const oldDir = join(vault, folderSubdir(folder.name))
   const newDir = join(vault, folderSubdir(name))
-  if (existsSync(oldDir) && !existsSync(newDir)) renameSync(oldDir, newDir)
+  // Nesting into a deeper path (e.g. "Alpha" → "Projects/Alpha") needs the new
+  // parent to exist before the move. A drag-drop target always does, but a path
+  // with a missing intermediate would otherwise make renameSync throw.
+  if (existsSync(oldDir) && !existsSync(newDir)) {
+    ensureVaultDir(dirname(newDir))
+    renameSync(oldDir, newDir)
+  }
   db.prepare("UPDATE folders SET name = ?, updated_at = datetime('now') WHERE id = ?").run(name, id)
   // The files moved with the directory; refresh file_path in the index.
   reindexWorkspace(db, folder.workspace_id)
@@ -1183,6 +1213,16 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
       reindexDerived(db, { id: note.id, title: note.title, workspace_id: workspaceId }, note.doc)
     })()
     seen.add(note.id)
+  }
+
+  // Materialize a row for EVERY directory on disk, not just those that contain a
+  // note. Without this an empty folder — including one carried along by a folder
+  // move/rename, where the directory relocates but no note exists to re-derive
+  // its new path — would have no row and vanish from the tree (and then be pruned
+  // below as "missing"). ensureFolderRow is find-or-create, so directories that
+  // already got a row from the notes loop above are no-ops here.
+  for (const folderPath of listVaultFolders(vaultDir)) {
+    seenFolders.add(ensureFolderRow(db, workspaceId, folderPath))
   }
 
   // Drop index rows for this workspace whose files no longer exist.
@@ -1340,6 +1380,14 @@ export function deleteIndexRowByPath(db: Database.Database, absPathRaw: string):
 
 export function reindexFile(db: Database.Database, absPathRaw: string): ReindexResult {
   const abs = absPathRaw.normalize('NFC')
+
+  // --- non-indexable guard: an unmapped extension (e.g. a `<name>.csv.meta.json`
+  // table-schema sidecar) is NEVER indexed. Without this, `kindForRow` below
+  // DEFAULTS an unmapped extension to `'note'` and would markdown-parse the file
+  // into a phantom note. This matters because reindexFile is reachable for
+  // arbitrary paths via the vault-restore IPC, which bypasses the watcher's
+  // indexable-file gate. (The walk in note-store already skips these via kindForExt.)
+  if (kindForExt(abs) === null) return { kind: 'ignored' }
 
   // --- DELETE branch: the file is gone. Report it but DON'T prune the row here
   // — the watcher confirms the deletion after a settle window and prunes then,

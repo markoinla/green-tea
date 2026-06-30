@@ -9,6 +9,17 @@ const greenteaApi = {
   // Write-back for an editable artifact (the canvas autosaves through this).
   writeArtifact: (id: string, contents: string): Promise<void> =>
     ipcRenderer.invoke('documents:writeArtifact', id, contents),
+  // Table-schema sidecar (`<name>.csv.meta.json`) for a csv artifact. read returns
+  // null when no sidecar exists (plain table).
+  readTableMeta: (id: string): Promise<string | null> =>
+    ipcRenderer.invoke('documents:readTableMeta', id),
+  writeTableMeta: (id: string, contents: string): Promise<void> =>
+    ipcRenderer.invoke('documents:writeTableMeta', id, contents),
+  // Per-document table view-state (column widths + sort) — opaque JSON in SQLite.
+  readViewState: (id: string): Promise<string | null> =>
+    ipcRenderer.invoke('documents:readViewState', id),
+  writeViewState: (id: string, viewState: string): Promise<void> =>
+    ipcRenderer.invoke('documents:writeViewState', id, viewState),
   workspaces: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('db:workspaces:list'),
     get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:workspaces:get', id),

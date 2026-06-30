@@ -32,3 +32,8 @@ export interface PublishResponse {
   slug: string
   url: string
 }
+
+export interface RegisterResponse {
+  deviceId: string
+  deviceSecret: string
+}

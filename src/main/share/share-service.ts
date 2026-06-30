@@ -5,11 +5,11 @@ import type { Document } from '../database/types'
 import type { PublishRequest, ShareType } from '../../shared/share-contract'
 import { getDocument } from '../vault/documents-service'
 import { getWorkspaceVaultDir } from '../vault/paths'
-import { getSetting } from '../database/repositories/settings'
 import { getShareByDoc, upsertShare, deleteShare } from '../database/repositories/shares'
 import { renderNoteToHtml } from './note-renderer'
 import { walkArtifactAssets } from './asset-walker'
 import { publishToWorker, unpublishFromWorker } from './publish-client'
+import { getDeviceCredential } from './device-credential'
 import { getPluginViewerContribution } from '../plugins/registry'
 
 const DEFAULT_BASE_URL = 'https://share.greentea.app'
@@ -34,16 +34,21 @@ function expiresAtFrom(lastPublish: Date): string {
 }
 
 /**
- * Resolve the worker token + base URL, mirroring the existing settings-with-env
- * fallback pattern. The token lives ONLY in the settings table or the
- * environment — never hardcoded (green-tea is a public repo) and never logged.
+ * Resolve the write credential (publish/unpublish bearer). `SHARE_PUBLISH_TOKEN`
+ * is honored as a dev/self-host/admin override; otherwise the per-device
+ * credential is used, registering this device on first use. Never logged.
  */
-function resolveToken(db: Database.Database): string {
-  return getSetting(db, 'share.publishToken') || process.env.SHARE_PUBLISH_TOKEN || ''
+async function resolveToken(db: Database.Database): Promise<string> {
+  if (process.env.SHARE_PUBLISH_TOKEN) return process.env.SHARE_PUBLISH_TOKEN
+  return getDeviceCredential(db, resolveBaseUrl())
 }
 
-function resolveBaseUrl(db: Database.Database): string {
-  return getSetting(db, 'share.baseUrl') || process.env.SHARE_BASE_URL || DEFAULT_BASE_URL
+/**
+ * The share worker host. Hardcoded (device registration is automatic), with an
+ * env override for dev/self-host. No longer user-configurable.
+ */
+function resolveBaseUrl(): string {
+  return process.env.SHARE_BASE_URL || DEFAULT_BASE_URL
 }
 
 /**
@@ -151,10 +156,10 @@ export async function publishShare(
   db: Database.Database,
   documentId: string
 ): Promise<{ url: string; slug: string; expiresAt: string }> {
-  const token = resolveToken(db)
+  const token = await resolveToken(db)
   if (!token) throw new Error('Share publish token not configured')
   const doc = loadShareableDoc(db, documentId)
-  return pushToWorker(db, doc, token, resolveBaseUrl(db))
+  return pushToWorker(db, doc, token, resolveBaseUrl())
 }
 
 /**
@@ -197,7 +202,7 @@ export async function publishCanvasShare(
   documentId: string,
   entryHtml: string
 ): Promise<{ url: string; slug: string; expiresAt: string }> {
-  const token = resolveToken(db)
+  const token = await resolveToken(db)
   if (!token) throw new Error('Share publish token not configured')
   const doc = getDocument(db, documentId)
   if (!doc) throw new Error('Document not found')
@@ -212,19 +217,19 @@ export async function publishCanvasShare(
     assets: [],
     slug: prevSlug
   }
-  return recordAndPush(db, doc, req, token, resolveBaseUrl(db))
+  return recordAndPush(db, doc, req, token, resolveBaseUrl())
 }
 
 /** Remove a document's share from the worker and the local index (idempotent). */
 export async function unpublishShare(db: Database.Database, documentId: string): Promise<void> {
-  const token = resolveToken(db)
+  const token = await resolveToken(db)
   if (!token) throw new Error('Share publish token not configured')
   const doc = getDocument(db, documentId)
   if (!doc) throw new Error('Document not found')
   const docKey = computeDocKey(db, doc)
   const existing = getShareByDoc(db, docKey)
   if (!existing) return // not shared — nothing to do
-  await unpublishFromWorker(resolveBaseUrl(db), token, existing.slug)
+  await unpublishFromWorker(resolveBaseUrl(), token, existing.slug)
   deleteShare(db, docKey)
 }
 
@@ -267,7 +272,13 @@ export async function updateSharedVersion(
   db: Database.Database,
   documentId: string
 ): Promise<UpdateShareResult> {
-  const token = resolveToken(db)
+  let token: string
+  try {
+    token = await resolveToken(db)
+  } catch {
+    // Offline / registration failed — a headless agent must never crash here.
+    return { status: 'no-token' }
+  }
   if (!token) return { status: 'no-token' }
 
   const doc = getDocument(db, documentId)
@@ -283,6 +294,6 @@ export async function updateSharedVersion(
 
   if (!getShareByDoc(db, computeDocKey(db, doc))) return { status: 'not-shared' }
 
-  const { url, expiresAt } = await pushToWorker(db, doc, token, resolveBaseUrl(db))
+  const { url, expiresAt } = await pushToWorker(db, doc, token, resolveBaseUrl())
   return { status: 'updated', url, expiresAt }
 }

@@ -11,6 +11,7 @@ import {
   type ChatSlashCommandItem
 } from './chat-slash-commands'
 import { renderChatSlashSuggestion } from './ChatSlashCommandList'
+import { positionPopup } from './popup-position'
 import { useSkills } from '@renderer/hooks/useSkills'
 import { LARGE_PASTE_THRESHOLD } from './chat-input-constants'
 import { isImageMimeType, type RichTextNode, walkRichText } from './chat-input-utils'
@@ -105,20 +106,17 @@ export function useChatInputEditor({
                 document.body.appendChild(popup)
                 popup.appendChild(component.element)
 
-                const rect = props.clientRect?.()
-                if (rect && popup) {
-                  popup.style.left = `${rect.left}px`
-                  popup.style.top = `${rect.top - popup.offsetHeight}px`
-                }
+                // Defer to next frame so the popup has laid out before measuring.
+                requestAnimationFrame(() => {
+                  const rect = props.clientRect?.()
+                  if (rect && popup) positionPopup(popup, rect)
+                })
               },
               onUpdate: (props) => {
                 component?.updateProps(props)
 
                 const rect = props.clientRect?.()
-                if (rect && popup) {
-                  popup.style.left = `${rect.left}px`
-                  popup.style.top = `${rect.top - popup.offsetHeight}px`
-                }
+                if (rect && popup) positionPopup(popup, rect)
               },
               onKeyDown: (props) => {
                 if (props.event.key === 'Escape') {

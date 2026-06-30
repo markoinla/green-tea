@@ -22,7 +22,13 @@ import {
 import { FolderMenuItem } from './FolderMenuItem'
 import { DocumentMenuItem } from './DocumentMenuItem'
 import { buildFolderTree } from './folderTree'
-import { DROP_TYPE_ROOT, isDocumentDragData, isFolderDropData, isRootDropData } from './dnd'
+import {
+  DROP_TYPE_ROOT,
+  isDocumentDragData,
+  isFolderDragData,
+  isFolderDropData,
+  isRootDropData
+} from './dnd'
 import {
   creatablePluginKinds,
   getPluginViewersVersion,
@@ -60,6 +66,8 @@ interface NotesListProps {
   onNewSubfolder: (folderId: string) => void
   /** Move a document into a folder (id) or out to the root (null). */
   onMoveDocument: (docId: string, folderId: string | null) => void
+  /** Nest a folder into another folder (id) or lift it out to the root (null). */
+  onMoveFolder: (folderId: string, destFolderId: string | null) => void
   /** Rebuild the index from disk (manual reconcile of external changes). */
   onRefresh: () => void
 }
@@ -80,8 +88,14 @@ function RootDropZone({ children }: { children: React.ReactNode }) {
     return combine(
       dropTargetForElements({
         element: el,
-        // Only documents that aren't already at root.
-        canDrop: ({ source }) => isDocumentDragData(source.data) && source.data.folderId !== null,
+        // A document not already at root, or a nested folder being lifted out to
+        // the top level (a root folder has no '/' in its path).
+        canDrop: ({ source }) => {
+          const data = source.data
+          if (isDocumentDragData(data)) return data.folderId !== null
+          if (isFolderDragData(data)) return data.path.includes('/')
+          return false
+        },
         getData: () => ({ type: DROP_TYPE_ROOT }),
         onDragEnter: () => setIsDraggedOver(true),
         onDragLeave: () => setIsDraggedOver(false),
@@ -123,6 +137,7 @@ export function NotesList({
   onNewTableInFolder,
   onNewSubfolder,
   onMoveDocument,
+  onMoveFolder,
   onRefresh
 }: NotesListProps) {
   // Re-read the plugin-viewer store on change so the data-driven "New X" items
@@ -156,24 +171,30 @@ export function NotesList({
 
   // A single global monitor performs the move on drop, reading the innermost
   // drop target. Centralizing it (rather than per-target onDrop) avoids
-  // double-handling and keeps the move + no-op guard in one place.
+  // double-handling and keeps the move + no-op guard in one place. Handles both
+  // a dragged document and a dragged folder; the drop targets and their
+  // canDrop guards (here and on each folder) keep cycles/no-ops out.
   useEffect(() => {
     return monitorForElements({
-      canMonitor: ({ source }) => isDocumentDragData(source.data),
+      canMonitor: ({ source }) => isDocumentDragData(source.data) || isFolderDragData(source.data),
       onDrop: ({ source, location }) => {
         const target = location.current.dropTargets[0]
         if (!target) return
-        const src = source.data
-        if (!isDocumentDragData(src)) return
         let destFolderId: string | null
         if (isFolderDropData(target.data)) destFolderId = target.data.folderId
         else if (isRootDropData(target.data)) destFolderId = null
         else return
-        if (src.folderId === destFolderId) return // no-op
-        onMoveDocument(src.docId, destFolderId)
+        const src = source.data
+        if (isDocumentDragData(src)) {
+          if (src.folderId === destFolderId) return // no-op
+          onMoveDocument(src.docId, destFolderId)
+        } else if (isFolderDragData(src)) {
+          if (src.folderId === destFolderId) return // can't drop onto itself as a target
+          onMoveFolder(src.folderId, destFolderId)
+        }
       }
     })
-  }, [onMoveDocument])
+  }, [onMoveDocument, onMoveFolder])
 
   return (
     <ContextMenu>

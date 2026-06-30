@@ -105,6 +105,10 @@ type UpdateStatus =
 interface GreenteaApi {
   readArtifactText(id: string): Promise<string>
   writeArtifact(id: string, contents: string): Promise<void>
+  readTableMeta(id: string): Promise<string | null>
+  writeTableMeta(id: string, contents: string): Promise<void>
+  readViewState(id: string): Promise<string | null>
+  writeViewState(id: string, viewState: string): Promise<void>
   workspaces: {
     list(): Promise<Workspace[]>
     get(id: string): Promise<Workspace | undefined>

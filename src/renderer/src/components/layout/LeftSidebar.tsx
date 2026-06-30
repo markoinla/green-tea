@@ -108,6 +108,37 @@ export function LeftSidebar({
     [updateDocument]
   )
 
+  // Nest a folder into `destFolderId` (or lift it out to the root when null).
+  // Folder names are slash-paths mirroring on-disk subdirectories, so a move is a
+  // re-prefix of the name: the backend (`renameFolder`) turns it into a directory
+  // move + reindex, carrying every note and subfolder along. Guards mirror the
+  // drag-layer's: no self/descendant cycles, no no-ops, no name collisions.
+  const handleMoveFolder = useCallback(
+    async (folderId: string, destFolderId: string | null) => {
+      const folder = folders.find((f) => f.id === folderId)
+      if (!folder) return
+      const destFolder = destFolderId ? folders.find((f) => f.id === destFolderId) : null
+      if (destFolderId && !destFolder) return
+      const destPath = destFolder ? destFolder.name : ''
+      // Can't move a folder into itself or one of its own descendants.
+      if (destPath === folder.name || destPath.startsWith(folder.name + '/')) return
+      const slash = folder.name.lastIndexOf('/')
+      const lastSegment = slash === -1 ? folder.name : folder.name.slice(slash + 1)
+      const newName = destPath ? `${destPath}/${lastSegment}` : lastSegment
+      if (newName === folder.name) return // already there
+      if (folders.some((f) => f.id !== folderId && f.name === newName)) {
+        toast.error('A folder with that name already exists here')
+        return
+      }
+      try {
+        await updateFolder(folderId, { name: newName })
+      } catch {
+        toast.error('Failed to move folder')
+      }
+    },
+    [folders, updateFolder]
+  )
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -304,87 +335,88 @@ export function LeftSidebar({
 
       {/* Full content — hidden in icon mode, shown when expanded or hover-expanded */}
       <div className="flex flex-col min-h-0 flex-1 w-full group-data-[collapsible=icon]:hidden">
-      <SidebarHeader className="px-3 py-2">
-        <WorkspaceSwitcher
-          selectedWorkspaceId={selectedWorkspaceId}
-          onSelectWorkspace={onSelectWorkspace}
+        <SidebarHeader className="px-3 py-2">
+          <WorkspaceSwitcher
+            selectedWorkspaceId={selectedWorkspaceId}
+            onSelectWorkspace={onSelectWorkspace}
+            onNewDocument={handleNewDocument}
+            onNewCanvas={handleNewCanvas}
+            onNewTable={handleNewTable}
+            onNewArtifactKind={handleNewArtifactKind}
+            onNewFolder={handleNewFolder}
+          />
+          <button
+            type="button"
+            onClick={() => setCommandOpen(true)}
+            className="relative w-full h-8 rounded-md bg-sidebar-accent/50 pl-8 pr-3 text-xs text-muted-foreground text-left hover:bg-sidebar-accent hover:text-foreground transition-all group-data-[collapsible=icon]:hidden ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5" />
+            <span>Search</span>
+            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
+              <span className="text-xs">&#8984;</span>K
+            </kbd>
+          </button>
+          <CommandMenu
+            open={commandOpen}
+            onOpenChange={setCommandOpen}
+            selectedWorkspaceId={selectedWorkspaceId}
+            onSelectDoc={onSelectDoc}
+            onSelectWorkspace={onSelectWorkspace}
+          />
+          {filterActive && filter && (
+            <div className="flex items-center gap-1.5 rounded-md bg-sidebar-accent/60 px-2 py-1 text-xs group-data-[collapsible=icon]:hidden">
+              <span className="text-muted-foreground shrink-0">Filter:</span>
+              <span className="truncate font-medium" title={`${filter.key}: ${filter.value}`}>
+                {filter.key}: {filter.value}
+              </span>
+              <button
+                type="button"
+                aria-label="Clear filter"
+                className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={clearFilter}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </SidebarHeader>
+
+        <NotesList
+          documents={visibleDocuments}
+          folders={folders}
+          loading={loading}
+          selectedDocId={selectedDocId}
+          onSelectDoc={onSelectDoc}
           onNewDocument={handleNewDocument}
           onNewCanvas={handleNewCanvas}
           onNewTable={handleNewTable}
           onNewArtifactKind={handleNewArtifactKind}
           onNewFolder={handleNewFolder}
+          onRenameDoc={handleRenameDoc}
+          onDeleteDoc={handleDeleteDoc}
+          onDuplicateDoc={handleDuplicateDoc}
+          onRenameFolder={handleRenameFolder}
+          onDeleteFolder={handleDeleteFolder}
+          onToggleFolder={handleToggleFolder}
+          onNewDocInFolder={handleNewDocInFolder}
+          onNewCanvasInFolder={handleNewCanvasInFolder}
+          onNewTableInFolder={handleNewTableInFolder}
+          onNewSubfolder={handleNewSubfolder}
+          onMoveDocument={handleMoveDocument}
+          onMoveFolder={handleMoveFolder}
+          onRefresh={handleRefresh}
         />
-        <button
-          type="button"
-          onClick={() => setCommandOpen(true)}
-          className="relative w-full h-8 rounded-md bg-sidebar-accent/50 pl-8 pr-3 text-xs text-muted-foreground text-left hover:bg-sidebar-accent hover:text-foreground transition-all group-data-[collapsible=icon]:hidden ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        >
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5" />
-          <span>Search</span>
-          <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
-            <span className="text-xs">&#8984;</span>K
-          </kbd>
-        </button>
-        <CommandMenu
-          open={commandOpen}
-          onOpenChange={setCommandOpen}
-          selectedWorkspaceId={selectedWorkspaceId}
-          onSelectDoc={onSelectDoc}
-          onSelectWorkspace={onSelectWorkspace}
+
+        <WorkspaceFilesSection
+          files={workspaceFiles}
+          addFiles={addFiles}
+          pickAndAddFiles={pickAndAddFiles}
+          pickAndAddFolder={pickAndAddFolder}
+          removeFile={removeFile}
+          onOpenInApp={(file) => onOpenFile(file.id)}
         />
-        {filterActive && filter && (
-          <div className="flex items-center gap-1.5 rounded-md bg-sidebar-accent/60 px-2 py-1 text-xs group-data-[collapsible=icon]:hidden">
-            <span className="text-muted-foreground shrink-0">Filter:</span>
-            <span className="truncate font-medium" title={`${filter.key}: ${filter.value}`}>
-              {filter.key}: {filter.value}
-            </span>
-            <button
-              type="button"
-              aria-label="Clear filter"
-              className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
-              onClick={clearFilter}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
-      </SidebarHeader>
 
-      <NotesList
-        documents={visibleDocuments}
-        folders={folders}
-        loading={loading}
-        selectedDocId={selectedDocId}
-        onSelectDoc={onSelectDoc}
-        onNewDocument={handleNewDocument}
-        onNewCanvas={handleNewCanvas}
-        onNewTable={handleNewTable}
-        onNewArtifactKind={handleNewArtifactKind}
-        onNewFolder={handleNewFolder}
-        onRenameDoc={handleRenameDoc}
-        onDeleteDoc={handleDeleteDoc}
-        onDuplicateDoc={handleDuplicateDoc}
-        onRenameFolder={handleRenameFolder}
-        onDeleteFolder={handleDeleteFolder}
-        onToggleFolder={handleToggleFolder}
-        onNewDocInFolder={handleNewDocInFolder}
-        onNewCanvasInFolder={handleNewCanvasInFolder}
-        onNewTableInFolder={handleNewTableInFolder}
-        onNewSubfolder={handleNewSubfolder}
-        onMoveDocument={handleMoveDocument}
-        onRefresh={handleRefresh}
-      />
-
-      <WorkspaceFilesSection
-        files={workspaceFiles}
-        addFiles={addFiles}
-        pickAndAddFiles={pickAndAddFiles}
-        pickAndAddFolder={pickAndAddFolder}
-        removeFile={removeFile}
-        onOpenInApp={(file) => onOpenFile(file.id)}
-      />
-
-      <SidebarFooterSection selectedWorkspaceId={selectedWorkspaceId} />
+        <SidebarFooterSection selectedWorkspaceId={selectedWorkspaceId} />
       </div>
 
       <ConfirmDeleteDialog

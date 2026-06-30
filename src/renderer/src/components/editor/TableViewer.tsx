@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Table2 } from 'lucide-react'
+import { Check, Plus, Table2 } from 'lucide-react'
 import Papa from 'papaparse'
 import type {
   CellClickedEventArgs,
@@ -34,6 +34,9 @@ import { registerFlusher } from '../../hooks/useAutosave'
 type GlideModule = typeof import('@glideapps/glide-data-grid')
 
 const SAVE_DEBOUNCE_MS = 800
+// View-state (widths/sort) is cheaper than the CSV write and changes in bursts
+// (resize drag), so it gets its own short debounce.
+const VIEWSTATE_DEBOUNCE_MS = 500
 // While the user is mid-interaction (pointer down) or has just edited, an
 // external reload is deferred so it can't yank the grid out from under them.
 const INTERACTION_QUIET_MS = 1200
@@ -82,6 +85,13 @@ const DARK_THEME: Partial<Theme> = {
   linkColor: '#6b9fff'
 }
 
+// Light theme overrides only what Glide's defaults don't cover for us — namely a
+// link color for `uri` columns (Glide's default light theme has none, so a uri
+// cell would render indistinguishable from text).
+const LIGHT_THEME: Partial<Theme> = {
+  linkColor: '#2563eb'
+}
+
 interface ParsedTable {
   header: string[]
   rows: string[][]
@@ -89,6 +99,211 @@ interface ParsedTable {
   newline: string
   /** Whether the source file ended with a terminating newline (round-tripped). */
   trailingNewline: boolean
+}
+
+// --- column types (schema sidecar) -----------------------------------------
+// Types are a DISPLAY + sort lens only; the .csv on disk stays plain text. The
+// schema lives in a sibling `<name>.csv.meta.json`, read/written via the
+// readTableMeta/writeTableMeta IPCs. `text` is the default and is never written.
+type ColumnType = 'text' | 'number' | 'boolean' | 'uri'
+const COLUMN_TYPES: ColumnType[] = ['text', 'number', 'boolean', 'uri']
+const COLUMN_TYPE_LABELS: Record<ColumnType, string> = {
+  text: 'Text',
+  number: 'Number',
+  boolean: 'Boolean',
+  uri: 'URL'
+}
+
+interface TableMeta {
+  version: number
+  columns: { name: string; type: ColumnType }[]
+}
+
+function isColumnType(v: unknown): v is ColumnType {
+  return typeof v === 'string' && (COLUMN_TYPES as string[]).includes(v)
+}
+
+/** Parse a sidecar JSON string (null/garbage → null, safe-degrade to all-text). */
+function parseMeta(json: string | null): TableMeta | null {
+  if (!json) return null
+  try {
+    const parsed = JSON.parse(json) as unknown
+    if (!parsed || typeof parsed !== 'object') return null
+    const cols = (parsed as { columns?: unknown }).columns
+    if (!Array.isArray(cols)) return null
+    const columns = cols
+      .filter((c): c is { name: string; type: ColumnType } => {
+        if (!c || typeof c !== 'object') return false
+        const name = (c as { name?: unknown }).name
+        const type = (c as { type?: unknown }).type
+        return typeof name === 'string' && isColumnType(type)
+      })
+      .map((c) => ({ name: c.name, type: c.type }))
+    return { version: 1, columns }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve per-column types against the live header by NAME-ANCHORING: match each
+ * sidecar entry to the CSV header by name. Anything unmatched — including a header
+ * that is blank, duplicated, or renamed/reordered by an agent — degrades to
+ * `text`. This is the safe failure mode: lose a type rather than mis-apply it to
+ * the wrong column.
+ *
+ * Resolution is name-ONLY (no positional fallback): the sidecar omits text
+ * columns (see buildMeta), so `meta.columns` is sparse and NOT positionally
+ * aligned with the header — indexing it by header position would mistype columns.
+ * Name is also the only anchor an agent-authored `{name,type}` sidecar carries.
+ * Always returns an array aligned 1:1 with `header`.
+ */
+function resolveColumnTypes(header: string[], meta: TableMeta | null): ColumnType[] {
+  if (!meta || meta.columns.length === 0) return header.map(() => 'text')
+  const byName = new Map<string, ColumnType>()
+  const duplicate = new Set<string>()
+  for (const c of meta.columns) {
+    if (!c.name) continue
+    if (byName.has(c.name)) duplicate.add(c.name)
+    else byName.set(c.name, c.type)
+  }
+  return header.map((h) =>
+    h && byName.has(h) && !duplicate.has(h) ? (byName.get(h) as ColumnType) : 'text'
+  )
+}
+
+/** Serialize the current header + types to a sidecar (text columns omitted). */
+function buildMeta(header: string[], types: ColumnType[]): TableMeta {
+  const columns = header
+    .map((name, i) => ({ name, type: types[i] ?? ('text' as ColumnType) }))
+    .filter((c) => c.type !== 'text')
+  return { version: 1, columns }
+}
+
+// --- view-state (DB, not on disk) ------------------------------------------
+// Local UI state: column widths + sort. Both keyed by column NAME (like the schema
+// sidecar) so they track a column across reorders; unmatched names fall back.
+// Stored in SQLite via read/writeViewState.
+type SortDir = 'asc' | 'desc'
+interface SortState {
+  column: string
+  dir: SortDir
+}
+interface ViewState {
+  version: number
+  widths?: Record<string, number>
+  sort?: SortState | null
+}
+
+function parseViewState(json: string | null): ViewState | null {
+  if (!json) return null
+  try {
+    const parsed = JSON.parse(json) as unknown
+    if (!parsed || typeof parsed !== 'object') return null
+    const widthsRaw = (parsed as { widths?: unknown }).widths
+    const widths: Record<string, number> = {}
+    if (widthsRaw && typeof widthsRaw === 'object') {
+      for (const [k, v] of Object.entries(widthsRaw as Record<string, unknown>)) {
+        if (typeof v === 'number' && Number.isFinite(v)) widths[k] = v
+      }
+    }
+    const sortRaw = (parsed as { sort?: unknown }).sort
+    let sort: SortState | null = null
+    if (sortRaw && typeof sortRaw === 'object') {
+      const column = (sortRaw as { column?: unknown }).column
+      const dir = (sortRaw as { dir?: unknown }).dir
+      if (typeof column === 'string' && (dir === 'asc' || dir === 'desc')) sort = { column, dir }
+    }
+    return { version: 1, widths, sort }
+  } catch {
+    return null
+  }
+}
+
+/** Map saved name-keyed widths onto the live header (unmatched → default). */
+function widthsFromViewState(header: string[], vs: ViewState | null): number[] | undefined {
+  if (!vs?.widths) return undefined
+  return header.map((h) => {
+    const w = h ? vs.widths?.[h] : undefined
+    return typeof w === 'number' ? w : DEFAULT_COL_WIDTH
+  })
+}
+
+// A type-aware comparator over the RAW cell strings of one column. Numbers compare
+// numerically with non-numeric/blank values sorted last (in ascending order);
+// booleans by truthiness with blanks last; text/uri lexicographically. The result
+// is multiplied by the direction in computeViewToData; ties preserve input order.
+function compareCells(a: string, b: string, type: ColumnType): number {
+  if (type === 'number') {
+    const na = parseFloat(a)
+    const nb = parseFloat(b)
+    const aNan = Number.isNaN(na)
+    const bNan = Number.isNaN(nb)
+    if (aNan && bNan) return 0
+    if (aNan) return 1 // non-numeric sorts after numeric (ascending)
+    if (bNan) return -1
+    // Compare via </> rather than (na - nb): subtraction yields NaN for two equal
+    // infinities (Infinity - Infinity), which would break the total order.
+    return na === nb ? 0 : na < nb ? -1 : 1
+  }
+  if (type === 'boolean') {
+    const rank = (v: string): number => {
+      const p = parseBool(v)
+      return p === undefined ? 2 : p ? 1 : 0 // false < true < blank
+    }
+    return rank(a) - rank(b)
+  }
+  return a.localeCompare(b)
+}
+
+/**
+ * Build the display→data row index from the current sort. Returns identity when no
+ * sort (or the sort column is gone). STABLE: ties keep their original data order,
+ * unaffected by direction.
+ */
+function computeViewToData(
+  rows: string[][],
+  header: string[],
+  colTypes: ColumnType[],
+  sort: SortState | null
+): number[] {
+  const identity = rows.map((_, i) => i)
+  if (!sort) return identity
+  const col = header.indexOf(sort.column)
+  if (col < 0) return identity
+  const type = colTypes[col] ?? 'text'
+  const dir = sort.dir === 'asc' ? 1 : -1
+  return identity
+    .map((i) => ({ i, v: rows[i]?.[col] ?? '' }))
+    .sort((a, b) => {
+      const c = compareCells(a.v, b.v, type) * dir
+      return c !== 0 ? c : a.i - b.i
+    })
+    .map((x) => x.i)
+}
+
+// Tokens read as `true` for a boolean column (case-insensitive). Anything else
+// non-empty reads as `false`; empty stays empty (renders no checkbox).
+const BOOL_TRUE = new Set(['true', 't', 'yes', 'y', '1', 'x', '✓', 'checked'])
+function parseBool(value: string): boolean | undefined {
+  const v = value.trim().toLowerCase()
+  if (v === '') return undefined
+  return BOOL_TRUE.has(v)
+}
+
+/**
+ * Convert an edited Glide cell back to the string stored in the CSV. Covers the
+ * kinds our typed columns can emit (Text, Uri, Boolean — and Number defensively).
+ * A boolean toggle writes a canonical token; everything else is stored verbatim.
+ * Returns null for a kind we don't handle (the edit is then ignored).
+ */
+function editableToText(g: GlideModule, value: EditableGridCell): string | null {
+  if (value.kind === g.GridCellKind.Text || value.kind === g.GridCellKind.Uri) return value.data
+  if (value.kind === g.GridCellKind.Number)
+    return value.data === undefined ? '' : String(value.data)
+  if (value.kind === g.GridCellKind.Boolean)
+    return value.data === true ? 'true' : value.data === false ? 'false' : ''
+  return null
 }
 
 /**
@@ -138,8 +353,25 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   const [header, setHeader] = useState<string[]>([])
   const [rows, setRows] = useState<string[][]>([])
   const [widths, setWidths] = useState<number[]>([])
+  const [colTypes, setColTypes] = useState<ColumnType[]>([])
   const headerRef = useRef<string[]>([])
   const rowsRef = useRef<string[][]>([])
+  // Types live in a ref too so getCellContent reads the latest synchronously.
+  const colTypesRef = useRef<ColumnType[]>([])
+  // Widths mirrored into a ref so view-state can be serialized synchronously from
+  // anywhere (resize/structural ops) without threading state through.
+  const widthsRef = useRef<number[]>([])
+  // Sort is a VIEW-ONLY overlay: the stored CSV order never changes. `sort` (state)
+  // drives header indicators + repaint; sortRef mirrors it for synchronous reads.
+  const [sort, setSort] = useState<SortState | null>(null)
+  const sortRef = useRef<SortState | null>(null)
+  // display-row → data-row map. Identity when unsorted. getCellContent and every
+  // row-index consumer route through this; it's rebuilt on sort/structural change
+  // (NOT on a value edit, so rows don't jump while you type).
+  const viewToDataRef = useRef<number[]>([])
+  // Whether this table has ever had a sidecar (loaded or written). Gates whether
+  // an all-text schema is persisted — we never create a sidecar for a plain table.
+  const hadMetaRef = useRef(false)
 
   const glideRef = useRef<GlideModule | null>(null)
   // CSV dialect captured on load and fed back into unparse so a ';'/tab file
@@ -162,6 +394,10 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   const lastInteractionRef = useRef(0)
   const pointerDownRef = useRef(false)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Debounced view-state (widths/sort) persistence + last-written baseline to skip
+  // redundant writes.
+  const viewStateTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const viewStateSavedRef = useRef<string | null>(null)
 
   // Lightweight right-click menu (Glide has no built-in row/column ops menu).
   const [menu, setMenu] = useState<{
@@ -189,6 +425,60 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     return trailingNewlineRef.current ? csv + newlineRef.current : csv
   }, [])
 
+  // --- view-state (widths/sort) persistence ---------------------------------
+  // Serialize widths keyed by column name (so they track a renamed/reordered
+  // column), skipping empty-named columns.
+  const serializeViewState = useCallback((): string => {
+    const header = headerRef.current
+    const w = widthsRef.current
+    const widths: Record<string, number> = {}
+    header.forEach((h, i) => {
+      if (h) widths[h] = w[i] ?? DEFAULT_COL_WIDTH
+    })
+    const vs: ViewState = { version: 1, widths, sort: sortRef.current }
+    return JSON.stringify(vs)
+  }, [])
+
+  // Rebuild the display→data index from the current sort. Call on sort change and
+  // structural changes (row/column add/delete, reload) — NOT on value edits.
+  const rebuildView = useCallback((rows: string[][]): void => {
+    viewToDataRef.current = computeViewToData(
+      rows,
+      headerRef.current,
+      colTypesRef.current,
+      sortRef.current
+    )
+  }, [])
+
+  // Translate a Glide display row to the underlying data row. Falls back to identity
+  // for the trailing append affordance / an empty index.
+  const toDataRow = useCallback((displayRow: number): number => {
+    const mapped = viewToDataRef.current[displayRow]
+    return mapped === undefined ? displayRow : mapped
+  }, [])
+
+  const flushViewState = useCallback((): Promise<void> => {
+    if (viewStateTimer.current) {
+      clearTimeout(viewStateTimer.current)
+      viewStateTimer.current = null
+    }
+    const json = serializeViewState()
+    if (json === viewStateSavedRef.current) return Promise.resolve()
+    // Return the write promise so the registered flusher (and thus the quit
+    // handshake's flushAll) awaits it — matching the CSV write's durability.
+    return window.api.writeViewState(gtFileId, json).then(
+      () => {
+        viewStateSavedRef.current = json
+      },
+      (err: unknown) => console.error('[table] view-state save failed', err)
+    )
+  }, [gtFileId, serializeViewState])
+
+  const scheduleViewStateSave = useCallback((): void => {
+    if (viewStateTimer.current) clearTimeout(viewStateTimer.current)
+    viewStateTimer.current = setTimeout(() => flushViewState(), VIEWSTATE_DEBOUNCE_MS)
+  }, [flushViewState])
+
   // --- lazy-load Glide (component + CSS) ------------------------------------
   useEffect(() => {
     let cancelled = false
@@ -213,7 +503,13 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
 
   // --- adopt a parsed table into refs + state -------------------------------
   const adopt = useCallback(
-    (text: string): void => {
+    (
+      text: string,
+      metaJson: string | null,
+      persistedWidths?: number[],
+      // undefined = keep current sort (external reload); null/SortState = apply (load)
+      persistedSort?: SortState | null
+    ): void => {
       const parsed = parseTable(text)
       headerRef.current = parsed.header
       rowsRef.current = parsed.rows
@@ -222,19 +518,43 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       trailingNewlineRef.current = parsed.trailingNewline
       setHeader(parsed.header)
       setRows(parsed.rows)
-      // Column widths are view-only state (never serialized). Preserve the user's
-      // sizing across an external reload when the column count is unchanged; only
-      // (re)initialize widths when the shape changes (incl. first load).
-      setWidths((prev) =>
-        prev.length === parsed.header.length
-          ? prev
-          : parsed.header.map((_, i) => prev[i] ?? DEFAULT_COL_WIDTH)
-      )
+      // Resolve column types name-anchored against the freshly parsed header, so
+      // an agent rewrite that changed columns re-aligns (or safe-degrades to text).
+      const meta = parseMeta(metaJson)
+      if (meta) hadMetaRef.current = true
+      const types = resolveColumnTypes(parsed.header, meta)
+      colTypesRef.current = types
+      setColTypes(types)
+      // Column widths: on initial load, seed from the persisted view-state (passed
+      // in, already mapped to the live header) — computed here rather than via a
+      // separate setWidths so it can't be clobbered by a default-init race. On an
+      // external reload (no persistedWidths), preserve the user's current sizing
+      // when the column count is unchanged, else (re)initialize to defaults.
+      const prevW = widthsRef.current
+      const nextWidths =
+        persistedWidths && persistedWidths.length === parsed.header.length
+          ? persistedWidths
+          : prevW.length === parsed.header.length
+            ? prevW
+            : parsed.header.map((_, i) => prevW[i] ?? DEFAULT_COL_WIDTH)
+      widthsRef.current = nextWidths
+      setWidths(nextWidths)
+      // Sort: apply the persisted sort on initial load; on an external reload
+      // (persistedSort === undefined) keep the user's current sort. Then rebuild the
+      // display→data index against the freshly parsed rows either way.
+      if (persistedSort !== undefined) {
+        sortRef.current = persistedSort
+        setSort(persistedSort)
+      }
+      rebuildView(parsed.rows)
+      // Baseline the saved view-state to what we just loaded so a load never
+      // triggers a redundant write-back.
+      viewStateSavedRef.current = serializeViewState()
       // Adopt the reserialized form as the saved baseline so a freshly loaded
       // table isn't immediately written back.
       lastSavedRef.current = serialize()
     },
-    [serialize]
+    [serialize, serializeViewState, rebuildView]
   )
 
   // --- load the table from disk --------------------------------------------
@@ -242,11 +562,20 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     let cancelled = false
     setStatus('loading')
     setError(null)
-    window.api
-      .readArtifactText(gtFileId)
-      .then((text) => {
+    // Read the CSV, its schema sidecar, and the DB view-state together so types +
+    // widths are resolved against the same header the data is parsed from. Both
+    // sidecar reads return null when absent (plain table / never sized) — not errors.
+    Promise.all([
+      window.api.readArtifactText(gtFileId),
+      window.api.readTableMeta(gtFileId),
+      window.api.readViewState(gtFileId)
+    ])
+      .then(([text, metaJson, viewStateJson]) => {
         if (cancelled) return
-        adopt(text)
+        const parsed = parseTable(text)
+        const vs = parseViewState(viewStateJson)
+        const widths = widthsFromViewState(parsed.header, vs)
+        adopt(text, metaJson, widths, vs?.sort ?? null)
         setStatus('ready')
       })
       .catch((err: unknown) => {
@@ -298,33 +627,83 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   // -render) and arm the debounced save.
   const commit = useCallback(
     (nextHeader: string[], nextRows: string[][], nextWidths?: number[]): void => {
+      // Rebuild the sort view when the row COUNT changes (add/delete) so the index
+      // stays valid; a pure value edit keeps the existing order (rows don't jump
+      // mid-edit). Done before setRows so getCellContent reads a consistent map.
+      const countChanged = nextRows.length !== rowsRef.current.length
       headerRef.current = nextHeader
       rowsRef.current = nextRows
+      if (countChanged) rebuildView(nextRows)
       setHeader(nextHeader)
       setRows(nextRows)
-      if (nextWidths) setWidths(nextWidths)
+      if (nextWidths) {
+        widthsRef.current = nextWidths
+        setWidths(nextWidths)
+      }
       scheduleSave()
     },
-    [scheduleSave]
+    [scheduleSave, rebuildView]
+  )
+
+  // Persist the schema sidecar. Called only on type/column changes (NOT cell
+  // edits), so it never churns. Skipped entirely for a plain table that has never
+  // had a sidecar (don't litter the vault with empty-schema files).
+  const persistMeta = useCallback((): void => {
+    const meta = buildMeta(headerRef.current, colTypesRef.current)
+    if (meta.columns.length === 0 && !hadMetaRef.current) return
+    hadMetaRef.current = true
+    const json = JSON.stringify(meta, null, 2)
+    window.api.writeTableMeta(gtFileId, json).catch((err: unknown) => {
+      console.error('[table] schema write failed', err)
+    })
+  }, [gtFileId])
+
+  // Set a column's type via the header menu: update the aligned types array (ref +
+  // state for repaint) and persist the sidecar. The .csv bytes are untouched.
+  const setColumnType = useCallback(
+    (col: number, type: ColumnType): void => {
+      const next = colTypesRef.current.slice()
+      while (next.length < headerRef.current.length) next.push('text')
+      next[col] = type
+      colTypesRef.current = next
+      // The sort comparator is type-dependent, so retyping the sorted column must
+      // re-sort (e.g. text "9","10" → number reorders to "9","10"). Rebuild before
+      // the re-render so the grid paints the corrected order.
+      rebuildView(rowsRef.current)
+      setColTypes(next)
+      persistMeta()
+    },
+    [persistMeta, rebuildView]
   )
 
   // Flush on unmount, window hide, and visibility-hidden; register into the
   // global flush registry so the quit handshake awaits this write too.
   useEffect(() => {
-    const onHide = (): void => void flush()
+    const onHide = (): void => {
+      void flush()
+      void flushViewState()
+    }
     const onVisibility = (): void => {
-      if (document.visibilityState === 'hidden') void flush()
+      if (document.visibilityState === 'hidden') {
+        void flush()
+        void flushViewState()
+      }
     }
     window.addEventListener('pagehide', onHide)
     document.addEventListener('visibilitychange', onVisibility)
+    // Register BOTH writes (distinct ids) so the quit handshake's flushAll awaits
+    // the view-state write too, not just the CSV write.
     const unregister = registerFlusher(gtFileId, flush)
+    const unregisterViewState = registerFlusher(`${gtFileId}:viewstate`, flushViewState)
     return () => {
       window.removeEventListener('pagehide', onHide)
       document.removeEventListener('visibilitychange', onVisibility)
       unregister()
+      unregisterViewState()
       void flush()
+      void flushViewState()
     }
-  }, [gtFileId, flush])
+  }, [gtFileId, flush, flushViewState])
 
   // --- external reload: re-read and replace, deferred while interacting -----
   const applyExternal = useCallback((): void => {
@@ -337,12 +716,14 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       reloadTimer.current = setTimeout(applyExternal, INTERACTION_QUIET_MS)
       return
     }
-    window.api
-      .readArtifactText(gtFileId)
-      .then((text) => {
+    // Re-read CSV AND sidecar: an agent rewrite may have changed both, and types
+    // must re-anchor against the new header. (Without the sidecar re-read here,
+    // the agent's write-sidecar-first ordering would never reflect in the grid.)
+    Promise.all([window.api.readArtifactText(gtFileId), window.api.readTableMeta(gtFileId)])
+      .then(([text, metaJson]) => {
         // Replace the grid wholesale; adopt() resets the saved baseline so the
         // just-reloaded data isn't written straight back.
-        adopt(text)
+        adopt(text, metaJson)
       })
       .catch((err: unknown) => {
         console.error('[table] external reload failed', err)
@@ -364,40 +745,81 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
 
   // --- grid data plumbing ---------------------------------------------------
   const columns = useMemo<GridColumn[]>(() => {
-    return header.map((title, i) => ({
-      // Empty header shows a placeholder for DISPLAY only; the real (possibly
-      // empty) header text is what gets serialized on save.
-      title: title === '' ? `Column ${i + 1}` : title,
-      id: String(i),
-      width: widths[i] ?? DEFAULT_COL_WIDTH,
-      hasMenu: true
-    }))
-  }, [header, widths])
+    return header.map((title, i) => {
+      const base = title === '' ? `Column ${i + 1}` : title
+      // Append a sort arrow to the active sort column's header for feedback.
+      const arrow =
+        sort && title !== '' && sort.column === title ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''
+      return {
+        // Empty header shows a placeholder for DISPLAY only; the real (possibly
+        // empty) header text is what gets serialized on save.
+        title: base + arrow,
+        id: String(i),
+        width: widths[i] ?? DEFAULT_COL_WIDTH,
+        hasMenu: true
+      }
+    })
+    // colTypes is an intentional dep: a type change isn't read in this body, but it
+    // must yield a fresh `columns` array so Glide (which memoizes on prop identity)
+    // repaints cells with their new kind. (sort is read, for the arrow.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [header, widths, colTypes, sort])
 
   const getCellContent = useCallback((cell: Item): GridCell => {
     const g = glideRef.current
     const [col, row] = cell
-    const value = rowsRef.current[row]?.[col] ?? ''
+    const dataRow = viewToDataRef.current[row] ?? row
+    const value = rowsRef.current[dataRow]?.[col] ?? ''
+    const type = colTypesRef.current[col] ?? 'text'
+    if (g && type === 'boolean') {
+      // allowOverlay MUST be the literal false for a BooleanCell; it toggles on
+      // click, not via an overlay editor.
+      return {
+        kind: g.GridCellKind.Boolean,
+        data: parseBool(value),
+        allowOverlay: false
+      } as GridCell
+    }
+    if (g && type === 'uri') {
+      return {
+        kind: g.GridCellKind.Uri,
+        data: value,
+        displayData: value,
+        // Uri renders as plain text without hoverEffect; onClickUri opens external
+        // (the click args carry no url, so capture this cell's value).
+        hoverEffect: true,
+        onClickUri: () => {
+          if (value) void window.api.shell.openExternal(value)
+        },
+        allowOverlay: true
+      } as GridCell
+    }
+    // text + number both ride a Text cell — number is stored verbatim and only
+    // right-aligned (no native NumberCell, which would coerce/reformat the value).
     return {
       kind: (g?.GridCellKind.Text ?? 'text') as GridCell['kind'] & 'text',
       data: value,
       displayData: value,
-      allowOverlay: true
+      allowOverlay: true,
+      contentAlign: type === 'number' ? 'right' : undefined
     }
   }, [])
 
   const onCellEdited = useCallback(
     (cell: Item, newValue: EditableGridCell): void => {
       const g = glideRef.current
-      if (!g || newValue.kind !== g.GridCellKind.Text) return
+      if (!g) return
+      const text = editableToText(g, newValue)
+      if (text === null) return
       const [col, row] = cell
+      const dataRow = toDataRow(row)
       const nextRows = rowsRef.current.map((r) => r.slice())
-      if (!nextRows[row]) return
-      nextRows[row][col] = newValue.data
+      if (!nextRows[dataRow]) return
+      nextRows[dataRow][col] = text
       editorOpenRef.current = false
       commit(headerRef.current, nextRows)
     },
-    [commit]
+    [commit, toDataRow]
   )
 
   // Track the overlay editor's open/closed state so an external reload defers
@@ -420,15 +842,17 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       if (!g) return false
       const nextRows = rowsRef.current.map((r) => r.slice())
       for (const { location, value } of newValues) {
-        if (value.kind !== g.GridCellKind.Text) continue
+        const text = editableToText(g, value)
+        if (text === null) continue
         const [col, row] = location
-        if (nextRows[row]) nextRows[row][col] = value.data
+        const dataRow = toDataRow(row)
+        if (nextRows[dataRow]) nextRows[dataRow][col] = text
       }
       editorOpenRef.current = false
       commit(headerRef.current, nextRows)
       return true
     },
-    [commit]
+    [commit, toDataRow]
   )
 
   // Range paste — we own the model, so we apply it (and grow rows to fit) here.
@@ -440,12 +864,18 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       if (width === 0) return false
       const [startCol, startRow] = target
       const nextRows = rowsRef.current.map((r) => r.slice())
-      const needed = startRow + values.length
-      while (nextRows.length < needed) nextRows.push(new Array<string>(width).fill(''))
       values.forEach((rowVals, r) => {
+        // Map each pasted display row to its data row; rows pasted past the last
+        // visible row append to the data end (and re-sort via commit's rebuild).
+        const displayRow = startRow + r
+        let dataRow = viewToDataRef.current[displayRow]
+        if (dataRow === undefined) {
+          dataRow = nextRows.length
+          nextRows.push(new Array<string>(width).fill(''))
+        }
         rowVals.forEach((val, c) => {
           const col = startCol + c
-          if (col < width) nextRows[startRow + r][col] = val
+          if (col < width) nextRows[dataRow][col] = val
         })
       })
       commit(headerRef.current, nextRows)
@@ -466,62 +896,120 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     (selection: GridSelection): GridSelection | boolean => {
       const selectedRows = selection.rows.toArray()
       if (selectedRows.length > 0) {
-        const drop = new Set(selectedRows)
+        // selection rows are DISPLAY indices — map to data indices before dropping.
+        const drop = new Set(selectedRows.map((r) => toDataRow(r)))
         const nextRows = rowsRef.current.filter((_, i) => !drop.has(i))
         commit(headerRef.current, nextRows)
         return false
       }
       return true
     },
-    [commit]
+    [commit, toDataRow]
   )
 
   const onColumnResize = useCallback(
     (_column: GridColumn, newSize: number, colIndex: number): void => {
-      setWidths((prev) => {
-        const next = prev.slice()
-        next[colIndex] = newSize
-        return next
-      })
+      const next = widthsRef.current.slice()
+      next[colIndex] = newSize
+      widthsRef.current = next
+      setWidths(next)
+      scheduleViewStateSave()
     },
-    []
+    [scheduleViewStateSave]
+  )
+
+  // Left-click a header to cycle its sort: none → asc → desc → none. View-only —
+  // the stored CSV order is untouched; only the display→data index changes.
+  const onHeaderClicked = useCallback(
+    (colIndex: number): void => {
+      const name = headerRef.current[colIndex]
+      if (!name) return // unnamed column has no stable sort anchor
+      const cur = sortRef.current
+      const next: SortState | null =
+        !cur || cur.column !== name
+          ? { column: name, dir: 'asc' }
+          : cur.dir === 'asc'
+            ? { column: name, dir: 'desc' }
+            : null
+      sortRef.current = next
+      setSort(next)
+      rebuildView(rowsRef.current)
+      scheduleViewStateSave()
+    },
+    [rebuildView, scheduleViewStateSave]
   )
 
   // --- column / row ops via the right-click menu ---------------------------
+  // colTypes is positionally aligned to the header, so column add/delete must keep
+  // it in step (and re-persist the sidecar so its name-anchors track the header).
   const addColumn = useCallback((): void => {
     const nextHeader = [...headerRef.current, '']
     const nextRows = rowsRef.current.map((r) => [...r, ''])
-    commit(nextHeader, nextRows, [...widths, DEFAULT_COL_WIDTH])
-  }, [commit, widths])
+    const nextTypes = [...colTypesRef.current, 'text' as ColumnType]
+    colTypesRef.current = nextTypes
+    setColTypes(nextTypes)
+    commit(nextHeader, nextRows, [...widthsRef.current, DEFAULT_COL_WIDTH])
+  }, [commit])
 
   const deleteColumn = useCallback(
     (col: number): void => {
+      const removedName = headerRef.current[col]
       const nextHeader = headerRef.current.filter((_, i) => i !== col)
       const nextRows = rowsRef.current.map((r) => r.filter((_, i) => i !== col))
+      const nextTypes = colTypesRef.current.filter((_, i) => i !== col)
+      colTypesRef.current = nextTypes
+      setColTypes(nextTypes)
+      // If the sorted column was the one removed, drop the sort (its column is gone).
+      if (sortRef.current && sortRef.current.column === removedName) {
+        sortRef.current = null
+        setSort(null)
+      }
       commit(
         nextHeader,
         nextRows,
-        widths.filter((_, i) => i !== col)
+        widthsRef.current.filter((_, i) => i !== col)
       )
+      // Column delete doesn't change row count (commit won't rebuild), so rebuild
+      // the view here against the new header/sort.
+      rebuildView(rowsRef.current)
+      persistMeta()
+      // The deleted column's width entry disappears from the name-keyed view-state.
+      scheduleViewStateSave()
     },
-    [commit, widths]
+    [commit, persistMeta, scheduleViewStateSave, rebuildView]
   )
 
   const deleteRow = useCallback(
     (row: number): void => {
-      const nextRows = rowsRef.current.filter((_, i) => i !== row)
+      // `row` is a display index (from the right-click menu) — map to data.
+      const dataRow = toDataRow(row)
+      const nextRows = rowsRef.current.filter((_, i) => i !== dataRow)
       commit(headerRef.current, nextRows)
     },
-    [commit]
+    [commit, toDataRow]
   )
 
   const renameColumn = useCallback(
     (col: number, value: string): void => {
+      const oldName = headerRef.current[col]
       const nextHeader = headerRef.current.slice()
       nextHeader[col] = value
+      // Sort anchors by name — follow a renamed sorted column to its new name so the
+      // sort survives (and the view doesn't silently fall back to identity).
+      if (sortRef.current && sortRef.current.column === oldName) {
+        const next = { column: value, dir: sortRef.current.dir }
+        sortRef.current = next
+        setSort(next)
+      }
       commit(nextHeader, rowsRef.current)
+      rebuildView(rowsRef.current)
+      // The sidecar anchors types by column name — re-persist so a renamed typed
+      // column keeps its type across the next reload. View-state is name-keyed too,
+      // so re-persist its widths under the new name.
+      persistMeta()
+      scheduleViewStateSave()
     },
-    [commit]
+    [commit, persistMeta, scheduleViewStateSave, rebuildView]
   )
 
   const onHeaderContextMenu = useCallback(
@@ -620,7 +1108,7 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
         >
           <DataEditor
             className="h-full w-full"
-            theme={chromeTheme === 'dark' ? DARK_THEME : undefined}
+            theme={chromeTheme === 'dark' ? DARK_THEME : LIGHT_THEME}
             getCellContent={getCellContent}
             columns={columns}
             rows={rows.length}
@@ -636,6 +1124,7 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
             onDelete={onDelete}
             onRowAppended={onRowAppended}
             onColumnResize={onColumnResize}
+            onHeaderClicked={onHeaderClicked}
             onHeaderContextMenu={onHeaderContextMenu}
             onCellContextMenu={onCellContextMenu}
             trailingRowOptions={{ sticky: true, tint: true, hint: 'Add row…' }}
@@ -663,6 +1152,27 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
                   >
                     Rename column
                   </button>
+                  <div className="my-1 border-t border-black/10 dark:border-white/10" />
+                  <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                    Column type
+                  </div>
+                  {COLUMN_TYPES.map((t) => {
+                    const active = (colTypes[menu.col] ?? 'text') === t
+                    return (
+                      <button
+                        key={t}
+                        className="flex w-full items-center justify-between px-3 py-1.5 text-left hover:bg-muted"
+                        onClick={() => {
+                          setColumnType(menu.col, t)
+                          setMenu(null)
+                        }}
+                      >
+                        <span>{COLUMN_TYPE_LABELS[t]}</span>
+                        {active && <Check className="h-3.5 w-3.5 text-foreground" />}
+                      </button>
+                    )
+                  })}
+                  <div className="my-1 border-t border-black/10 dark:border-white/10" />
                   <button
                     className="block w-full px-3 py-1.5 text-left hover:bg-muted"
                     onClick={() => {

@@ -48,7 +48,6 @@ export const ChatSlashCommands = Extension.create({
       suggestion: {
         char: '/',
         pluginKey: chatSlashCommandPluginKey,
-        startOfLine: true,
         command: ({
           editor,
           range,

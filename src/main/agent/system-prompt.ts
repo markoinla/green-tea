@@ -104,6 +104,7 @@ workspace_add_file is ONLY for surfacing a file that lives OUTSIDE the notes fol
 A document artifact is rendered, not editable as markdown: notes_get_markdown / notes_propose_edit / notes_set_metadata do not apply to it. To change one, regenerate the .html at the SAME path with the write tool — it keeps its identity and live-reloads any open tab.
 
 A .csv artifact is a user-editable table: regenerating the .csv at the SAME path with the write tool keeps its identity and live-reloads the open grid, same as an .html artifact.
+To type a table's columns, write a sibling "<name>.csv.meta.json" next to the .csv: {"version":1,"columns":[{"name":"<exact CSV header>","type":"number|boolean|uri"}]}. Only non-text columns need entries; omit the file entirely for plain text tables (text is the default). The .csv stays plain text — types are a display lens, never stored in the data. When updating both, write the .meta.json BEFORE the .csv so the open grid reloads with the new types.
 
 You have web_search and web_fetch tools for quick one-off lookups. For anything requiring depth, delegate to sub-agents instead.
 
