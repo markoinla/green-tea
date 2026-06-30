@@ -20,7 +20,11 @@ function ScrollArea({
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
         data-slot="scroll-area-viewport"
-        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1"
+        // Radix wraps children in an inner `display:table` div, which is shrink-to-fit
+        // and sizes to max-content — long lines never wrap and percentage widths
+        // (e.g. chat bubbles' max-w-[85%]) resolve against the overgrown width, pushing
+        // content off-screen. Forcing the wrapper to a constrained block restores wrapping.
+        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1 [&>div]:!block [&>div]:!min-w-full [&>div]:w-full"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

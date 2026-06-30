@@ -249,7 +249,8 @@ interface ChatMessageProps {
   resolveDocName?: (id: string) => string
 }
 
-// Custom link renderer: mention links render as styled chips
+// Custom renderers: mention links render as styled chips; wide tables scroll
+// horizontally inside their own container so they never overflow the bubble.
 const markdownComponents: Components = {
   a: ({ href, children }) => {
     if (href === 'mention') {
@@ -266,7 +267,12 @@ const markdownComponents: Components = {
         {children}
       </a>
     )
-  }
+  },
+  table: ({ children }) => (
+    <div className="overflow-x-auto">
+      <table>{children}</table>
+    </div>
+  )
 }
 
 export function ChatMessage({
