@@ -1,9 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
-import { FileText, Paperclip } from 'lucide-react'
+import { FileIcon } from '@renderer/components/layout/left-sidebar/FileIcon'
+import { iconForKind } from '@renderer/components/artifacts/registry'
+import type { DocumentKind } from '../../../../main/database/types'
 
 interface MentionItem {
   id: string
   label: string
+  kind?: DocumentKind
 }
 
 interface MentionListProps {
@@ -52,24 +55,27 @@ export const MentionList = forwardRef<
 
   return (
     <div className="bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] max-h-[200px] overflow-y-auto">
-      {items.map((item, index) => (
-        <button
-          key={item.id}
-          onClick={() => command(item)}
-          className={`flex items-center gap-2 w-full px-3 py-1.5 text-left text-sm transition-colors ${
-            index === selectedIndex
-              ? 'bg-accent text-accent-foreground'
-              : 'text-foreground hover:bg-muted'
-          }`}
-        >
-          {item.id.startsWith('file:') ? (
-            <Paperclip className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-          ) : (
-            <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-          )}
-          <span className="truncate">{item.label}</span>
-        </button>
-      ))}
+      {items.map((item, index) => {
+        const Icon = iconForKind(item.kind)
+        return (
+          <button
+            key={item.id}
+            onClick={() => command(item)}
+            className={`flex items-center gap-2 w-full px-3 py-1.5 text-left text-sm transition-colors ${
+              index === selectedIndex
+                ? 'bg-accent text-accent-foreground'
+                : 'text-foreground hover:bg-muted'
+            }`}
+          >
+            {item.id.startsWith('file:') ? (
+              <FileIcon fileName={item.label} />
+            ) : (
+              <Icon className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+            )}
+            <span className="truncate">{item.label}</span>
+          </button>
+        )
+      })}
     </div>
   )
 })

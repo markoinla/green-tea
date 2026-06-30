@@ -45,6 +45,12 @@ function resolveRgPath(): string {
 
 interface SandboxConfig extends SandboxRuntimeConfig {
   enabled?: boolean
+  // Set when the global sandbox.json requests allow-all network via
+  // allowedDomains: ["*"]. The runtime can't express a broad wildcard in its
+  // allowlist (it rejects "*"), so instead we keep the network proxy running
+  // and auto-approve every host via the ask-callback. Filesystem restrictions
+  // are independent of network and remain fully enforced.
+  allowAllNetwork?: boolean
 }
 
 function defaultConfig(agentBaseDir: string): SandboxConfig {
@@ -120,6 +126,20 @@ export function loadSandboxConfig(
   }
 
   const merged = deepMerge(defaultConfig(agentBaseDir), globalConfig)
+
+  // Allow-all network sentinel: a global sandbox.json with allowedDomains: ["*"]
+  // means "let the agent reach any host". The runtime's allowlist matcher only
+  // understands exact and "*.domain" patterns (a literal "*" never matches), so
+  // we strip the sentinel and instead flag allow-all — initializeSandbox then
+  // wires up an ask-callback that approves every host. deniedDomains still
+  // applies, so specific hosts can be blocked even in allow-all mode.
+  if (merged.network?.allowedDomains?.includes('*')) {
+    merged.allowAllNetwork = true
+    merged.network = {
+      ...merged.network,
+      allowedDomains: merged.network.allowedDomains.filter((d) => d !== '*')
+    }
+  }
 
   // Append extra writable paths (e.g. the active workspace vault dir) AFTER the
   // merge so a global sandbox.json that overrides filesystem.allowWrite cannot
@@ -224,18 +244,27 @@ export async function initializeSandbox(config: SandboxConfig): Promise<boolean>
       enableWeakerNestedSandbox?: boolean
     }
 
-    await SandboxManager.initialize({
-      network: config.network,
-      filesystem: config.filesystem,
-      ripgrep: { command: resolveRgPath() },
-      ignoreViolations: configExt.ignoreViolations,
-      enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox
-    })
+    // In allow-all mode, approve any host the allowlist didn't already match.
+    // deniedDomains is still checked first by the runtime, so explicit blocks win.
+    const askCallback = config.allowAllNetwork ? async () => true : undefined
+
+    await SandboxManager.initialize(
+      {
+        network: config.network,
+        filesystem: config.filesystem,
+        ripgrep: { command: resolveRgPath() },
+        ignoreViolations: configExt.ignoreViolations,
+        enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox
+      },
+      askCallback
+    )
 
     sandboxInitialized = true
-    const networkCount = config.network?.allowedDomains?.length ?? 0
+    const networkDesc = config.allowAllNetwork
+      ? 'all domains (allow-all)'
+      : `${config.network?.allowedDomains?.length ?? 0} allowed domains`
     const writeCount = config.filesystem?.allowWrite?.length ?? 0
-    console.log(`Sandbox initialized: ${networkCount} allowed domains, ${writeCount} write paths`)
+    console.log(`Sandbox initialized: ${networkDesc}, ${writeCount} write paths`)
     return true
   } catch (err) {
     console.error(`Sandbox initialization failed: ${err instanceof Error ? err.message : err}`)

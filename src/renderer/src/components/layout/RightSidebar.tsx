@@ -435,7 +435,7 @@ export function RightSidebar({
               onSend={handleSend}
               isStreaming={activeState.isStreaming}
               documents={[
-                ...documents.map((d) => ({ id: d.id, title: d.title })),
+                ...documents.map((d) => ({ id: d.id, title: d.title, kind: d.kind })),
                 ...workspaceFiles.map((f) => ({ id: `file:${f.file_path}`, title: f.file_name }))
               ]}
               showSlashCommands={!!workspaceId}

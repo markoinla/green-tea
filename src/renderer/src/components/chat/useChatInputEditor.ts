@@ -82,7 +82,7 @@ export function useChatInputEditor({
             return documentsRef.current
               .filter((doc) => doc.title.toLowerCase().includes(query.toLowerCase()))
               .slice(0, 8)
-              .map((doc) => ({ id: doc.id, label: doc.title }))
+              .map((doc) => ({ id: doc.id, label: doc.title, kind: doc.kind }))
           },
           render: () => {
             let component: ReactRenderer<{
