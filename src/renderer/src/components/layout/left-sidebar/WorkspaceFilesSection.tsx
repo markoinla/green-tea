@@ -7,6 +7,7 @@ import {
   FolderOpen,
   ExternalLink,
   FileCode,
+  ClipboardCopy,
   X,
   Ellipsis
 } from 'lucide-react'
@@ -28,6 +29,7 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from '@renderer/components/ui/tooltip'
+import { copyToClipboard } from '@renderer/lib/utils'
 import { FileIcon } from './FileIcon'
 
 interface WorkspaceFile {
@@ -193,6 +195,12 @@ export function WorkspaceFilesSection({
                                     <FolderOpen className="h-3.5 w-3.5 mr-2" />
                                     Show in Folder
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => copyToClipboard(file.file_path, 'Path copied')}
+                                  >
+                                    <ClipboardCopy className="h-3.5 w-3.5 mr-2" />
+                                    Copy Path
+                                  </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => removeFile(file.id)}>
                                     <X className="h-3.5 w-3.5 mr-2" />
                                     Remove
@@ -220,6 +228,12 @@ export function WorkspaceFilesSection({
                         >
                           <FolderOpen className="h-3.5 w-3.5 mr-2" />
                           Show in Folder
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          onClick={() => copyToClipboard(file.file_path, 'Path copied')}
+                        >
+                          <ClipboardCopy className="h-3.5 w-3.5 mr-2" />
+                          Copy Path
                         </ContextMenuItem>
                         <ContextMenuItem onClick={() => removeFile(file.id)}>
                           <X className="h-3.5 w-3.5 mr-2" />

@@ -219,6 +219,7 @@ export function NotesList({
                         title={doc.title}
                         kind={doc.kind}
                         folderId={null}
+                        filePath={doc.file_path}
                         isSelected={selectedDocId === doc.id}
                         onSelect={(e) => onSelectDoc(doc.id, { newTab: e.metaKey || e.ctrlKey })}
                         onRename={(newTitle) => onRenameDoc(doc.id, newTitle)}

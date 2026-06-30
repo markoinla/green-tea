@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Pencil, Copy, Trash2 } from 'lucide-react'
+import { Pencil, Copy, ClipboardCopy, Trash2 } from 'lucide-react'
 import { draggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
 import { iconForKind } from '@renderer/components/artifacts/registry'
 import type { DocumentKind } from '../../../../../main/database/types'
@@ -17,6 +17,7 @@ import {
   TooltipTrigger
 } from '@renderer/components/ui/tooltip'
 import { useInlineRename } from '@renderer/hooks/useInlineRename'
+import { copyToClipboard } from '@renderer/lib/utils'
 import { DRAG_TYPE_DOCUMENT } from './dnd'
 
 interface DocumentMenuItemProps {
@@ -26,6 +27,8 @@ interface DocumentMenuItemProps {
   kind?: DocumentKind
   /** The folder this doc currently lives in (null = root); used to skip no-op drops. */
   folderId: string | null
+  /** Absolute path to the backing file on disk; enables "Copy Path" when present. */
+  filePath?: string | null
   isSelected: boolean
   onSelect: (e: React.MouseEvent) => void
   onRename: (newTitle: string) => void
@@ -38,6 +41,7 @@ export const DocumentMenuItem = React.memo(function DocumentMenuItem({
   title,
   kind,
   folderId,
+  filePath,
   isSelected,
   onSelect,
   onRename,
@@ -117,6 +121,12 @@ export const DocumentMenuItem = React.memo(function DocumentMenuItem({
                 <Copy className="h-3.5 w-3.5 mr-2" />
                 Duplicate
               </ContextMenuItem>
+              {filePath && (
+                <ContextMenuItem onClick={() => copyToClipboard(filePath, 'Path copied')}>
+                  <ClipboardCopy className="h-3.5 w-3.5 mr-2" />
+                  Copy Path
+                </ContextMenuItem>
+              )}
               <ContextMenuItem onClick={onDelete}>
                 <Trash2 className="h-3.5 w-3.5 mr-2" />
                 Delete

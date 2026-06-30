@@ -3,6 +3,7 @@ import {
   Folder,
   FolderOpen,
   ChevronRight,
+  ClipboardCopy,
   FilePlus,
   FolderPlus,
   Pencil,
@@ -21,6 +22,7 @@ import {
   ContextMenuTrigger
 } from '@renderer/components/ui/context-menu'
 import { useInlineRename } from '@renderer/hooks/useInlineRename'
+import { copyToClipboard } from '@renderer/lib/utils'
 import {
   creatablePluginKinds,
   getPluginViewersVersion,
@@ -101,6 +103,14 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
       if (folder) onRenameFolder(folder.id, parentPath ? `${parentPath}/${segment}` : segment)
     }
   })
+
+  // The folder's `name` is its slash-path relative to the workspace root, which
+  // mirrors the on-disk subdirectory — join it onto the workspace's absolute path.
+  const copyFolderPath = async (): Promise<void> => {
+    if (!folder) return
+    const ws = (await window.api.workspaces.get(folder.workspace_id)) as { path?: string } | null
+    await copyToClipboard(ws?.path ? `${ws.path}/${node.path}` : node.path, 'Path copied')
+  }
 
   const isCollapsed = isReal ? folder.collapsed === 1 : collapsedPaths.has(node.path)
   const toggle = (): void => {
@@ -204,6 +214,10 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                   <Pencil className="h-3.5 w-3.5 mr-2" />
                   Rename
                 </ContextMenuItem>
+                <ContextMenuItem onClick={copyFolderPath}>
+                  <ClipboardCopy className="h-3.5 w-3.5 mr-2" />
+                  Copy Path
+                </ContextMenuItem>
                 <ContextMenuItem onClick={() => onDeleteFolder(folder.id)}>
                   <Trash2 className="h-3.5 w-3.5 mr-2" />
                   Delete
@@ -244,6 +258,7 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                     title={doc.title}
                     kind={doc.kind}
                     folderId={folder ? folder.id : null}
+                    filePath={doc.file_path}
                     isSelected={selectedDocId === doc.id}
                     onSelect={(e) => onSelectDoc(doc.id, { newTab: e.metaKey || e.ctrlKey })}
                     onRename={(newTitle) => onRenameDoc(doc.id, newTitle)}
