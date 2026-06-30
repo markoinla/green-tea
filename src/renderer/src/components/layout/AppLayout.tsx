@@ -7,11 +7,10 @@ import {
 } from '@renderer/components/ui/sidebar'
 import { LeftSidebar } from './LeftSidebar'
 import { RightSidebar } from './RightSidebar'
-import { TabStrip, VersionHistoryButton, CopyMarkdownButton, ExportPdfButton } from './TabStrip'
+import { TabStrip, CopyMarkdownButton, ExportPdfButton } from './TabStrip'
 import { ShareControl } from './ShareControl'
 import { cn } from '@renderer/lib/utils'
 import { UpdateBanner } from './UpdateBanner'
-import { VersionHistoryPanel } from '../VersionHistoryPanel'
 import { NoteHistoryPanel } from '../NoteHistoryPanel'
 import { VaultHistoryPanel } from '../VaultHistoryPanel'
 import { toast } from 'sonner'
@@ -22,7 +21,6 @@ import {
   getPluginViewersVersion
 } from '@renderer/components/artifacts/registry'
 import { isFileTabId } from '@renderer/lib/tab-ids'
-import type { DocumentVersion } from '../../../../main/database/types'
 
 const MIN_SIDEBAR_WIDTH = 200
 const MAX_SIDEBAR_WIDTH = 700
@@ -41,10 +39,6 @@ interface AppLayoutProps {
   onCloseToRight: (id: string) => void
   onCloseAll: () => void
   onReorderTab: (from: number, to: number) => void
-  versionHistoryOpen: boolean
-  onVersionHistoryOpenChange: (open: boolean) => void
-  onPreviewVersion: (version: DocumentVersion | null) => void
-  activePreviewId: string | null
   selectionContext?: string | null
   onClearSelection?: () => void
   children: React.ReactNode
@@ -63,10 +57,6 @@ export function AppLayout({
   onCloseToRight,
   onCloseAll,
   onReorderTab,
-  versionHistoryOpen,
-  onVersionHistoryOpenChange,
-  onPreviewVersion,
-  activePreviewId,
   selectionContext,
   onClearSelection,
   children
@@ -269,7 +259,9 @@ export function AppLayout({
               onCloseAll={onCloseAll}
               onReorder={onReorderTab}
             />
-            {selectedWorkspaceId && (
+            {/* Workspace checkpoint button hidden for now — surfacing this feature later;
+                keeping file version control (note history) only. */}
+            {false && selectedWorkspaceId && (
               <div
                 className="flex items-center shrink-0 ml-1"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -291,7 +283,6 @@ export function AppLayout({
                   docKind={activeDoc?.kind}
                   docTitle={activeDoc?.title}
                 />
-                <VersionHistoryButton onClick={() => onVersionHistoryOpenChange(true)} />
                 <NoteHistoryPanel documentId={activeDocId} />
               </div>
             )}
@@ -314,13 +305,6 @@ export function AppLayout({
         )}
         {isResizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
       </SidebarProvider>
-      <VersionHistoryPanel
-        documentId={activeDocId}
-        open={versionHistoryOpen}
-        onOpenChange={onVersionHistoryOpenChange}
-        onPreviewVersion={onPreviewVersion}
-        activePreviewId={activePreviewId}
-      />
     </div>
   )
 }

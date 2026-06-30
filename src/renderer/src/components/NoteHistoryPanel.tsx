@@ -1,14 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react'
-import {
-  GitCommitVertical,
-  History,
-  ArrowLeft,
-  RotateCcw,
-  Bot,
-  PenLine,
-  Loader2
-} from 'lucide-react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { History, ArrowLeft, RotateCcw, Bot, PenLine, Loader2 } from 'lucide-react'
 import { useNoteHistory, type NoteCommit } from '@renderer/hooks/useNoteHistory'
+import { useOutsideDismiss } from '@renderer/hooks/useOutsideDismiss'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import {
   Sheet,
@@ -42,16 +35,16 @@ const DIFF_LINE_CLASS: Record<DiffLineType, string> = {
 }
 
 /**
- * Per-note git history (Phase 1, §5) — a self-contained trigger button + Sheet that
- * sits beside the per-note `VersionHistoryPanel` (document_versions quick-undo) at a
- * different altitude: these are the vault-wide, cross-file git commits that touched
- * this note, attributed to the agent vs. the app. Master/detail: the commit list,
- * then a diff-against-current view with a non-destructive restore (§4.7).
+ * Per-note Version History (Phase 1, §5) — a self-contained trigger button + Sheet
+ * showing the saved versions of this note (git commits that touched it), attributed
+ * to the agent vs. the app. Master/detail: the version list, then a what-changed
+ * view with a non-destructive restore (§4.7). User-facing copy avoids git jargon.
  */
 export function NoteHistoryPanel({ documentId }: { documentId: string | null }): React.ReactNode {
   const [open, setOpen] = useState(false)
   const { commits, loading, getDiff, restore } = useNoteHistory(open ? documentId : null)
   const [selected, setSelected] = useState<NoteCommit | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
   // Reset the detail view whenever the panel closes or the note changes.
   useEffect(() => {
@@ -61,14 +54,18 @@ export function NoteHistoryPanel({ documentId }: { documentId: string | null }):
     setSelected(null)
   }, [documentId])
 
+  const close = useCallback(() => setOpen(false), [])
+  useOutsideDismiss(open, close, triggerRef)
+
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        ref={triggerRef}
+        onClick={() => setOpen((o) => !o)}
         className="text-muted-foreground hover:text-foreground rounded-sm p-1 transition-colors hover:bg-muted shrink-0"
-        title="Git history"
+        title="Version history"
       >
-        <GitCommitVertical className="h-4 w-4" />
+        <History className="h-4 w-4" />
       </button>
       <Sheet open={open} onOpenChange={setOpen} modal={false}>
         <SheetContent
@@ -90,12 +87,10 @@ export function NoteHistoryPanel({ documentId }: { documentId: string | null }):
               ) : (
                 <History className="h-4 w-4" />
               )}
-              {selected ? 'Changes since this version' : 'Git History'}
+              {selected ? 'What changed' : 'Version History'}
             </SheetTitle>
             <SheetDescription className="text-xs">
-              {selected
-                ? 'Diff of the saved version against the current note'
-                : 'Commits that touched this note — diff and restore'}
+              {selected ? 'What changed since this version' : 'Every version of this file'}
             </SheetDescription>
           </SheetHeader>
 
@@ -115,7 +110,7 @@ export function NoteHistoryPanel({ documentId }: { documentId: string | null }):
                 )}
                 {!loading && commits.length === 0 && (
                   <p className="text-xs text-muted-foreground py-8 text-center">
-                    No git history yet for this note.
+                    No earlier versions of this file yet.
                   </p>
                 )}
                 <div className="space-y-0.5">
@@ -214,7 +209,7 @@ function CommitDiffView({
           onClick={handleRestore}
           disabled={restoring}
           className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-muted disabled:opacity-50"
-          title="Restore this version (non-destructive — current state is saved first)"
+          title="Go back to this version. Your current file is saved first, so nothing is lost."
         >
           {restoring ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -226,10 +221,10 @@ function CommitDiffView({
       </div>
       <ScrollArea className="flex-1 min-h-0">
         {patch === null ? (
-          <p className="text-xs text-muted-foreground py-8 text-center">Loading diff...</p>
+          <p className="text-xs text-muted-foreground py-8 text-center">Loading…</p>
         ) : lines.length === 0 ? (
           <p className="text-xs text-muted-foreground py-8 text-center">
-            No differences from the current note.
+            This version is identical to your file now.
           </p>
         ) : (
           <pre className="text-[11px] leading-relaxed font-mono px-0 py-1">

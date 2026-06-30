@@ -25,7 +25,6 @@ import {
 } from './sandbox'
 import { updateAgentLogStatus } from '../database/repositories/agent-logs'
 import { getDocument, updateDocument, updateFrontmatter } from '../vault/documents-service'
-import { createVersion } from '../database/repositories/document-versions'
 import { getWorkspace } from '../database/repositories/workspaces'
 import { readWorkspaceDoc } from '../vault/workspace-docs'
 import { markdownToTiptap } from '../markdown/tiptap-markdown'
@@ -41,13 +40,20 @@ import { getEnabledMicrosoftServices } from '../microsoft'
 
 // ---- Shared Model Config ----
 
-export function getModelConfig(db: Database.Database): {
+export function getModelConfig(
+  db: Database.Database,
+  override?: { provider?: string | null; model?: string | null }
+): {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   model: Model<any>
   authStorage: AuthStorage
 } {
   const authStorage = getPiAuthStorage(db)
-  const aiProvider = getSetting(db, 'aiProvider') || 'default'
+  // A per-call override (e.g. a scheduled task's saved provider/model) takes
+  // precedence over the global app setting; an empty/missing override falls back
+  // to the user's current selection, preserving prior behavior.
+  const overrideModel = override?.model || undefined
+  const aiProvider = override?.provider || getSetting(db, 'aiProvider') || 'default'
   const reasoningMode = getSetting(db, 'reasoningMode') === 'true'
 
   const anthropicApiKey = getSetting(db, 'anthropicApiKey')
@@ -87,7 +93,8 @@ export function getModelConfig(db: Database.Database): {
     }
     authStorage.setRuntimeApiKey('together', togetherApiKey)
 
-    const togetherModelId = getSetting(db, 'togetherModel') || 'moonshotai/Kimi-K2.5'
+    const togetherModelId =
+      overrideModel || getSetting(db, 'togetherModel') || 'moonshotai/Kimi-K2.5'
     model = {
       id: togetherModelId,
       name: togetherModelId,
@@ -110,7 +117,8 @@ export function getModelConfig(db: Database.Database): {
     }
     authStorage.setRuntimeApiKey('openrouter', openrouterApiKey)
 
-    const openrouterModelId = getSetting(db, 'openrouterModel') || 'minimax/minimax-m2.1'
+    const openrouterModelId =
+      overrideModel || getSetting(db, 'openrouterModel') || 'minimax/minimax-m2.1'
     const openrouterCompat = {
       supportsDeveloperRole: true,
       supportsStore: false,
@@ -139,7 +147,7 @@ export function getModelConfig(db: Database.Database): {
     }
     authStorage.setRuntimeApiKey('zenlayer', zenlayerApiKey)
 
-    const zenlayerModelId = getSetting(db, 'zenlayerModel') || 'glm-5.2'
+    const zenlayerModelId = overrideModel || getSetting(db, 'zenlayerModel') || 'glm-5.2'
     // The gateway is OpenAI-compatible but does not implement the /v1/store
     // conversation API; it does accept OpenAI-style reasoning_effort.
     const zenlayerCompat = {
@@ -171,7 +179,7 @@ export function getModelConfig(db: Database.Database): {
         'No Claude account connected. Open Settings → Accounts to connect Claude (Pro/Max).'
       )
     }
-    const modelId = getSetting(db, 'anthropicOAuthModel') || 'claude-sonnet-4-6'
+    const modelId = overrideModel || getSetting(db, 'anthropicOAuthModel') || 'claude-sonnet-4-6'
     model = getModel('anthropic', modelId as Parameters<typeof getModel>[1])
     if (!reasoningMode) {
       model = { ...model, reasoning: false }
@@ -185,7 +193,7 @@ export function getModelConfig(db: Database.Database): {
         'No ChatGPT account connected. Open Settings → Accounts to connect ChatGPT (Codex).'
       )
     }
-    const modelId = getSetting(db, 'codexModel') || 'gpt-5.5'
+    const modelId = overrideModel || getSetting(db, 'codexModel') || 'gpt-5.5'
     model = getModel('openai-codex', modelId as Parameters<typeof getModel>[1])
   } else {
     if (!anthropicApiKey) {
@@ -195,7 +203,7 @@ export function getModelConfig(db: Database.Database): {
     }
     authStorage.setRuntimeApiKey('anthropic', anthropicApiKey)
 
-    const modelId = getSetting(db, 'anthropicModel') || 'claude-sonnet-4-6'
+    const modelId = overrideModel || getSetting(db, 'anthropicModel') || 'claude-sonnet-4-6'
     model = getModel('anthropic', modelId as Parameters<typeof getModel>[1])
     if (!reasoningMode) {
       model = { ...model, reasoning: false }
@@ -231,13 +239,8 @@ export async function applyEdit(db: Database.Database, logId: string): Promise<v
     throw new Error(`Document not found: ${log.document_id}`)
   }
 
-  // Snapshot current state before applying the agent edit
-  createVersion(db, {
-    document_id: doc.id,
-    title: doc.title,
-    content: doc.content,
-    source: 'agent_patch'
-  })
+  // The current on-disk state is snapshotted to git via commitDocumentPreImage
+  // below (the before-agent-patch boundary), so no separate snapshot is needed here.
 
   let newMarkdown: string
 

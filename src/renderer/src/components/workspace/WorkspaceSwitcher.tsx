@@ -8,7 +8,6 @@ import {
   Trash2,
   MoreHorizontal,
   Type,
-  SquarePen,
   FileText,
   Shapes,
   Table2,
@@ -137,65 +136,52 @@ export function WorkspaceSwitcher({
             />
           </button>
 
-          {onNewDocument && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  className="h-7 w-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-                  title="New"
-                >
-                  <SquarePen className="h-3.5 w-3.5" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="bottom">
-                <DropdownMenuItem onSelect={onNewDocument}>
-                  <FileText className="h-4 w-4" />
-                  New Note
-                </DropdownMenuItem>
-                {onNewCanvas && (
-                  <DropdownMenuItem onSelect={onNewCanvas}>
-                    <Shapes className="h-4 w-4" />
-                    New Canvas
-                  </DropdownMenuItem>
-                )}
-                {onNewTable && (
-                  <DropdownMenuItem onSelect={onNewTable}>
-                    <Table2 className="h-4 w-4" />
-                    New Table
-                  </DropdownMenuItem>
-                )}
-                {onNewArtifactKind &&
-                  pluginKinds.map((entry) => (
-                    <DropdownMenuItem
-                      key={entry.kind}
-                      onSelect={() => onNewArtifactKind(entry.kind)}
-                    >
-                      <entry.icon className="h-4 w-4" />
-                      {entry.label}
-                    </DropdownMenuItem>
-                  ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {onNewFolder && (
-            <button
-              onClick={onNewFolder}
-              className="h-7 w-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors group-data-[collapsible=icon]:hidden"
-              title="New Folder"
-            >
-              <FolderPlus className="h-3.5 w-3.5" />
-            </button>
-          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 className="h-7 w-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-                title="Workspace options"
+                title="New & workspace options"
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="bottom">
+              {onNewDocument && (
+                <DropdownMenuItem onSelect={onNewDocument}>
+                  <FileText className="h-4 w-4" />
+                  New Note
+                </DropdownMenuItem>
+              )}
+              {onNewCanvas && (
+                <DropdownMenuItem onSelect={onNewCanvas}>
+                  <Shapes className="h-4 w-4" />
+                  New Canvas
+                </DropdownMenuItem>
+              )}
+              {onNewTable && (
+                <DropdownMenuItem onSelect={onNewTable}>
+                  <Table2 className="h-4 w-4" />
+                  New Table
+                </DropdownMenuItem>
+              )}
+              {onNewFolder && (
+                <DropdownMenuItem onSelect={onNewFolder}>
+                  <FolderPlus className="h-4 w-4" />
+                  New Folder
+                </DropdownMenuItem>
+              )}
+              {onNewArtifactKind && pluginKinds.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  {pluginKinds.map((entry) => (
+                    <DropdownMenuItem key={entry.kind} onSelect={() => onNewArtifactKind(entry.kind)}>
+                      <entry.icon className="h-4 w-4" />
+                      {entry.label}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={() => {
                   setRenameName(workspace?.name ?? '')

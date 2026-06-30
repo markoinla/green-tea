@@ -69,7 +69,10 @@ export async function executeScheduledTask(
   }
 
   try {
-    const { model, authStorage } = getModelConfig(db)
+    const { model, authStorage } = getModelConfig(db, {
+      provider: task.provider,
+      model: task.model
+    })
     const reasoningMode = getSetting(db, 'reasoningMode') === 'true'
 
     const customTools = createNotesTools(db, window, task.workspace_id, true)

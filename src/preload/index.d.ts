@@ -2,7 +2,6 @@ import { ElectronAPI } from '@electron-toolkit/preload'
 import type {
   Document,
   DocumentKind,
-  DocumentVersion,
   Block,
   BlockNode,
   AgentLog,
@@ -202,17 +201,6 @@ interface GreenteaApi {
     onEvent(callback: (data: unknown) => void): () => void
     onSubagentEvent(callback: (data: unknown) => void): () => void
   }
-  documentVersions: {
-    list(documentId: string): Promise<DocumentVersion[]>
-    get(id: string): Promise<DocumentVersion | undefined>
-    create(data: {
-      document_id: string
-      title: string
-      content: string | null
-    }): Promise<DocumentVersion>
-    restore(id: string): Promise<void>
-    delete(id: string): Promise<void>
-  }
   git: {
     log(documentId: string): Promise<GitLogEntry[]>
     diff(documentId: string, ref: string): Promise<string>
@@ -221,7 +209,6 @@ interface GreenteaApi {
     vaultLog(workspaceId: string): Promise<GitLogEntry[]>
     vaultRestore(workspaceId: string, ref: string): Promise<GitVaultRestoreResult>
   }
-  onDocumentVersionsChanged(callback: () => void): () => void
   onDocumentsChanged(callback: () => void): () => void
   onDocumentContentChanged(callback: (data: { id: string }) => void): () => void
   onFoldersChanged(callback: () => void): () => void
@@ -406,7 +393,13 @@ interface GreenteaApi {
     toggle(id: string, enabled: boolean): Promise<void>
     update(
       id: string,
-      changes: { name?: string; prompt?: string; cron_expression?: string }
+      changes: {
+        name?: string
+        prompt?: string
+        cron_expression?: string
+        provider?: string | null
+        model?: string | null
+      }
     ): Promise<void>
     delete(id: string): Promise<void>
     runNow(id: string): Promise<void>

@@ -12,7 +12,6 @@ import { usePythonCheck } from './hooks/usePythonCheck'
 import { MetadataFilterProvider } from './contexts/MetadataFilterContext'
 import { getFontStack } from './components/settings/constants'
 import { setPluginViewers } from './components/artifacts/registry'
-import type { DocumentVersion } from '../../main/database/types'
 
 const THEME_CSS_KEYS = [
   'background',
@@ -118,8 +117,6 @@ function applyThemeOverrides(theme: ThemeData | null, mode: 'light' | 'dark'): v
 export default function App() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
   const [selectionContext, setSelectionContext] = useState<string | null>(null)
-  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false)
-  const [previewVersion, setPreviewVersion] = useState<DocumentVersion | null>(null)
   const autoOpenedWorkspaceRef = useRef<string | null>(null)
   const pendingOpenRef = useRef<{ docId: string; workspaceId: string | null } | null>(null)
   const { workspaces } = useWorkspaces()
@@ -147,10 +144,6 @@ export default function App() {
     syncViewers()
     return window.api.onPluginsChanged(syncViewers)
   }, [])
-
-  // Preview is only active when it belongs to the currently active tab.
-  const activePreview =
-    previewVersion && previewVersion.document_id === tabs.activeDocId ? previewVersion : null
 
   // Restore last workspace or fall back to first
   useEffect(() => {
@@ -326,17 +319,6 @@ export default function App() {
     return map
   }, [workspaceFiles])
 
-  const handleVersionHistoryOpenChange = useCallback((open: boolean) => {
-    setVersionHistoryOpen(open)
-    if (!open) setPreviewVersion(null)
-  }, [])
-
-  const handleRestorePreview = useCallback(async () => {
-    if (!activePreview) return
-    await window.api.documentVersions.restore(activePreview.id)
-    setPreviewVersion(null)
-  }, [activePreview])
-
   return (
     <MetadataFilterProvider>
       <AppLayout
@@ -352,10 +334,6 @@ export default function App() {
         onCloseToRight={tabs.closeToRight}
         onCloseAll={tabs.closeAll}
         onReorderTab={tabs.reorderTab}
-        versionHistoryOpen={versionHistoryOpen}
-        onVersionHistoryOpenChange={handleVersionHistoryOpenChange}
-        onPreviewVersion={setPreviewVersion}
-        activePreviewId={activePreview?.id ?? null}
         selectionContext={selectionContext}
         onClearSelection={clearSelection}
       >
@@ -371,9 +349,6 @@ export default function App() {
             canNavigateBack={tabs.canGoBack}
             canNavigateForward={tabs.canGoForward}
             fileNamesById={fileNamesById}
-            previewVersion={activePreview}
-            onExitPreview={() => setPreviewVersion(null)}
-            onRestorePreview={handleRestorePreview}
           />
         ) : (
           <div className="flex flex-col items-center justify-center flex-1 gap-3">

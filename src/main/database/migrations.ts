@@ -270,19 +270,10 @@ export function runMigrations(db: Database.Database): void {
     db.exec('ALTER TABLE documents ADD COLUMN file_path TEXT')
   }
 
-  // Migration: create document_versions table for note version history
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS document_versions (
-      id TEXT PRIMARY KEY,
-      document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-      title TEXT NOT NULL,
-      content TEXT,
-      source TEXT NOT NULL DEFAULT 'autosave',
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_document_versions_doc ON document_versions(document_id);
-    CREATE INDEX IF NOT EXISTS idx_document_versions_doc_time ON document_versions(document_id, created_at DESC);
-  `)
+  // Migration: drop the legacy document_versions table. Per-note + vault history is
+  // now git-backed (src/main/git/), so the SQLite quick-undo layer is retired.
+  // Dropping the table also removes its indexes.
+  db.exec('DROP TABLE IF EXISTS document_versions;')
 
   // Migration: note metadata (frontmatter properties). The .md frontmatter stays
   // the source of truth; these columns/tables are a derived, queryable index.
@@ -462,6 +453,19 @@ export function runMigrations(db: Database.Database): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `)
+
+  // Migration: add per-task provider/model override to scheduled_tasks. NULL means
+  // "use the app's current model setting" (the prior behavior), so existing tasks
+  // keep working unchanged. When set, the executor builds the model from these
+  // instead of the global aiProvider/*Model settings (see getModelConfig override).
+  const hasProviderCol = db
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('scheduled_tasks') WHERE name = 'provider'")
+    .get() as { cnt: number }
+
+  if (hasProviderCol.cnt === 0) {
+    db.exec('ALTER TABLE scheduled_tasks ADD COLUMN provider TEXT')
+    db.exec('ALTER TABLE scheduled_tasks ADD COLUMN model TEXT')
+  }
 }
 
 /**

@@ -6,7 +6,6 @@ import { dirname, extname, join, relative, sep } from 'path'
 import type { Document, DocumentKind } from '../database/types'
 import { sanitizeWorkspaceName, getDefaultWorkspaceDir } from '../agent/paths'
 import { getWorkspace, normalizePath } from '../database/repositories/workspaces'
-import { maybeCreateAutoVersion } from '../database/repositories/document-versions'
 import type { TTDoc, TTNode } from '../markdown/tiptap-markdown'
 import { getWorkspaceVaultDir, ensureVaultDir } from './paths'
 import { kindForRow } from './artifact-kinds'
@@ -951,11 +950,6 @@ export function updateDocument(
 
   const current = readNote(row.file_path)
   const doc: TTDoc = data.content !== undefined ? (JSON.parse(data.content) as TTDoc) : current.doc
-
-  // Snapshot previous content before overwriting (version history).
-  if (data.content !== undefined) {
-    maybeCreateAutoVersion(db, id, row.title, JSON.stringify(current.doc))
-  }
 
   const title = data.title ?? row.title
   const workspaceId = data.workspace_id ?? row.workspace_id

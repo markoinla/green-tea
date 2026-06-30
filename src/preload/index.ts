@@ -141,28 +141,8 @@ const greenteaApi = {
       }
     }
   },
-  documentVersions: {
-    list: (documentId: string): Promise<unknown[]> =>
-      ipcRenderer.invoke('db:document-versions:list', documentId),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke('db:document-versions:get', id),
-    create: (data: {
-      document_id: string
-      title: string
-      content: string | null
-    }): Promise<unknown> => ipcRenderer.invoke('db:document-versions:create', data),
-    restore: (id: string): Promise<unknown> =>
-      ipcRenderer.invoke('db:document-versions:restore', id),
-    delete: (id: string): Promise<void> => ipcRenderer.invoke('db:document-versions:delete', id)
-  },
-  onDocumentVersionsChanged: (callback: () => void): (() => void) => {
-    const sub = (): void => callback()
-    ipcRenderer.on('document-versions:changed', sub)
-    return () => {
-      ipcRenderer.removeListener('document-versions:changed', sub)
-    }
-  },
-  // Per-workspace git engine (vault-wide version history; sits beside the per-note
-  // documentVersions quick-undo layer). All read/restore ops key off a documentId.
+  // Per-workspace git engine — the single source of truth for note + vault version
+  // history. All read/restore ops key off a documentId.
   git: {
     log: (documentId: string): Promise<unknown[]> => ipcRenderer.invoke('git:log', documentId),
     diff: (documentId: string, ref: string): Promise<string> =>
@@ -519,7 +499,13 @@ const greenteaApi = {
       ipcRenderer.invoke('scheduler:toggle', id, enabled),
     update: (
       id: string,
-      changes: { name?: string; prompt?: string; cron_expression?: string }
+      changes: {
+        name?: string
+        prompt?: string
+        cron_expression?: string
+        provider?: string | null
+        model?: string | null
+      }
     ): Promise<void> => ipcRenderer.invoke('scheduler:update', id, changes),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('scheduler:delete', id),
     runNow: (id: string): Promise<void> => ipcRenderer.invoke('scheduler:run-now', id)

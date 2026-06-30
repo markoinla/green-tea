@@ -31,6 +31,7 @@ import { join } from 'node:path'
 import { SandboxManager, type SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime'
 import { rgPath as bundledRgPath } from '@vscode/ripgrep'
 import type { BashOperations } from '@earendil-works/pi-coding-agent'
+import { getPythonUserBaseDir } from '../python'
 
 function resolveRgPath(): string {
   // Prefer bundled ripgrep if available
@@ -64,6 +65,11 @@ function defaultConfig(agentBaseDir: string): SandboxConfig {
         'registry.yarnpkg.com',
         'pypi.org',
         '*.pypi.org',
+        // pip resolves package metadata on pypi.org but downloads the actual
+        // wheels from files.pythonhosted.org — both must be allowed or
+        // `pip install` hangs/fails at the download step.
+        'files.pythonhosted.org',
+        '*.pythonhosted.org',
         'github.com',
         '*.github.com',
         'api.github.com',
@@ -73,7 +79,10 @@ function defaultConfig(agentBaseDir: string): SandboxConfig {
     },
     filesystem: {
       denyRead: ['~/.ssh', '~/.aws', '~/.gnupg'],
-      allowWrite: [agentBaseDir],
+      // Python user base is writable so the agent's runtime `pip install --user`
+      // can land packages there (the bundled interpreter's own site-packages is
+      // inside the read-only app bundle).
+      allowWrite: [agentBaseDir, getPythonUserBaseDir()],
       denyWrite: ['.env', '.env.*', '*.pem', '*.key']
     }
   }

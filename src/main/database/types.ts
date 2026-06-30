@@ -137,18 +137,13 @@ export interface ScheduledTask {
   prompt: string
   cron_expression: string
   enabled: number
+  /** Per-task provider override (e.g. 'anthropic'). NULL = use app default setting. */
+  provider: string | null
+  /** Per-task model id override (e.g. 'claude-opus-4-8'). NULL = use app default setting. */
+  model: string | null
   last_run_at: string | null
   last_run_status: string | null
   next_run_at: string | null
-  created_at: string
-}
-
-export interface DocumentVersion {
-  id: string
-  document_id: string
-  title: string
-  content: string | null
-  source: string // 'autosave' | 'agent_patch' | 'manual' | 'restore'
   created_at: string
 }
 

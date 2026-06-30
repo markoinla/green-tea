@@ -6,6 +6,8 @@ export interface ScheduledTaskView {
   name: string
   prompt: string
   cron_expression: string
+  provider: string | null
+  model: string | null
   enabled: number
   last_run_at: string | null
   last_run_status: string | null
@@ -21,7 +23,13 @@ interface UseScheduledTasksResult {
   toggle: (id: string, enabled: boolean) => Promise<void>
   update: (
     id: string,
-    changes: { name?: string; prompt?: string; cron_expression?: string }
+    changes: {
+      name?: string
+      prompt?: string
+      cron_expression?: string
+      provider?: string | null
+      model?: string | null
+    }
   ) => Promise<void>
   remove: (id: string) => Promise<void>
   runNow: (id: string) => Promise<void>

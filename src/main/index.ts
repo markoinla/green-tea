@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
+import { mkdirSync } from 'fs'
 import { execSync } from 'child_process'
 import { app, shell, BrowserWindow, protocol, screen, ipcMain, Notification } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -25,7 +26,6 @@ import { startPluginWatcher, stopPluginWatcher } from './plugins/watcher'
 import { seedWelcomeDocument } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
 import { getMcpManager } from './mcp'
-import { pruneVersions } from './database/repositories/document-versions'
 import { countEnabledScheduledTasks } from './database/repositories/scheduled-tasks'
 import { getSetting, setSetting } from './database/repositories/settings'
 import { createTray } from './tray'
@@ -35,7 +35,7 @@ import {
   startThemeWatcher,
   stopThemeWatcher
 } from './theme-watcher'
-import { getPythonBinDir } from './python'
+import { getPythonBinDir, getPythonUserBaseDir, getPythonUserBinDir } from './python'
 import { GT_FILE_SCHEME, GT_FILE_PRIVILEGE, createGtFileHandler } from './protocol/gt-file'
 import { GT_PLUGIN_SCHEME, GT_PLUGIN_PRIVILEGE, createGtPluginHandler } from './protocol/gt-plugin'
 import { reEncryptPlaintextSecrets } from './secrets'
@@ -67,6 +67,26 @@ const pythonBinDir = getPythonBinDir()
 if (pythonBinDir) {
   const sep = process.platform === 'win32' ? ';' : ':'
   process.env.PATH = `${pythonBinDir}${sep}${process.env.PATH}`
+
+  // Make runtime `pip install` work despite the interpreter living in the
+  // read-only app bundle: route installs to a writable user base and let the
+  // bundled interpreter auto-add its site-packages to sys.path.
+  // - PIP_USER=1            → every `pip install` behaves like `--user`
+  // - PYTHONUSERBASE        → where --user installs land (and import from)
+  // - PIP_NO_CACHE_DIR      → don't write to ~/.cache (outside the sandbox)
+  // The sandbox grants write to this same dir (see sandbox.ts defaultConfig).
+  const pythonUserBase = getPythonUserBaseDir()
+  try {
+    mkdirSync(pythonUserBase, { recursive: true })
+  } catch {
+    // Non-fatal — pip will surface a clear error if the dir is unwritable.
+  }
+  process.env.PYTHONUSERBASE = pythonUserBase
+  process.env.PIP_USER = '1'
+  process.env.PIP_NO_CACHE_DIR = '1'
+  process.env.PIP_DISABLE_PIP_VERSION_CHECK = '1'
+  // Console scripts from --user installs live here; put them on PATH too.
+  process.env.PATH = `${getPythonUserBinDir()}${sep}${process.env.PATH}`
 }
 
 // Set app name before any getPath() calls so userData resolves to
@@ -304,6 +324,15 @@ app.whenReady().then(() => {
   registerIpcHandlers(db, mainWindow)
   initAutoUpdater(mainWindow)
 
+  // Auto-connect enabled MCP servers on startup so their tools are ready and the
+  // settings UI shows them connected instead of all-disconnected. Fire-and-forget
+  // so a slow or broken server never blocks startup; broadcast once the batch
+  // settles so the renderer's status dots refresh.
+  getMcpManager()
+    .autoConnect()
+    .then(() => mainWindow.webContents.send('mcp:changed'))
+    .catch((err) => console.error('[mcp] startup auto-connect failed', err))
+
   // Go resident in the menu bar: create the tray (lazily, on first hide) and,
   // the first time only, post a one-time notice so the user knows the app is
   // still running in the background.
@@ -394,10 +423,6 @@ app.whenReady().then(() => {
   // (Phase 4, §6): skills/plugins/agents/mcp.json/theme.json edits → a debounced
   // commit. Same engine as the vault auto-committer, pointed at `.settings/`.
   startSettingsWatcher(db)
-
-  // Prune old document versions at startup and hourly
-  pruneVersions(db)
-  setInterval(() => pruneVersions(db), 60 * 60 * 1000)
 
   app.on('activate', function () {
     // On macOS, dock-click fires `activate`. The close interceptor hides rather

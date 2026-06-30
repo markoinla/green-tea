@@ -12,6 +12,9 @@ import {
   DialogFooter
 } from '@renderer/components/ui/dialog'
 import { useScheduledTasks, type ScheduledTaskView } from '@renderer/hooks/useScheduledTasks'
+import { PROVIDERS, isModelEnabled, type ProviderDef } from '@renderer/lib/models'
+import { useSettings } from '@renderer/hooks/useSettings'
+import { useLlmAccounts } from '@renderer/hooks/useLlmAccounts'
 
 interface SchedulerPopoverProps {
   workspaceId: string | null
@@ -421,7 +424,13 @@ function EditTaskDialog({
   onClose: () => void
   onSave: (
     id: string,
-    changes: { name?: string; prompt?: string; cron_expression?: string }
+    changes: {
+      name?: string
+      prompt?: string
+      cron_expression?: string
+      provider?: string | null
+      model?: string | null
+    }
   ) => Promise<void>
 }): ReactElement {
   const [name, setName] = useState('')
@@ -433,17 +442,61 @@ function EditTaskDialog({
     days: [],
     interval: 30
   })
+  // Per-task model override. Empty provider string = "use the app's current
+  // model setting" (the default; stored as NULL).
+  const [provider, setProvider] = useState('')
+  const [model, setModel] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const { settings } = useSettings()
+  const llm = useLlmAccounts()
 
   useEffect(() => {
     if (task) {
       setName(task.name)
       setPrompt(task.prompt)
       setSchedule(parseCronToSchedule(task.cron_expression))
+      setProvider(task.provider ?? '')
+      setModel(task.model ?? '')
     }
   }, [task])
 
+  // A provider is usable if its credentials/account are set up (the built-in
+  // Green Tea provider needs none). Mirrors the chat model selector.
+  const providerReady = (p: ProviderDef): boolean => {
+    if (p.id === 'default') return true
+    if (p.authKind === 'oauth') return llm.isConnected(p.connectionId as string)
+    return !!p.keyField && !!(settings[p.keyField as keyof typeof settings] as string)
+  }
+  const enabledModelsOf = (p: ProviderDef): ProviderDef['models'] =>
+    p.models.filter((m) => isModelEnabled(settings.enabledModels, m.id))
+
   const preview = describeSchedule(schedule)
+  const selectedProvider = PROVIDERS.find((p) => p.id === provider)
+
+  // Only offer providers that are ready and expose at least one enabled model;
+  // always keep the task's currently-saved provider visible so an existing
+  // selection isn't silently dropped when a key/model is later disabled.
+  const providerOptions = PROVIDERS.filter(
+    (p) => (providerReady(p) && enabledModelsOf(p).length > 0) || p.id === provider
+  )
+  const providerModels = selectedProvider
+    ? selectedProvider.models.filter(
+        (m) => isModelEnabled(settings.enabledModels, m.id) || m.id === model
+      )
+    : []
+
+  // Switching provider resets the model to that provider's first enabled option
+  // so the saved model is always valid for the chosen provider.
+  const handleProviderChange = (next: string): void => {
+    setProvider(next)
+    if (!next) {
+      setModel('')
+    } else {
+      const p = PROVIDERS.find((pr) => pr.id === next)
+      setModel(p ? (enabledModelsOf(p)[0]?.id ?? '') : '')
+    }
+  }
 
   const handleSave = async (): Promise<void> => {
     if (!task || !name.trim()) return
@@ -452,7 +505,9 @@ function EditTaskDialog({
       await onSave(task.id, {
         name,
         prompt,
-        cron_expression: scheduleToCron(schedule)
+        cron_expression: scheduleToCron(schedule),
+        provider: provider || null,
+        model: provider ? model || null : null
       })
       onClose()
     } finally {
@@ -476,11 +531,11 @@ function EditTaskDialog({
 
   return (
     <Dialog open={task !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-base">Edit Scheduled Task</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
             <input
@@ -498,9 +553,45 @@ function EditTaskDialog({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               className="w-full text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground outline-none focus:ring-1 focus:ring-ring resize-none"
-              rows={5}
+              rows={6}
               placeholder="What should the agent do each time this task runs?"
             />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-2 block">Model</label>
+            <div className="flex gap-2">
+              <select
+                value={provider}
+                onChange={(e) => handleProviderChange(e.target.value)}
+                className={`flex-1 ${selectClass}`}
+              >
+                <option value="">App default (current setting)</option>
+                {providerOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              {provider && providerModels.length > 0 && (
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className={`flex-1 ${selectClass}`}
+                >
+                  {providerModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1.5">
+              {provider
+                ? 'This task always runs with the model selected above. API keys / connected accounts are read from Settings.'
+                : 'This task uses whichever model is selected in the app when it runs.'}
+            </p>
           </div>
 
           <div>

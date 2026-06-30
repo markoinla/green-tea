@@ -28,10 +28,28 @@ export function createScheduledTaskTool(
       cron_expression: Type.String({
         description:
           'Cron expression (minute hour dayOfMonth month dayOfWeek). Example: "0 8 * * *" for daily at 8am'
-      })
+      }),
+      provider: Type.Optional(
+        Type.String({
+          description:
+            "Optional model provider to run this task with: 'default' (Green Tea), 'anthropic', 'anthropic-oauth', 'openai-codex', 'together', 'openrouter', or 'zenlayer'. Omit to use the app's current provider setting."
+        })
+      ),
+      model: Type.Optional(
+        Type.String({
+          description:
+            "Optional model id for the chosen provider (e.g. 'claude-opus-4-8'). Omit to use the provider's default model."
+        })
+      )
     }),
     async execute(_toolCallId, params) {
-      const p = params as { name: string; prompt: string; cron_expression: string }
+      const p = params as {
+        name: string
+        prompt: string
+        cron_expression: string
+        provider?: string
+        model?: string
+      }
 
       if (!isValidCron(p.cron_expression)) {
         return {
@@ -49,7 +67,9 @@ export function createScheduledTaskTool(
         workspace_id: workspaceId,
         name: p.name,
         prompt: p.prompt,
-        cron_expression: p.cron_expression
+        cron_expression: p.cron_expression,
+        provider: p.provider ?? null,
+        model: p.model ?? null
       })
 
       const nextRun = getNextCronTime(p.cron_expression, new Date())
@@ -62,12 +82,15 @@ export function createScheduledTaskTool(
       }
 
       const schedule = describeCron(p.cron_expression)
+      const modelLine = p.provider
+        ? `\n- Model: ${p.provider}${p.model ? ` / ${p.model}` : ''}`
+        : ''
 
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Scheduled task created successfully.\n- Name: ${task.name}\n- Schedule: ${schedule}\n- Cron: ${p.cron_expression}\n- ID: ${task.id}`
+            text: `Scheduled task created successfully.\n- Name: ${task.name}\n- Schedule: ${schedule}\n- Cron: ${p.cron_expression}${modelLine}\n- ID: ${task.id}`
           }
         ],
         details: undefined

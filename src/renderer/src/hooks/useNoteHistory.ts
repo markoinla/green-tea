@@ -24,10 +24,9 @@ interface UseNoteHistoryResult {
  * main-side, so callers stay in document terms. Lists the commits touching the note
  * (newest first), exposes a diff-against-current and a non-destructive restore.
  *
- * Sits BESIDE `useDocumentVersions` (the per-note quick-undo layer) at a different
- * altitude: git commits are vault-wide, atomic across files, and attributed to the
- * agent vs. the app. Re-fetches whenever the note's content changes on disk (a new
- * agent-patch / autosave / restore commit) so the list stays live.
+ * Git commits are vault-wide, atomic across files, and attributed to the agent vs.
+ * the app. Re-fetches whenever the note's content changes on disk (a new agent-patch
+ * / autosave / restore commit) so the list stays live.
  */
 export function useNoteHistory(documentId: string | null): UseNoteHistoryResult {
   const [commits, setCommits] = useState<NoteCommit[]>([])

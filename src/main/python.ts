@@ -1,4 +1,5 @@
 import { existsSync } from 'fs'
+import { homedir } from 'os'
 import { join } from 'path'
 import { app } from 'electron'
 
@@ -39,4 +40,27 @@ export function getPythonBinDir(): string | null {
  */
 export function isPythonBundled(): boolean {
   return existsSync(getBundledPythonBin())
+}
+
+/**
+ * Writable install target for runtime `pip install`. The bundled interpreter
+ * lives inside the (read-only, code-signed) app bundle, so its own
+ * site-packages can't be written to at runtime. We point PYTHONUSERBASE here
+ * and run pip with --user (via PIP_USER); the interpreter automatically adds
+ * this base's site-packages to sys.path, so installed packages just import.
+ *
+ * Depends only on homedir() — no electron app state — so the sandbox module can
+ * import it to grant write access without pulling in app lifecycle.
+ */
+export function getPythonUserBaseDir(): string {
+  return join(homedir(), '.greentea', 'python')
+}
+
+/**
+ * The bin/ (Scripts/ on Windows) dir under the user base, where pip --user
+ * drops console scripts. Prepended to PATH so those entry points are runnable.
+ */
+export function getPythonUserBinDir(): string {
+  const base = getPythonUserBaseDir()
+  return process.platform === 'win32' ? join(base, 'Scripts') : join(base, 'bin')
 }

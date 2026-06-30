@@ -30,12 +30,22 @@ export function createScheduledTask(
     name: string
     prompt: string
     cron_expression: string
+    provider?: string | null
+    model?: string | null
   }
 ): ScheduledTask {
   const id = randomUUID()
   db.prepare(
-    'INSERT INTO scheduled_tasks (id, workspace_id, name, prompt, cron_expression) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, data.workspace_id, data.name, data.prompt, data.cron_expression)
+    'INSERT INTO scheduled_tasks (id, workspace_id, name, prompt, cron_expression, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(
+    id,
+    data.workspace_id,
+    data.name,
+    data.prompt,
+    data.cron_expression,
+    data.provider ?? null,
+    data.model ?? null
+  )
   return getScheduledTask(db, id)!
 }
 
@@ -46,6 +56,8 @@ export function updateScheduledTask(
     name?: string
     prompt?: string
     cron_expression?: string
+    provider?: string | null
+    model?: string | null
     enabled?: number
     last_run_at?: string
     last_run_status?: string
@@ -69,6 +81,14 @@ export function updateScheduledTask(
   if (data.cron_expression !== undefined) {
     fields.push('cron_expression = ?')
     values.push(data.cron_expression)
+  }
+  if (data.provider !== undefined) {
+    fields.push('provider = ?')
+    values.push(data.provider)
+  }
+  if (data.model !== undefined) {
+    fields.push('model = ?')
+    values.push(data.model)
   }
   if (data.enabled !== undefined) {
     fields.push('enabled = ?')

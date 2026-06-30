@@ -78,7 +78,7 @@ describe('createDocument', () => {
 })
 
 describe('updateDocument', () => {
-  it('persists content changes to the file and snapshots a version', () => {
+  it('persists content changes to the file', () => {
     const doc = createDocument(db, {
       title: 'Edit Me',
       workspace_id: workspaceId,
@@ -91,9 +91,6 @@ describe('updateDocument', () => {
     expect(JSON.parse(getDocument(db, doc.id)!.content!)).toEqual(
       markdownToTiptap('v2 **changed**')
     )
-
-    const versions = db.prepare('SELECT * FROM document_versions WHERE document_id = ?').all(doc.id)
-    expect(versions.length).toBeGreaterThan(0)
   })
 
   it('does NOT rename the file on a content-only save (no churn)', () => {

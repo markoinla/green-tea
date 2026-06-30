@@ -94,15 +94,4 @@ describe('documents repository', () => {
     const logs = db.prepare('SELECT * FROM agent_logs WHERE document_id = ?').all(doc.id)
     expect(logs.length).toBe(0)
   })
-
-  it('updateDocument triggers auto-version creation when content changes', () => {
-    const ws = makeWorkspace()
-    const doc = createDocument(db, { title: 'Versioned', workspace_id: ws.id, content: 'v1' })
-    updateDocument(db, doc.id, { content: 'v2' })
-
-    const versions = db
-      .prepare('SELECT * FROM document_versions WHERE document_id = ?')
-      .all(doc.id)
-    expect(versions.length).toBeGreaterThanOrEqual(1)
-  })
 })

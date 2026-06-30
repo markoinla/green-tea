@@ -8,7 +8,6 @@ import * as folders from '../database/repositories/folders'
 import * as workspaces from '../database/repositories/workspaces'
 import * as settings from '../database/repositories/settings'
 import * as conversations from '../database/repositories/conversations'
-import * as documentVersions from '../database/repositories/document-versions'
 import * as documents from '../vault/documents-service'
 import { MAX_ARTIFACT_BYTES, atomicWriteFile } from '../vault/note-store'
 import { markSelfWrite } from '../vault/self-write'
@@ -396,52 +395,6 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
       return documents.listByProperty(db, workspaceId, key, valueFold)
     }
   )
-
-  // Document Versions
-  ipcMain.handle('db:document-versions:list', (_event, documentId: string) => {
-    return documentVersions.listVersions(db, documentId)
-  })
-
-  ipcMain.handle('db:document-versions:get', (_event, id: string) => {
-    return documentVersions.getVersion(db, id)
-  })
-
-  ipcMain.handle(
-    'db:document-versions:create',
-    (_event, data: { document_id: string; title: string; content: string | null }) => {
-      const version = documentVersions.createVersion(db, { ...data, source: 'manual' })
-      mainWindow?.webContents.send('document-versions:changed')
-      return version
-    }
-  )
-
-  ipcMain.handle('db:document-versions:restore', (_event, id: string) => {
-    const version = documentVersions.getVersion(db, id)
-    if (version) {
-      const current = documents.getDocument(db, version.document_id)
-      if (current) {
-        // Snapshot current state, then restore via the file-backed service.
-        documentVersions.createVersion(db, {
-          document_id: current.id,
-          title: current.title,
-          content: current.content,
-          source: 'restore'
-        })
-        documents.updateDocument(db, version.document_id, {
-          title: version.title,
-          content: version.content ?? undefined
-        })
-      }
-    }
-    mainWindow?.webContents.send('documents:content-changed', { id: version?.document_id })
-    mainWindow?.webContents.send('documents:changed')
-    mainWindow?.webContents.send('document-versions:changed')
-  })
-
-  ipcMain.handle('db:document-versions:delete', (_event, id: string) => {
-    documentVersions.deleteVersion(db, id)
-    mainWindow?.webContents.send('document-versions:changed')
-  })
 
   // Folders
   ipcMain.handle('db:folders:list', (_event, workspaceId?: string) => {

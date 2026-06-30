@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { X, History, FileCode, Copy, FileDown, type LucideIcon } from 'lucide-react'
+import { X, FileCode, Copy, FileDown, type LucideIcon } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useDocuments } from '@renderer/hooks/useDocuments'
 import { useWorkspaceFiles } from '@renderer/hooks/useWorkspaceFiles'
@@ -111,20 +111,7 @@ export function TabStrip({
   )
 }
 
-// Version-history button — rendered by AppLayout at the right end of the strip.
-export function VersionHistoryButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="text-muted-foreground hover:text-foreground rounded-sm p-1 transition-colors hover:bg-muted shrink-0"
-      title="Version history"
-    >
-      <History className="h-4 w-4" />
-    </button>
-  )
-}
-
-// Copy-as-markdown button — sits beside the version-history button.
+// Copy-as-markdown button — sits beside the note-history button.
 export function CopyMarkdownButton({
   onClick,
   disabled

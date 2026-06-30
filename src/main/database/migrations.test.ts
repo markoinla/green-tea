@@ -25,7 +25,9 @@ describe('database migrations', () => {
     expect(tableNames).toContain('conversation_messages')
     expect(tableNames).toContain('scheduled_tasks')
     expect(tableNames).toContain('scheduled_task_runs')
-    expect(tableNames).toContain('document_versions')
+    // document_versions is the retired SQLite version layer — migrations drop it
+    // now that version history is git-backed.
+    expect(tableNames).not.toContain('document_versions')
   })
 
   it('is idempotent — running twice does not throw', () => {
@@ -53,8 +55,6 @@ describe('database migrations', () => {
     expect(indexNames).toContain('idx_conversation_messages_conversation_id')
     expect(indexNames).toContain('idx_scheduled_tasks_workspace')
     expect(indexNames).toContain('idx_task_runs_task')
-    expect(indexNames).toContain('idx_document_versions_doc')
-    expect(indexNames).toContain('idx_document_versions_doc_time')
   })
 
   it('documents table has all expected columns', () => {

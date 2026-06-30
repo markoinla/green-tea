@@ -1,7 +1,6 @@
 import { existsSync } from 'fs'
 import { ipcMain } from 'electron'
 import * as documents from '../vault/documents-service'
-import * as documentVersions from '../database/repositories/document-versions'
 import { getWorkspaceVaultDir } from '../vault/paths'
 import {
   logForPath,
@@ -48,18 +47,9 @@ export function registerGitHandlers({ db, mainWindow }: IpcHandlerContext): void
     if (!doc?.file_path) throw new Error(`Document not found or has no backing file: ${documentId}`)
     const dir = getWorkspaceVaultDir(db, doc.workspace_id)
 
-    // Snapshot the current state into the per-note version system BEFORE the
-    // restore overwrites the file, so the quick-undo layer stays consistent with
-    // the file-backed restore (mirrors db:document-versions:restore).
-    documentVersions.createVersion(db, {
-      document_id: doc.id,
-      title: doc.title,
-      content: doc.content,
-      source: 'restore'
-    })
-
     // restorePath flushes the current state to git first (non-destructive, §4.7),
-    // then writes the old bytes back (self-write-marked).
+    // then writes the old bytes back (self-write-marked). The pre-restore state is
+    // recoverable from that flush commit, so no separate snapshot is needed.
     const result = await restorePath(dir, ref, doc.file_path)
 
     // Drive the reindex + reload explicitly — the raw checkout bytes are written
@@ -67,7 +57,6 @@ export function registerGitHandlers({ db, mainWindow }: IpcHandlerContext): void
     documents.reindexFile(db, doc.file_path)
     mainWindow?.webContents.send('documents:content-changed', { id: doc.id })
     mainWindow?.webContents.send('documents:changed')
-    mainWindow?.webContents.send('document-versions:changed')
     return result
   })
 
@@ -108,7 +97,6 @@ export function registerGitHandlers({ db, mainWindow }: IpcHandlerContext): void
         }
       }
       mainWindow?.webContents.send('documents:changed')
-      mainWindow?.webContents.send('document-versions:changed')
       return result
     }
   )

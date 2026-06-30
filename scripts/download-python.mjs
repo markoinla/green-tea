@@ -4,9 +4,13 @@
  * Downloads a portable Python 3.12 from python-build-standalone, extracts it
  * into resources/python/, and trims unnecessary files to minimize bundle size.
  *
- * Only Python + pip are bundled — the agent installs packages as needed at runtime.
+ * Python + pip + a small set of commonly-needed libraries (see BUNDLED_PACKAGES)
+ * are baked into the bundle so they import offline with zero runtime install.
+ * Anything else the agent needs is `pip install`ed on demand at runtime into the
+ * user base (see src/main/index.ts / src/main/python.ts).
  *
- * Idempotent — skips if resources/python/ already exists with the expected version.
+ * Idempotent — skips if resources/python/ already exists with the expected
+ * version AND the bundled packages are present (otherwise it installs them).
  *
  * Usage: node scripts/download-python.mjs [--force]
  */
@@ -34,6 +38,22 @@ const VERSION_FILE = join(PYTHON_DIR, '.python-version')
 const PYTHON_VERSION = '3.12.12'
 const RELEASE_TAG = '20260211'
 const FORCE = process.argv.includes('--force')
+
+// Libraries baked into the bundle's own site-packages at build time. These are
+// the ones the agent reaches for constantly (YAML) plus the doc-processing
+// skills (PDF/DOCX/XLSX/PPTX), which are slow/fragile to install on demand.
+// Pinned for reproducible builds. Wheels are fetched for the build platform, so
+// the C-extension deps (lxml, Pillow) match the bundled interpreter's ABI.
+const BUNDLED_PACKAGES = [
+  'PyYAML==6.0.2',
+  'python-docx==1.1.2',
+  'openpyxl==3.1.5',
+  'python-pptx==1.0.2',
+  'pypdf==5.1.0'
+]
+
+// Import names used to verify the above are present (idempotency check).
+const BUNDLED_IMPORTS = ['yaml', 'docx', 'openpyxl', 'pptx', 'pypdf']
 
 // Platform → archive name mapping
 const ARCHIVE_MAP = {
@@ -104,6 +124,31 @@ function getPythonBin() {
     return join(PYTHON_DIR, 'python.exe')
   }
   return join(PYTHON_DIR, 'bin', 'python3')
+}
+
+function arePackagesInstalled(pythonBin) {
+  try {
+    execFileSync(pythonBin, ['-c', `import ${BUNDLED_IMPORTS.join(', ')}`], {
+      stdio: 'ignore',
+      env: { ...process.env, PYTHONHOME: PYTHON_DIR }
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function installBundledPackages(pythonBin) {
+  if (BUNDLED_PACKAGES.length === 0) return
+  console.log(`Installing bundled packages: ${BUNDLED_PACKAGES.join(', ')}`)
+  // Install into the bundle's own site-packages (no --user) — at build time the
+  // bundle is writable; at runtime it is not, which is exactly why these ship
+  // baked in rather than installed on demand.
+  execFileSync(
+    pythonBin,
+    ['-m', 'pip', 'install', '--no-cache-dir', '--no-warn-script-location', ...BUNDLED_PACKAGES],
+    { stdio: 'inherit', env: { ...process.env, PYTHONHOME: PYTHON_DIR } }
+  )
 }
 
 function dirSize(dir) {
@@ -222,6 +267,14 @@ function trimBundle() {
 async function main() {
   if (!FORCE && isAlreadyInstalled()) {
     console.log(`Python ${PYTHON_VERSION}+${RELEASE_TAG} already installed in resources/python/`)
+    // The interpreter is current, but the bundled-package list may have grown
+    // since this install — top it up rather than forcing a full re-download.
+    const pythonBin = getPythonBin()
+    if (arePackagesInstalled(pythonBin)) {
+      console.log('Bundled packages already present.')
+    } else {
+      installBundledPackages(pythonBin)
+    }
     return
   }
 
@@ -264,16 +317,23 @@ async function main() {
       env: { ...process.env, PYTHONHOME: PYTHON_DIR }
     })
 
+    // Bake in the common libraries before trimming (so their __pycache__ is
+    // stripped by trimBundle along with everything else).
+    installBundledPackages(pythonBin)
+
     // Trim unnecessary files
     trimBundle()
 
-    // Verify python + pip still work after trimming
+    // Verify python + pip + bundled packages still work after trimming
     const verifyVersion = execFileSync(pythonBin, ['--version'], { encoding: 'utf-8' }).trim()
     execFileSync(pythonBin, ['-m', 'pip', '--version'], {
       stdio: 'pipe',
       env: { ...process.env, PYTHONHOME: PYTHON_DIR }
     })
-    console.log(`Verified after trim: ${verifyVersion}, pip OK`)
+    if (!arePackagesInstalled(pythonBin)) {
+      throw new Error(`Bundled packages failed to import after trim: ${BUNDLED_IMPORTS.join(', ')}`)
+    }
+    console.log(`Verified after trim: ${verifyVersion}, pip OK, bundled packages OK`)
 
     // Write version marker
     writeFileSync(VERSION_FILE, `${PYTHON_VERSION}+${RELEASE_TAG}\n`)

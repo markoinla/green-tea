@@ -1,7 +1,6 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 import type { Document } from '../types'
-import { maybeCreateAutoVersion } from './document-versions'
 
 export function listDocuments(db: Database.Database, workspaceId?: string): Document[] {
   if (workspaceId) {
@@ -34,11 +33,6 @@ export function updateDocument(
 ): Document {
   const doc = getDocument(db, id)
   if (!doc) throw new Error(`Document not found: ${id}`)
-
-  // Snapshot the previous content before overwriting
-  if (data.content !== undefined) {
-    maybeCreateAutoVersion(db, id, doc.title, doc.content)
-  }
 
   const title = data.title ?? doc.title
   const workspace_id = data.workspace_id !== undefined ? data.workspace_id : doc.workspace_id

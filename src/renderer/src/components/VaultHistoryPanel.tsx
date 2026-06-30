@@ -1,6 +1,7 @@
-import React, { useCallback, useState } from 'react'
-import { History, RotateCcw, Bot, PenLine, Loader2, GitCommitVertical, Check } from 'lucide-react'
+import React, { useCallback, useRef, useState } from 'react'
+import { Archive, RotateCcw, Bot, PenLine, Loader2, Check } from 'lucide-react'
 import { useVaultHistory, type VaultCommit } from '@renderer/hooks/useVaultHistory'
+import { useOutsideDismiss } from '@renderer/hooks/useOutsideDismiss'
 import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { Input } from '@renderer/components/ui/input'
 import {
@@ -43,6 +44,10 @@ export function VaultHistoryPanel({
   // The commit the user has armed to restore — a second click on the row confirms.
   const [confirmOid, setConfirmOid] = useState<string | null>(null)
   const [restoringOid, setRestoringOid] = useState<string | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  const close = useCallback(() => setOpen(false), [])
+  useOutsideDismiss(open, close, triggerRef)
 
   const handleCheckpoint = useCallback(async () => {
     const name = label.trim()
@@ -72,11 +77,12 @@ export function VaultHistoryPanel({
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        ref={triggerRef}
+        onClick={() => setOpen((o) => !o)}
         className="text-muted-foreground hover:text-foreground rounded-sm p-1 transition-colors hover:bg-muted shrink-0"
-        title="Vault history (checkpoints)"
+        title="Workspace checkpoints"
       >
-        <History className="h-4 w-4" />
+        <Archive className="h-4 w-4" />
       </button>
       <Sheet open={open} onOpenChange={setOpen} modal={false}>
         <SheetContent
@@ -87,11 +93,11 @@ export function VaultHistoryPanel({
         >
           <SheetHeader className="px-4 pt-4 pb-2 border-b dark:border-white/5 border-black/5">
             <SheetTitle className="text-sm flex items-center gap-2">
-              <GitCommitVertical className="h-4 w-4" />
-              Vault History
+              <Archive className="h-4 w-4" />
+              Workspace Checkpoints
             </SheetTitle>
             <SheetDescription className="text-xs">
-              Checkpoints across the whole workspace — restore everything to a point in time
+              Saved snapshots of your whole workspace
             </SheetDescription>
           </SheetHeader>
 
@@ -109,7 +115,7 @@ export function VaultHistoryPanel({
               onClick={handleCheckpoint}
               disabled={!label.trim() || saving}
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1.5 rounded hover:bg-muted disabled:opacity-50 shrink-0"
-              title="Create a named checkpoint of the current vault state"
+              title="Save a named snapshot of your whole workspace right now"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
             </button>
@@ -122,7 +128,7 @@ export function VaultHistoryPanel({
               )}
               {!loading && commits.length === 0 && (
                 <p className="text-xs text-muted-foreground py-8 text-center">
-                  No checkpoints yet for this workspace.
+                  No saved snapshots yet for this workspace.
                 </p>
               )}
               <div className="space-y-0.5">
@@ -185,7 +191,7 @@ function CommitRow({
             onClick={onConfirm}
             disabled={restoring}
             className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded px-1.5 py-1 disabled:opacity-50"
-            title="Confirm: restore the whole vault to this commit (current state is saved first)"
+            title="Confirm: roll your whole workspace back to this snapshot. Your current state is saved first, so nothing is lost."
           >
             {restoring ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -206,7 +212,7 @@ function CommitRow({
         <button
           onClick={onArm}
           className="shrink-0 text-muted-foreground hover:text-foreground rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-          title="Restore the whole vault to this commit"
+          title="Roll your whole workspace back to this snapshot"
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </button>

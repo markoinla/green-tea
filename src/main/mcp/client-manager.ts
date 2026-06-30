@@ -178,6 +178,23 @@ class McpClientManager {
     }
   }
 
+  /**
+   * Connect every enabled server. Called once at app startup so MCP tools are
+   * ready and the settings UI shows servers connected instead of all-disconnected.
+   * Runs connections in parallel and swallows per-server failures (a broken
+   * server must never block the others or startup). `enabled === false` opts a
+   * server out; an unset `enabled` counts as enabled (mirrors listAllTools).
+   */
+  async autoConnect(): Promise<void> {
+    this.loadConfig()
+    const names: string[] = []
+    for (const [name, server] of this.servers) {
+      if (server.config.enabled === false) continue
+      names.push(name)
+    }
+    await Promise.allSettled(names.map((name) => this.connect(name)))
+  }
+
   async ensureConnected(name: string): Promise<void> {
     const server = this.servers.get(name)
     if (!server) throw new Error(`MCP server not found: ${name}`)
@@ -191,6 +208,8 @@ class McpClientManager {
     const server = this.servers.get(name)
     if (!server) return
     if (server.idleTimer) clearTimeout(server.idleTimer)
+    // Eager servers stay connected for the app's lifetime — no idle disconnect.
+    if (server.config.lifecycle === 'eager') return
     const timeout = (server.config.idleTimeout ?? DEFAULT_IDLE_TIMEOUT) * 1000
     server.idleTimer = setTimeout(() => {
       this.disconnect(name)

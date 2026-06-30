@@ -38,7 +38,17 @@ export function registerSchedulerHandlers({ db, mainWindow }: IpcHandlerContext)
 
   ipcMain.handle(
     'scheduler:update',
-    (_event, id: string, changes: { name?: string; prompt?: string; cron_expression?: string }) => {
+    (
+      _event,
+      id: string,
+      changes: {
+        name?: string
+        prompt?: string
+        cron_expression?: string
+        provider?: string | null
+        model?: string | null
+      }
+    ) => {
       if (changes.cron_expression) {
         const next = getNextCronTime(changes.cron_expression, new Date())
         scheduledTasks.updateScheduledTask(db, id, {
