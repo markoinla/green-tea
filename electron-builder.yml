@@ -21,6 +21,15 @@ files:
   - '!**/node_modules/**/test'
   - '!**/node_modules/**/tests'
   - '!**/node_modules/**/@types'
+  # Renderer-only libraries: their code is already bundled into out/renderer by
+  # vite, and the main/preload processes never import them. Shipping the raw
+  # node_modules source would just duplicate them (~85M) inside app.asar.
+  - '!node_modules/@excalidraw'
+  - '!node_modules/mermaid'
+  - '!node_modules/cytoscape'
+  - '!node_modules/cytoscape-fcose'
+  - '!node_modules/cytoscape-cose-bilkent'
+  - '!node_modules/katex'
 extraResources:
   - from: resources/default-skills
     to: default-skills
