@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { AccountUser } from '../shared/share-contract'
 
 const greenteaApi = {
   // Raw artifact text by document id, for read-only viewers (e.g. the CSV viewer)
@@ -382,6 +383,21 @@ const greenteaApi = {
     ipcRenderer.on('llm-auth:changed', sub)
     return () => {
       ipcRenderer.removeListener('llm-auth:changed', sub)
+    }
+  },
+  auth: {
+    signIn: (): Promise<{ success: true; user: AccountUser } | { success: false; error: string }> =>
+      ipcRenderer.invoke('auth:sign-in'),
+    sendMagicLink: (email: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('auth:send-magic-link', email),
+    signOut: (): Promise<{ revoked: boolean }> => ipcRenderer.invoke('auth:sign-out'),
+    getAccount: (): Promise<AccountUser | null> => ipcRenderer.invoke('auth:get-account')
+  },
+  onAuthChanged: (callback: () => void): (() => void) => {
+    const sub = (): void => callback()
+    ipcRenderer.on('auth:changed', sub)
+    return () => {
+      ipcRenderer.removeListener('auth:changed', sub)
     }
   },
   dialog: {

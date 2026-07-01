@@ -1,6 +1,6 @@
 ---
 name: plugin-creator
-description: 'Build a sandboxed artifact plugin that renders and edits a file type inside Green Tea. Use when asked to "create/build a plugin", "scaffold a viewer", "add a new artifact type/kind", "make a viewer for .<ext> files", "render/display X files in Green Tea", or "add a manifest.json for an artifact". A plugin is a manifest.json plus an entry HTML file that runs in a sandboxed iframe and renders the bytes of one file extension. NOT for editing note/outliner content, NOT for building agent tools, MCP servers, or anything needing app/system access — plugins are isolated and only ever see their own file.'
+description: 'Build a sandboxed artifact plugin that renders and edits a file type inside Green Tea, optionally bundling an agent skill that teaches Claude how to read/edit that file type. Use when asked to "create/build a plugin", "scaffold a viewer", "add a new artifact type/kind", "make a viewer for .<ext> files", "render/display X files in Green Tea", "add a manifest.json for an artifact", "bundle/ship a skill with a plugin", or "build a small app that saves data" (a tracker, board, checklist, or simple CRUD tool — back it with a JSON file acting as a tiny database; see "The JSON-backed data pattern"). A plugin is a manifest.json plus an entry HTML file that runs in a sandboxed iframe and renders the bytes of one file extension; it may also ship one or more bundled skills (markdown instructions + the agent''s sandboxed bash/read/edit, NOT in-process agent tools). NOT for editing note/outliner content, NOT for registering model-callable agent tools or MCP servers, NOT for anything needing app/system access — the viewer is isolated and only ever sees its own file.'
 license: Complete terms in LICENSE.txt
 ---
 
@@ -13,7 +13,51 @@ iframe and hands it the file contents over a tiny `postMessage` protocol.
 
 Use this for things like "render `.json` nicely", "make a `.csv` table editor", or "show
 `.mmd` Mermaid diagrams". Do **not** use it to edit note/outliner content or to build agent
-tools — a plugin is sandboxed and only ever sees its own file's bytes.
+tools — the viewer is sandboxed and only ever sees its own file's bytes.
+
+A plugin can **also** ship one or more bundled agent *skills* — markdown instructions that teach
+Claude how to read and edit the file type the viewer renders. That is a separate, optional
+capability (see [Bundling a skill](#bundling-a-skill-optional)) and does **not** loosen the
+viewer's sandbox: a bundled skill is still just instructions plus the agent's already-sandboxed
+tools, never a model-callable in-process tool.
+
+## The JSON-backed data pattern (small "apps" that save data)
+
+When the user asks to **"build an app"** — a tracker, a board, a checklist, a simple CRUD tool, a
+dashboard over their own data — what they almost always need reduces to: **structured data, a custom
+UI to view/edit it, and somewhere to save it.** In Green Tea the idiomatic shape for that is a
+plugin whose file **is a JSON document acting as a tiny database.** Reach for this pattern by
+default for "app"-flavored requests that boil down to records the user creates, edits, and views.
+
+How it maps onto a plugin:
+
+- **Pick a custom extension** for the data (`.kanban`, `.tracker`, `.budget`, …) and design a JSON
+  schema for it (an object with arrays of records — see the kanban example's `columns`/`tasks`).
+- **The file is the database.** The viewer iframe has **no `localStorage`/IndexedDB and sees only
+  its own bytes** (see [Capabilities and hard limits](#capabilities-and-hard-limits)), so *all*
+  persistence flows through `gt:save` writing the JSON back to disk. There is no server and no
+  external DB — the single file on disk is the entire store.
+- **Two write paths, one file.** The **viewer** renders the JSON and saves edits via `gt:save`
+  (`editable: true`); the **agent** reads and edits the same file with its built-in
+  `read`/`edit`/`write` tools. A [bundled skill](#bundling-a-skill-optional) documenting the schema
+  keeps the agent's chat-driven edits valid. The two stay in sync because they're the same file.
+- **Seed it and let the user create one.** Set `creatable: true` + a `templateFile` so the user gets
+  a **"New …"** menu item that starts from a valid empty document (see
+  [Making a kind user-creatable](#making-a-kind-user-creatable-optional)).
+
+Schema-design rules for data files:
+
+- **Stable, unique ids** on every record (e.g. `task-<rand>`), never renumbered — the viewer keys on them.
+- **Tolerate empty/missing bytes.** A new or `creatable` file can arrive as `""`; `render()` must not
+  crash (guard `JSON.parse` with `try/catch`, default to an empty shape).
+- **Preserve unknown fields** on edit — touch only what the change needs, so older/newer docs round-trip.
+- **Always valid JSON.** Both write paths must keep the file parseable; the viewer should reject/ignore
+  malformed input rather than overwrite good data with garbage.
+
+When **not** to use it: anything needing multi-user sync, large datasets, cross-file queries, a real
+backend/auth, or live external data is beyond a single-file plugin — say so instead of forcing it.
+The kanban worked example at the end of this guide is this pattern end-to-end (JSON file + viewer +
+`creatable` starter + a bundled edit skill).
 
 ## Quick start
 
@@ -177,6 +221,11 @@ Each entry in `contributes.artifacts[]`:
   empty, your viewer must still render empty/missing bytes defensively (see below) — the template
   is a nicer starting state, not something the viewer may assume is present.
 
+`contributes.skills` (optional) — an array of plugin-dir-relative **directory paths**, each
+shipping one or more agent skills that load while the plugin is enabled. Independent of
+`contributes.artifacts`: a plugin may declare either, both, or (rarely) only skills. See
+[Bundling a skill](#bundling-a-skill-optional).
+
 ## Bridge protocol
 
 The host and the sandboxed iframe talk over `window.postMessage`. The iframe posts to
@@ -310,6 +359,86 @@ The plugin/agent never creates these files behind the user's back — the "New �
 deliberate **user** action, exactly like sharing. Setting `creatable: true` only makes the menu
 item available.
 
+## Bundling a skill (optional)
+
+A plugin can ship one or more **agent skills** alongside its viewer, so that installing the plugin
+also teaches Claude how to work with the file type it renders. This is the agent-side counterpart
+to the viewer: the viewer renders the bytes for the **user**, while the bundled skill tells the
+**agent** the file's schema and the safe ways to read and edit it (with the agent's built-in
+`read`/`edit`/`write` tools — a bundled skill adds no new tool).
+
+Opt in with a top-level `contributes.skills` array of **plugin-dir-relative directory paths**:
+
+```json
+{
+  "id": "kanban-board",
+  "name": "Kanban Board",
+  "version": "1.0.0",
+  "minAppVersion": "0.6.0",
+  "description": "View and edit .kanban files as a board",
+  "author": "Green Tea",
+  "contributes": {
+    "skills": ["skills"],
+    "artifacts": [
+      { "kind": "kanban-board", "extensions": ["kanban"], "entry": "viewer.html", "icon": "SquareKanban", "editable": true }
+    ]
+  }
+}
+```
+
+Each path points at a **skill root** (a folder containing a `SKILL.md`) or a parent folder that is
+recursed into for `SKILL.md` files. The conventional layout is a single `skills/` folder holding
+one subfolder per skill:
+
+```
+<base>/.settings/plugins/kanban-board/
+├── manifest.json
+├── viewer.html
+└── skills/
+    └── kanban-board-edit/
+        └── SKILL.md
+```
+
+A bundled `SKILL.md` is an ordinary skill file — YAML frontmatter (`name`, `description`) plus
+markdown instructions:
+
+```markdown
+---
+name: kanban-board-edit
+description: Read and edit Kanban board files (`.kanban`, JSON). Use when the user asks to add, move, reprioritize, or tag tasks/columns on a Kanban board, or to create a new board.
+---
+
+# Editing Kanban boards (`.kanban`)
+
+A `.kanban` file is a single JSON object … (document the schema and the safe edit operations).
+```
+
+Write the `description` so the agent knows **when** to reach for the skill (trigger phrases, the
+file type). The body usually documents the file's schema and the safe editing operations, since the
+agent edits the file directly. The bundled default `kanban-board` plugin is a complete worked
+example — see its `skills/kanban-board-edit/SKILL.md`.
+
+How bundled skills behave:
+
+- **Loaded in place, tied to the plugin.** They load directly from the plugin folder — never copied
+  into the user skills dir, never rewritten — and are active only while the plugin is **enabled**.
+  Disabling or uninstalling the plugin removes them.
+- **Namespaced, and user skills win.** A bundled skill is tracked as `plugin:<id>:<name>`, so it
+  can't collide with a user skill of the same name. But if a **user** skill already has that name,
+  the user's wins and the plugin's is dropped — so give bundled skills specific names
+  (`kanban-board-edit`, not `edit`).
+- **Same trust as any skill, NOT an agent tool.** A bundled skill is markdown instructions plus the
+  agent's already-sandboxed `bash`/`read`/`edit` tools. It does **not** register a model-callable
+  tool and gets no extra privileges — `contributes.skills` is not a way to give a plugin app or
+  system access.
+- **Paths are clamped.** Each entry must stay inside the plugin folder; a path that escapes (`..`,
+  absolute) is rejected. A missing or malformed skill dir is skipped silently and never breaks the
+  rest of skill loading.
+
+Hot-reload covers skills too — add or edit a `SKILL.md` and the plugin registry rebuilds (restart
+once on Linux). `contributes.skills` and `contributes.artifacts` are independent, so a plugin may
+bundle a skill, a viewer, or both.
+
 ## Capabilities and hard limits
 
 A plugin gets these capabilities, and nothing else:
@@ -335,8 +464,11 @@ Hard limits — do not attempt to work around these, they are the security bound
   (see [Multi-file viewers](#multi-file-viewers)). What you can't do is reach **outside** the
   plugin folder or load assets over any scheme other than `https:` and `gt-plugin://`.
 
-If a task needs anything beyond rendering/editing a single file's bytes (reading other notes,
-calling the app, talking to the system), it is **not** a plugin — stop and tell the user.
+If a **viewer** task needs anything beyond rendering/editing a single file's bytes (reading other
+notes, calling the app, talking to the system), it is **not** a plugin viewer — stop and tell the
+user. (Teaching the *agent* to work across files is a different axis: that's a bundled skill, which
+uses the agent's own sandboxed tools — see [Bundling a skill](#bundling-a-skill-optional) — not a
+loophole in the viewer sandbox.)
 
 ## Worked example: an editable CSV table
 
@@ -561,5 +693,8 @@ user's actions; the plugin only ships the starter and provides the snapshot when
 - [ ] If the kind should be user-creatable, `creatable: true` is set and (if a `templateFile` is
       named) that seed file exists in the plugin folder with valid starter content for the
       claimed extension — and `render()` still tolerates empty/missing bytes without crashing.
+- [ ] If the plugin bundles a skill, `contributes.skills` lists its folder(s) (each path inside the
+      plugin dir), every listed folder holds a `SKILL.md` with `name` + a trigger-friendly
+      `description`, and the skill name is specific enough not to collide with a user skill.
 - [ ] No attempt to access other notes, settings, storage, or any app/system API, and no attempt
       to self-publish (publishing is always the user's action).

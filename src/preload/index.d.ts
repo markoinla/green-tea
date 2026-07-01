@@ -19,6 +19,7 @@ import type {
   RestoreResult as GitRestoreResult,
   VaultRestoreResult as GitVaultRestoreResult
 } from '../main/git/git-service'
+import type { AccountUser } from '../shared/share-contract'
 
 interface PluginListItem extends InstalledPlugin {
   name: string
@@ -303,6 +304,13 @@ interface GreenteaApi {
     getStatus(): Promise<Record<string, { connected: boolean }>>
   }
   onLlmAuthChanged(callback: () => void): () => void
+  auth: {
+    signIn(): Promise<{ success: true; user: AccountUser } | { success: false; error: string }>
+    sendMagicLink(email: string): Promise<{ success: boolean; error?: string }>
+    signOut(): Promise<{ revoked: boolean }>
+    getAccount(): Promise<AccountUser | null>
+  }
+  onAuthChanged(callback: () => void): () => void
   dialog: {
     pickFolder(): Promise<string | null>
   }

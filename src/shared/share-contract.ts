@@ -37,3 +37,29 @@ export interface RegisterResponse {
   deviceId: string
   deviceSecret: string
 }
+
+// --- Marketplace accounts / auth layer one (copied VERBATIM from the worker) ---
+
+export interface AccountUser {
+  id: string
+  email: string
+  name?: string
+  image?: string
+}
+
+export interface DesktopAuthorizeRequest {
+  redirect: string
+  state: string
+  code_challenge: string
+}
+
+export interface DesktopTokenRequest {
+  code: string
+  code_verifier: string
+  device?: { id: string; secret: string }
+}
+
+export interface DesktopTokenResponse {
+  token: string
+  user: AccountUser
+}
