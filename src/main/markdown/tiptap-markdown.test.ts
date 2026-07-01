@@ -27,6 +27,8 @@ const CORPUS: Record<string, string> = {
   taskList: '- [x] done\n- [ ] todo',
   nestedTask: '- [ ] parent\n  - [x] child',
   wikiLink: 'See [[Other Note]] here',
+  wikiLinkAnchor: 'See [[Other Note#Heading]] here',
+  wikiLinkSameNoteAnchor: 'Jump to [[#Overview]] below',
   blockquote: '> a quote',
   codeBlock: '```js\nconst x = 1\n```',
   codeNoLang: '```\nplain code\n```',
@@ -148,6 +150,67 @@ describe('feature fidelity', () => {
     expect(inline[2].text).toBe(' after')
     expect(norm('before [[A Note]] after').trim()).toBe('before [[A Note]] after')
   })
+
+  it('parses a plain [[Label]] into a null anchor', () => {
+    const node = markdownToTiptap('[[Other Note]]').content[0].content?.[0]
+    expect(node?.attrs?.anchor).toBeNull()
+  })
+
+  it('parses [[Label#Heading]] into label + anchor attrs', () => {
+    const node = markdownToTiptap('[[Other Note#Heading]]').content[0].content?.[0]
+    expect(node?.type).toBe('wikiLink')
+    expect(node?.attrs?.label).toBe('Other Note')
+    expect(node?.attrs?.anchor).toBe('Heading')
+  })
+
+  it('parses a same-note [[#Heading]] into an empty label + anchor', () => {
+    const node = markdownToTiptap('[[#Overview]]').content[0].content?.[0]
+    expect(node?.type).toBe('wikiLink')
+    expect(node?.attrs?.label).toBe('')
+    expect(node?.attrs?.anchor).toBe('Overview')
+  })
+
+  it('serializes an anchored wikiLink back to [[Label#Anchor]]', () => {
+    const doc: TTDoc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'wikiLink',
+              attrs: { label: 'Other Note', docId: 'abc-123', anchor: 'Heading' }
+            }
+          ]
+        }
+      ]
+    }
+    expect(tiptapToMarkdown(doc).trim()).toBe('[[Other Note#Heading]]')
+  })
+
+  it('serializes a same-note wikiLink (empty label) back to [[#Anchor]]', () => {
+    const doc: TTDoc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'wikiLink', attrs: { label: '', docId: null, anchor: 'Overview' } }]
+        }
+      ]
+    }
+    expect(tiptapToMarkdown(doc).trim()).toBe('[[#Overview]]')
+  })
+
+  it('round-trips anchored and same-note links idempotently', () => {
+    expect(norm('[[Other Note#Heading]]').trim()).toBe('[[Other Note#Heading]]')
+    expect(norm('[[#Overview]]').trim()).toBe('[[#Overview]]')
+    expect(norm('[[Other Note]]').trim()).toBe('[[Other Note]]')
+  })
+
+  it('leaves a degenerate [[]] as literal text (not a wikiLink node)', () => {
+    const inline = markdownToTiptap('a [[]] b').content[0].content ?? []
+    expect(inline.every((n) => n.type !== 'wikiLink')).toBe(true)
+  })
 })
 
 describe('tiptap doc round-trip (editor-shaped input)', () => {
@@ -184,7 +247,7 @@ describe('tiptap doc round-trip (editor-shaped input)', () => {
     const doc2 = markdownToTiptap(md)
     expect(doc2.content[0].content?.[1]).toEqual({
       type: 'wikiLink',
-      attrs: { label: 'Other Note', docId: null }
+      attrs: { label: 'Other Note', docId: null, anchor: null }
     })
   })
 })

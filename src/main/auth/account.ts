@@ -30,6 +30,16 @@ import type {
 const ACCOUNT_TOKEN_KEY = 'account:token'
 
 /**
+ * The raw account bearer for outgoing Authorization headers (registry publish,
+ * report, install accounting), or null when signed out. Local-only and
+ * synchronous — unlike {@link getAccount}, this never makes a network call, so
+ * it is safe to call per request. Callers must never persist or log the value.
+ */
+export function getAccountToken(db: Database.Database): string | null {
+  return getSecret(db, ACCOUNT_TOKEN_KEY)
+}
+
+/**
  * The per-device share credential, if this device has ever published. Stored as
  * `<deviceId>.<deviceSecret>`; presented to `/auth/desktop/token` so the worker can
  * link `devices.user_id` to the signed-in account. We only *read* it — signing in

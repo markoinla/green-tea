@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { AccountUser } from '../shared/share-contract'
+import type {
+  AccountUser,
+  PublishRegistryRequest,
+  PublishRegistryResponse,
+  RegistryItemType,
+  RegistryListItem
+} from '../shared/share-contract'
+import type { RegistryItemWithVersions } from '../main/registry/client'
 
 const greenteaApi = {
   // Raw artifact text by document id, for read-only viewers (e.g. the CSV viewer)
@@ -68,7 +75,18 @@ const greenteaApi = {
       id: string,
       patch: { path: number[]; oldText: string; newHTML: string }
     ): Promise<void> => ipcRenderer.invoke('db:documents:patchHtmlText', id, patch),
-    delete: (id: string): Promise<void> => ipcRenderer.invoke('db:documents:delete', id)
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('db:documents:delete', id),
+    copyToWorkspace: (params: {
+      kind: 'document' | 'folder'
+      mode?: 'copy' | 'move'
+      documentId?: string
+      sourceWorkspaceId?: string
+      folderName?: string
+      folderId?: string
+      targetWorkspaceId: string
+      targetFolder: string
+    }): Promise<{ createdCount: number }> =>
+      ipcRenderer.invoke('db:documents:copyToWorkspace', params)
   },
   metadata: {
     getTypes: (workspaceId: string): Promise<unknown[]> =>
@@ -400,6 +418,42 @@ const greenteaApi = {
       ipcRenderer.removeListener('auth:changed', sub)
     }
   },
+  // Community plugin & skill registry (marketplace layer two). Item ids are
+  // '<handle>/<slug>'. Reads work signed-out; publish/report require sign-in.
+  registry: {
+    search: (opts?: {
+      q?: string
+      sort?: 'installs' | 'recent'
+      type?: RegistryItemType
+    }): Promise<RegistryListItem[]> => ipcRenderer.invoke('registry:search', opts),
+    item: (itemId: string): Promise<RegistryItemWithVersions> =>
+      ipcRenderer.invoke('registry:item', itemId),
+    publish: (request: PublishRegistryRequest): Promise<PublishRegistryResponse> =>
+      ipcRenderer.invoke('registry:publish', request),
+    publishLocal: (opts: {
+      type: RegistryItemType
+      localId: string
+      version: string
+      handle?: string
+    }): Promise<PublishRegistryResponse> => ipcRenderer.invoke('registry:publishLocal', opts),
+    manifest: (
+      itemId: string,
+      version?: string
+    ): Promise<{ version: string; manifest: Record<string, unknown> }> =>
+      ipcRenderer.invoke('registry:manifest', itemId, version),
+    report: (itemId: string, reason: string): Promise<void> =>
+      ipcRenderer.invoke('registry:report', itemId, reason),
+    claimHandle: (handle: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('registry:claimHandle', handle),
+    install: (itemId: string, version?: string): Promise<unknown> =>
+      ipcRenderer.invoke('registry:install', itemId, version),
+    checkUpdates: (
+      installed?: { itemId: string; version: string }[]
+    ): Promise<{ itemId: string; installedVersion: string; latestVersion: string }[]> =>
+      ipcRenderer.invoke('registry:checkUpdates', installed),
+    installs: (): Promise<{ itemId: string; type: RegistryItemType; version: string }[]> =>
+      ipcRenderer.invoke('registry:installs')
+  },
   dialog: {
     pickFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:pick-folder')
   },
@@ -418,6 +472,7 @@ const greenteaApi = {
   },
   bugReport: {
     submit: (data: {
+      type?: 'bug' | 'feedback'
       name?: string
       email?: string
       description: string

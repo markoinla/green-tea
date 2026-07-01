@@ -314,11 +314,15 @@ function pushText(out: TTNode[], text: string, marks: TTMark[]): void {
 }
 
 // `mdast` has no concept of `[[wiki-links]]`, so they arrive as plain text. Split
-// a text run on the `[[Label]]` pattern, emitting `wikiLink` nodes (docId null —
-// title->id resolution happens in the service layer) interleaved with the
-// surrounding text runs, which keep the same marks. A `wikiLink` round-trips
-// back to `[[Label]]` (see inlineToMd), so this split is the exact inverse.
-const WIKI_LINK_RE = /\[\[([^[\]]+)\]\]/g
+// a text run on the `[[Label]]` / `[[Label#Anchor]]` pattern, emitting `wikiLink`
+// nodes (docId null — title->id resolution happens in the service layer)
+// interleaved with the surrounding text runs, which keep the same marks. A
+// `wikiLink` round-trips back to `[[Label]]` (see inlineToMd), so this split is
+// the exact inverse. The label group is `*` (not `+`) so a same-note anchor
+// `[[#Heading]]` (empty label) parses too; the anchor group is optional so a
+// plain `[[Label]]` still matches with anchor undefined. A note title containing
+// `#` is split at the first `#` — an inherent ambiguity of the Obsidian syntax.
+const WIKI_LINK_RE = /\[\[([^[\]#]*)(?:#([^[\]]+))?\]\]/g
 
 function splitWikiLinks(text: string, marks: TTMark[]): TTNode[] {
   const out: TTNode[] = []
@@ -326,10 +330,15 @@ function splitWikiLinks(text: string, marks: TTMark[]): TTNode[] {
   let match: RegExpExecArray | null
   WIKI_LINK_RE.lastIndex = 0
   while ((match = WIKI_LINK_RE.exec(text)) !== null) {
+    // Degenerate `[[]]` (empty label, no anchor) isn't a link — keep it literal.
+    if (match[1] === '' && !match[2]) continue
     if (match.index > last) {
       out.push(textNode(text.slice(last, match.index), marks))
     }
-    out.push({ type: 'wikiLink', attrs: { label: match[1], docId: null } })
+    out.push({
+      type: 'wikiLink',
+      attrs: { label: match[1], docId: null, anchor: match[2] ?? null }
+    })
     last = match.index + match[0].length
   }
   if (last < text.length) out.push(textNode(text.slice(last), marks))
@@ -500,7 +509,10 @@ function imageToMd(node: TTNode): MdNode {
 // collisions (`~~~~`) that re-parse differently and break idempotency.
 const MARK_ORDER = ['link', 'highlight', 'underline', 'strike', 'bold', 'italic', 'code']
 
-type InlineRun = { text: string; marks: TTMark[] } | { hardBreak: true } | { wikiLabel: string }
+type InlineRun =
+  | { text: string; marks: TTMark[] }
+  | { hardBreak: true }
+  | { wikiLabel: string; wikiAnchor: string | null }
 
 function markRank(mark: TTMark): number {
   const i = MARK_ORDER.indexOf(mark.type)
@@ -513,9 +525,13 @@ function inlineToMd(nodes: TTNode[]): MdNode[] {
     if (node.type === 'hardBreak') runs.push({ hardBreak: true })
     else if (node.type === 'text') runs.push({ text: node.text ?? '', marks: node.marks ?? [] })
     else if (node.type === 'wikiLink') {
-      // A wiki-link serializes to literal `[[Label]]` text. The docId is not
-      // written — it is re-resolved from the title on load.
-      runs.push({ wikiLabel: (node.attrs?.label as string) ?? '' })
+      // A wiki-link serializes to literal `[[Label]]` (or `[[Label#Anchor]]`)
+      // text. The docId is not written — it is re-resolved from the title on
+      // load. The anchor (a heading text) rides along in the literal text.
+      runs.push({
+        wikiLabel: (node.attrs?.label as string) ?? '',
+        wikiAnchor: (node.attrs?.anchor as string | null) ?? null
+      })
     }
   }
   return buildInline(runs)
@@ -535,7 +551,8 @@ function buildInline(runs: InlineRun[]): MdNode[] {
       // Emit as a raw `html` node so mdast passes `[[Label]]` through verbatim
       // (a plain text node would escape the brackets to `\[\[`). On reparse the
       // `[[Label]]` text is split back into a wikiLink node (see splitWikiLinks).
-      out.push({ type: 'html', value: `[[${run.wikiLabel}]]` })
+      const inner = run.wikiAnchor ? `${run.wikiLabel}#${run.wikiAnchor}` : run.wikiLabel
+      out.push({ type: 'html', value: `[[${inner}]]` })
       i++
       continue
     }

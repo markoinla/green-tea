@@ -14,10 +14,15 @@ import Suggestion, {
 //
 // `docId` is the resolved target document id (null when unresolved/broken).
 // `label` is the human-readable title shown in the document and written to disk.
+// `anchor` is a heading text for a section link; a same-note `[[#Heading]]` link
+// carries an empty label + an anchor, so it serializes to `[[#Heading]]`.
 
 export interface WikiLinkSuggestionItem {
-  id: string
+  /** Target document id; null for a same-note (`[[#Heading]]`) anchor. */
+  id: string | null
   label: string
+  /** Heading text when this suggestion is a section anchor. */
+  anchor?: string | null
 }
 
 export const wikiLinkSuggestionPluginKey = new PluginKey('wikiLinkSuggestion')
@@ -77,7 +82,10 @@ export const WikiLink = Node.create({
             .chain()
             .focus()
             .insertContentAt(range, [
-              { type: 'wikiLink', attrs: { docId: props.id, label: props.label } },
+              {
+                type: 'wikiLink',
+                attrs: { docId: props.id, label: props.label, anchor: props.anchor ?? null }
+              },
               { type: 'text', text: ' ' }
             ])
             .run()
@@ -97,6 +105,11 @@ export const WikiLink = Node.create({
         default: null,
         parseHTML: (el) => el.getAttribute('data-label'),
         renderHTML: (attrs) => (attrs.label ? { 'data-label': attrs.label } : {})
+      },
+      anchor: {
+        default: null,
+        parseHTML: (el) => el.getAttribute('data-anchor'),
+        renderHTML: (attrs) => (attrs.anchor ? { 'data-anchor': attrs.anchor } : {})
       }
     }
   },
@@ -111,21 +124,24 @@ export const WikiLink = Node.create({
     // unresolved (broken) link is muted with a dashed underline and is not
     // navigable. The literal `[[Label]]` still lives on disk — that's produced by
     // the markdown serializer from the node attrs, independent of this rendering.
-    const resolved = !!node.attrs.docId
+    // A same-note anchor (`[[#Heading]]`) has an empty label + a null docId but
+    // is a valid, clickable link — treat it as resolved.
+    const sameNoteAnchor = !node.attrs.docId && !node.attrs.label && !!node.attrs.anchor
+    const resolved = !!node.attrs.docId || sameNoteAnchor
     const cls = resolved
       ? 'wiki-link wiki-link-resolved text-primary underline cursor-pointer'
       : 'wiki-link wiki-link-broken text-muted-foreground underline decoration-dashed cursor-default'
-    return [
-      'span',
-      mergeAttributes({ 'data-wiki-link': '', class: cls }, HTMLAttributes),
-      `${node.attrs.label ?? ''}`
-    ]
+    // Same-note links show the heading text (their label is empty on disk).
+    const display = (node.attrs.label as string) || (node.attrs.anchor as string) || ''
+    return ['span', mergeAttributes({ 'data-wiki-link': '', class: cls }, HTMLAttributes), display]
   },
 
   // Plain-text (getText / clipboard) keeps the `[[Label]]` syntax so a copied
   // link stays a link when pasted elsewhere — only the on-screen HTML hides it.
   renderText({ node }) {
-    return `[[${node.attrs.label ?? ''}]]`
+    const label = (node.attrs.label as string) ?? ''
+    const anchor = node.attrs.anchor as string | null
+    return `[[${anchor ? `${label}#${anchor}` : label}]]`
   },
 
   addProseMirrorPlugins() {

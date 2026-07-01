@@ -20,9 +20,16 @@ interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   defaultTab?: string
+  /** Accordion section to open within the target tab (currently used by Accounts). */
+  defaultSection?: string
 }
 
-export function SettingsDialog({ open, onOpenChange, defaultTab }: SettingsDialogProps) {
+export function SettingsDialog({
+  open,
+  onOpenChange,
+  defaultTab,
+  defaultSection
+}: SettingsDialogProps) {
   const { settings, updateSetting } = useSettings()
   const [activeTab, setActiveTab] = useState(defaultTab || 'general')
 
@@ -96,7 +103,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab }: SettingsDialo
                   Connect and manage your linked accounts.
                 </p>
               </div>
-              <AccountsTab />
+              <AccountsTab defaultSection={defaultSection} />
             </div>
           </TabsContent>
 

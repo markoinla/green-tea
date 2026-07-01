@@ -23,7 +23,7 @@ import { startAutoCommit, stopAutoCommit } from './git/auto-commit'
 import { ensureSettingsRepo, commitSettingsChange } from './git/settings-git'
 import { startSettingsWatcher, stopSettingsWatcher } from './git/settings-watcher'
 import { startPluginWatcher, stopPluginWatcher } from './plugins/watcher'
-import { seedWelcomeDocument } from './database/seed'
+import { seedDefaultWorkspace } from './database/seed'
 import { startScheduler } from './scheduler/scheduler'
 import { getMcpManager } from './mcp'
 import { countEnabledScheduledTasks } from './database/repositories/scheduled-tasks'
@@ -315,8 +315,8 @@ app.whenReady().then(() => {
   // Seed bundled default skills (re-seeds if deleted)
   seedDefaultSkills(db)
 
-  // Seed welcome document on fresh install
-  seedWelcomeDocument(db)
+  // Seed the bundled starter content into the default workspace on fresh install
+  seedDefaultWorkspace(db)
 
   // Create window and register IPC handlers with window reference
   const mainWindow = createWindow()

@@ -14,6 +14,7 @@ import { registerShareHandlers } from './register-share-handlers'
 import { registerGitHandlers } from './register-git-handlers'
 import { registerLlmAuthHandlers } from './register-llm-auth-handlers'
 import { registerAuthHandlers } from './register-auth-handlers'
+import { registerRegistryHandlers } from './register-registry-handlers'
 
 export function registerIpcHandlers(db: Database.Database, mainWindow?: BrowserWindow): void {
   const context = { db, mainWindow }
@@ -32,4 +33,5 @@ export function registerIpcHandlers(db: Database.Database, mainWindow?: BrowserW
   registerLlmAuthHandlers(context)
   registerAuthHandlers(context)
   registerShareHandlers(context)
+  registerRegistryHandlers(context)
 }

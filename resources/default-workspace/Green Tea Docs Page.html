@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Welcome to Green Tea — Docs</title>
+  <style>
+    :root {
+      --bg: #f7f8f4;
+      --surface: #ffffff;
+      --surface-2: #eef3e8;
+      --ink: #172019;
+      --muted: #657162;
+      --line: #dce5d6;
+      --green: #2f7d4f;
+      --green-dark: #1f5f39;
+      --mint: #dff2e4;
+      --code: #102017;
+      --shadow: 0 18px 50px rgba(25, 43, 30, .10);
+      --radius: 18px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(101, 190, 130, .20), transparent 34rem),
+        linear-gradient(180deg, #fbfcf8 0%, var(--bg) 100%);
+      line-height: 1.65;
+    }
+
+    a { color: var(--green-dark); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .app {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 28px 22px;
+      border-right: 1px solid var(--line);
+      background: rgba(255, 255, 255, .78);
+      backdrop-filter: blur(18px);
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+    .logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      color: white;
+      font-weight: 800;
+      background: linear-gradient(135deg, #2f7d4f, #8acb88);
+      box-shadow: 0 10px 28px rgba(47, 125, 79, .28);
+    }
+    .brand strong { display: block; font-size: 15px; }
+    .brand span { display: block; font-size: 12px; color: var(--muted); }
+
+    nav .label {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+      font-weight: 800;
+      margin: 24px 8px 8px;
+    }
+    nav a {
+      display: block;
+      padding: 8px 10px;
+      border-radius: 10px;
+      color: #334237;
+      font-size: 14px;
+    }
+    nav a.sub { padding-left: 24px; color: var(--muted); font-size: 13px; }
+    nav a:hover { background: var(--surface-2); text-decoration: none; color: var(--green-dark); }
+
+    main {
+      max-width: 980px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 56px 44px 96px;
+    }
+
+    .hero {
+      padding: 46px;
+      background: linear-gradient(135deg, #ffffff 0%, #f1f8ee 100%);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      margin-bottom: 34px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 11px;
+      border-radius: 999px;
+      background: var(--mint);
+      color: var(--green-dark);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: clamp(38px, 6vw, 68px);
+      letter-spacing: -0.055em;
+      line-height: .95;
+      margin: 0 0 20px;
+    }
+    .hero p {
+      font-size: 19px;
+      color: #415040;
+      max-width: 760px;
+      margin: 0;
+    }
+
+    section {
+      background: rgba(255, 255, 255, .72);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 32px;
+      margin: 22px 0;
+    }
+    h2 {
+      font-size: 31px;
+      line-height: 1.15;
+      letter-spacing: -.03em;
+      margin: 0 0 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 {
+      font-size: 21px;
+      line-height: 1.25;
+      letter-spacing: -.02em;
+      margin: 28px 0 10px;
+    }
+    p, li { color: #344137; }
+    ul, ol { padding-left: 1.35rem; }
+    li + li { margin-top: 6px; }
+    strong { color: #142319; }
+    code {
+      font-family: var(--mono);
+      background: #edf4ea;
+      color: var(--code);
+      border: 1px solid #d7e5d3;
+      border-radius: 6px;
+      padding: 2px 5px;
+      font-size: .92em;
+    }
+    pre {
+      background: #101914;
+      color: #eaf7ee;
+      padding: 18px;
+      border-radius: 14px;
+      overflow: auto;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+    }
+    pre code { background: transparent; color: inherit; border: 0; padding: 0; }
+    blockquote {
+      margin: 18px 0;
+      padding: 16px 18px;
+      border-left: 4px solid var(--green);
+      background: #f2f8ef;
+      border-radius: 12px;
+      color: #314236;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin: 22px 0;
+    }
+    .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+    }
+    .card strong { display: block; margin-bottom: 6px; }
+    .card span { color: var(--muted); font-size: 14px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      margin: 18px 0;
+      background: #fff;
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    th { background: #edf5e9; color: #263529; font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+
+    .checklist { list-style: none; padding-left: 0; }
+    .checklist li::before { content: "☐"; color: var(--green); font-weight: 800; margin-right: 9px; }
+
+    .callout {
+      border: 1px solid #bfe0c5;
+      background: linear-gradient(135deg, #eef9f0, #ffffff);
+      border-radius: 18px;
+      padding: 22px;
+      margin-top: 24px;
+    }
+
+    .toolbar-demo {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 12px;
+      margin: 14px 0 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #f8faf6;
+    }
+    .toolbar-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+      padding: 7px 10px;
+      border: 1px solid #dde5da;
+      border-radius: 10px;
+      background: #fff;
+      color: #66706a;
+      font-weight: 700;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .toolbar-button.icon-only { width: 38px; justify-content: center; padding: 7px; }
+    .toolbar-button svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .button-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+    .button-label svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: #6b756f; }
+
+    .footer {
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+      padding: 30px 0 0;
+    }
+
+    @media (max-width: 920px) {
+      .app { grid-template-columns: 1fr; }
+      aside { position: relative; height: auto; }
+      main { padding: 30px 18px 64px; }
+      .hero, section { padding: 24px; }
+      .cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <div class="brand">
+        <div class="logo">GT</div>
+        <div><strong>Green Tea Docs</strong><span>Local-first AI workspace</span></div>
+      </div>
+      <nav aria-label="Documentation navigation">
+        <div class="label">Start here</div>
+        <a href="#html-docs">Working with HTML docs</a>
+        <a href="#getting-started">Getting started</a>
+        <a href="#big-idea">The big idea</a>
+        <div class="label">Workspace</div>
+        <a href="#workspace-folder">Your workspace is a folder</a>
+        <a href="#organizing">Organizing your work</a>
+        <a href="#finding">Finding things</a>
+        <div class="label">Notes & artifacts</div>
+        <a href="#writing-notes">Writing notes</a>
+        <a href="#linking-ideas">Linking ideas</a>
+        <a href="#artifact-types">Default artifact types</a>
+        <div class="label">Agent</div>
+        <a href="#agent-workflow">How to work with the agent</a>
+        <a href="#agent-can-do">What the agent can do</a>
+        <div class="label">Extend</div>
+        <a href="#scheduled-agents">Scheduled agents</a>
+        <a href="#memory">Memory</a>
+        <a href="#skills">Skills</a>
+        <a href="#plugins">Plugins</a>
+        <div class="label">Control</div>
+        <a href="#open-source">Open source & providers</a>
+        <a href="#sharing">Sharing and publishing</a>
+        <a href="#customization">Make it yours</a>
+        <a href="#try-it">Try it</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero" id="top">
+        <div class="eyebrow">Open source · Local-first · AI-native</div>
+        <h1>Welcome to Green Tea</h1>
+        <p>Green Tea is the <strong>open source AI workspace</strong> for people who want AI that actually does things without giving up control of their data.</p>
+      </header>
+
+      <section id="html-docs">
+        <h2>Working with HTML documents</h2>
+        <p>This page is an <strong>HTML artifact</strong>: a polished, rendered document that lives directly in your workspace as a plain <code>.html</code> file. HTML artifacts are useful for reports, dashboards, briefings, slide-style documents, onboarding guides, and anything that benefits from layout, navigation, tables, or light interactivity.</p>
+        <div class="cards">
+          <div class="card"><strong>Rendered in Green Tea</strong><span>Open HTML files in the workspace and they display as finished documents, not raw code.</span></div>
+          <div class="card"><strong>Editable with the agent</strong><span>Ask the agent to revise the copy, layout, sections, styling, or data and it can update the same file.</span></div>
+          <div class="card"><strong>Shareable</strong><span>Use Share to create a web version you can send to other people.</span></div>
+        </div>
+        <h3>Use the HTML toolbar</h3>
+        <p>When an HTML document is open, the toolbar gives you a few document-specific controls:</p>
+        <table>
+          <thead><tr><th>Button</th><th>What it does</th><th>When to use it</th></tr></thead>
+          <tbody>
+            <tr><td><strong class="button-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 10.7 6.8-4.4"></path><path d="m8.6 13.3 6.8 4.4"></path></svg>Share</strong></td><td>Creates a shareable web version of the HTML document, including an editable version when you want someone else to collaborate or make changes.</td><td>Use this when you want to send a polished page outside your workspace.</td></tr>
+            <tr><td><strong class="button-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg>Edit</strong></td><td>Turns on direct text editing inside the rendered web page.</td><td>Use this for quick copy edits without going through the raw HTML.</td></tr>
+            <tr><td><strong class="button-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.034 12.681a.498.498 0 0 1 .647-.647l9 3.5a.5.5 0 0 1-.033.943l-3.444 1.068a1 1 0 0 0-.66.66l-1.067 3.443a.5.5 0 0 1-.943.033z"></path><path d="M5 3a2 2 0 0 0-2 2"></path><path d="M19 3a2 2 0 0 1 2 2"></path><path d="M5 21a2 2 0 0 1-2-2"></path><path d="M9 3h1"></path><path d="M9 21h2"></path><path d="M14 3h1"></path><path d="M3 9v1"></path><path d="M21 9v2"></path><path d="M3 14v1"></path></svg>Select</strong></td><td>Lets you click an element on the page and send that exact selection to the chat.</td><td>Use this when you want the agent to know precisely which heading, paragraph, card, table, or section to change.</td></tr>
+            <tr><td><strong class="button-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>Reload</strong></td><td>Refreshes the rendered page from the current file.</td><td>Use this after changes if the page does not update automatically.</td></tr>
+          </tbody>
+        </table>
+        <h3>Editing HTML documents</h3>
+        <p>HTML artifacts are rendered documents. For quick changes, click <strong>Edit</strong> and update text directly on the page. For larger changes, ask the agent: “add a section,” “make this more concise,” “update the table,” or “restyle this as a briefing.” If you need the agent to work on a specific part of the page, click <strong>Select</strong>, choose the element, and send it to chat so the agent has exact context.</p>
+        <h3>Sharing HTML documents</h3>
+        <p>When you are ready to share, click <strong>Share</strong> to create a web version of the artifact. Shared HTML documents can include an editable version for collaborators, while still keeping your local workspace file as the source of truth.</p>
+      </section>
+
+      <section id="start-here">
+        <h2>Start here</h2>
+        <h3 id="getting-started">Getting started</h3>
+        <ol>
+          <li><strong>Choose an AI model</strong> — use Green Tea's built-in model, or log in with your <strong>Anthropic</strong> or <strong>OpenAI</strong> account.</li>
+          <li><strong>Write a note</strong> — use this workspace like a normal outliner for ideas, drafts, meeting notes, specs, or research.</li>
+          <li><strong>Ask the agent for help</strong> — open the chat sidebar and mention a note with <code>@</code> when you want the agent to use it as context.</li>
+          <li><strong>Create an artifact</strong> — ask Green Tea to make a table, HTML report, dashboard, canvas diagram, checklist, or slide-style page.</li>
+          <li><strong>Try automation</strong> — ask the agent to run a recurring task, like a weekly research digest or workspace summary.</li>
+          <li><strong>Make it yours</strong> — enable skills, connect providers, customize the theme, and organize around your own projects.</li>
+        </ol>
+
+        <h3 id="big-idea">The big idea</h3>
+        <p>Most tools make you choose between a notes app that owns your knowledge, an AI chat tool that forgets your context, or a SaaS workspace that locks your workflows into someone else's cloud.</p>
+        <div class="cards">
+          <div class="card"><strong>Open source</strong><span>Inspect, customize, fork, and extend the workspace.</span></div>
+          <div class="card"><strong>Local-first</strong><span>Your work stays in plain files on your machine.</span></div>
+          <div class="card"><strong>AI-native</strong><span>Agents have context, tools, memory, and permission to help.</span></div>
+        </div>
+        <p>Use Green Tea as a writing and thinking space, but also as a place where agents can research, organize, generate, update, and publish work for you.</p>
+      </section>
+
+      <section id="understand-workspace">
+        <h2>Understand your workspace</h2>
+        <h3 id="workspace-folder">Your workspace is a folder</h3>
+        <p>A Green Tea workspace is just a folder on disk. Notes are Markdown. Tables are CSV. Artifacts are ordinary files. You can open them in Green Tea, Finder, Git, Obsidian, VS Code, or any other tool that understands plain files.</p>
+        <ul>
+          <li><strong>Local-first by default</strong> — your workspace lives on your machine.</li>
+          <li><strong>Portable formats</strong> — Markdown notes, CSV tables, images, PDFs, HTML, and other file-based artifacts.</li>
+          <li><strong>No lock-in</strong> — if Green Tea disappeared tomorrow, your files would still be yours.</li>
+          <li><strong>Version history</strong> — workspaces are automatically version-controlled with Git, so you can restore earlier versions.</li>
+        </ul>
+
+        <h3 id="organizing">Organizing your work</h3>
+        <ul>
+          <li><strong>Workspaces</strong> are top-level folders on disk.</li>
+          <li><strong>Folders</strong> organize notes and artifacts inside a workspace.</li>
+          <li><strong><code>README.md</code></strong> stores stable workspace context.</li>
+          <li><strong><code>MEMORY.md</code></strong> stores the agent's running memory.</li>
+        </ul>
+
+        <h3 id="finding">Finding things</h3>
+        <ul>
+          <li><strong>Cmd/Ctrl-K</strong> — command palette: jump to any note across every workspace.</li>
+          <li><strong>Cmd/Ctrl-F</strong> — find and replace within the current note.</li>
+        </ul>
+      </section>
+
+      <section id="notes-artifacts">
+        <h2>Work with notes and artifacts</h2>
+        <h3 id="writing-notes">Writing notes</h3>
+        <p>Notes are <strong>outlines</strong>. Every line is a block you can nest, fold, and rearrange.</p>
+        <ul>
+          <li>Press <strong>Enter</strong> for a new block, <strong>Tab</strong> to indent, <strong>Shift-Tab</strong> to outdent.</li>
+          <li>Move a block with <strong>Cmd/Ctrl-Shift-↑</strong> and <strong>Cmd/Ctrl-Shift-↓</strong>.</li>
+          <li>Type <strong><code>/</code></strong> at the start of a block to insert text, headings, task lists, blockquotes, code blocks, tables, and images.</li>
+          <li>Use inline formatting like <strong>bold</strong>, <em>italic</em>, <code>inline code</code>, highlight, and links.</li>
+        </ul>
+        <p>Task lists are just blocks with checkboxes:</p>
+        <ul class="checklist">
+          <li>Read this welcome note</li>
+          <li>Ask the agent to draft or reorganize something</li>
+          <li>Create your first artifact</li>
+          <li>Make this workspace your own</li>
+        </ul>
+
+        <h3 id="linking-ideas">Linking ideas</h3>
+        <p>Type <strong><code>[[</code></strong> to link to another note by title. Links show up in reverse on the target note as <strong>backlinks</strong>. Links are stored as plain <code>[[Title]]</code> text on disk, so they stay portable and Obsidian-compatible.</p>
+
+        <h3 id="artifact-types">Default artifact types</h3>
+        <p>Green Tea can store and render <strong>artifacts</strong> beside your notes.</p>
+        <table>
+          <thead><tr><th>Type</th><th>File format</th><th>What it is good for</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Notes</strong></td><td><code>.md</code></td><td>Outlines, writing, linked knowledge, project context, meeting notes, specs, and drafts.</td></tr>
+            <tr><td><strong>Tables</strong></td><td><code>.csv</code></td><td>Editable grids for lists, research matrices, trackers, inventories, and structured data.</td></tr>
+            <tr><td><strong>HTML artifacts</strong></td><td><code>.html</code></td><td>Polished reports, dashboards, briefings, slide-style pages, and interactive documents generated by the agent.</td></tr>
+            <tr><td><strong>Canvas diagrams</strong></td><td><code>.excalidraw</code></td><td>Flowcharts, mind maps, system diagrams, relationship maps, and visual planning.</td></tr>
+            <tr><td><strong>Images</strong></td><td><code>.png</code>, <code>.jpg</code>, <code>.gif</code>, <code>.webp</code>, <code>.svg</code></td><td>Screenshots, diagrams, reference images, exports, and visual assets.</td></tr>
+            <tr><td><strong>PDFs</strong></td><td><code>.pdf</code></td><td>Reports, papers, contracts, scans, and other read-only reference documents.</td></tr>
+            <tr><td><strong>Office documents</strong></td><td><code>.docx</code>, <code>.xlsx</code>, <code>.pptx</code></td><td>Word documents, spreadsheets, and presentations the agent can read, create, or transform with skills.</td></tr>
+            <tr><td><strong>Plugin artifacts</strong></td><td>Varies</td><td>Custom document types added by plugins, like kanban boards, Mermaid diagrams, todo lists, or your own file types.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="ai-agent">
+        <h2>Use the AI agent</h2>
+        <h3 id="agent-workflow">How to work with the agent</h3>
+        <p>Open the <strong>chat sidebar</strong> and talk to the agent. It can work across your workspace, not just the current note.</p>
+        <ul>
+          <li><strong>Mention notes with <code>@</code></strong> to pull them into context.</li>
+          <li>Attach files or images when you want the agent to inspect or transform them.</li>
+          <li>The agent can read and search notes, query by tag/property, create notes and folders, generate artifacts, and reorganize the workspace.</li>
+          <li>It can search the web, read pages, write code, run tools, and create new capabilities for itself.</li>
+          <li>In <strong>Review</strong> mode, edits are proposed as a diff. In <strong>Auto</strong> mode, approved operations can happen immediately.</li>
+        </ul>
+
+        <h3 id="agent-can-do">What the agent can do</h3>
+        <ul>
+          <li>Summarize, rewrite, or restructure a messy note.</li>
+          <li>Research a topic and draft a briefing.</li>
+          <li>Turn a braindump into an organized outline, table, or checklist.</li>
+          <li>Generate an HTML report, dashboard, slide deck, or canvas diagram.</li>
+          <li>Create a recurring workflow, like a weekly research digest.</li>
+          <li>Build a custom skill or plugin for your workflow.</li>
+        </ul>
+      </section>
+
+      <section id="extend">
+        <h2>Automate and extend Green Tea</h2>
+        <h3 id="scheduled-agents">Scheduled agents</h3>
+        <p>Green Tea can run agent tasks in the background. Ask it to do something recurring, like:</p>
+        <blockquote>Every Monday at 9am, summarize what changed in this workspace into a new note.</blockquote>
+        <p>Scheduled agents make Green Tea a workspace that can monitor, update, research, and prepare work while you are away.</p>
+
+        <h3 id="memory">Memory that carries over</h3>
+        <p>The agent keeps lightweight memory in <strong><code>MEMORY.md</code></strong> — facts, preferences, decisions, and project context it should remember across conversations.</p>
+
+        <h3 id="skills">Skills</h3>
+        <p><strong>Skills</strong> are reusable capability packs the agent loads on demand. Green Tea ships with skills for <strong>PDF</strong>, <strong>DOCX</strong>, <strong>XLSX</strong>, and <strong>PPTX</strong> files, plus diagrams, slide decks, intelligence briefings, kanban boards, and more.</p>
+        <ul>
+          <li><strong>skill-creator</strong> — build a brand-new agent skill.</li>
+          <li><strong>plugin-creator</strong> — build a new artifact viewer/editor.</li>
+        </ul>
+
+        <h3 id="plugins">Plugins</h3>
+        <p><strong>Plugins</strong> add new artifact types with their own viewers. Bundled plugins include kanban boards, Mermaid diagrams, and todo lists. Plugins are sandboxed to their own files.</p>
+      </section>
+
+      <section id="control">
+        <h2>Control, sharing, and customization</h2>
+        <h3 id="open-source">Open source, provider login, and self-hosting</h3>
+        <ul>
+          <li><strong>Open source</strong> — inspect the code, contribute, fork it, or self-host the pieces you need.</li>
+          <li><strong>Use your existing AI plans</strong> — log in with Anthropic or OpenAI and use your plan inside Green Tea.</li>
+          <li><strong>Local-first data</strong> — your notes and artifacts live on your machine by default.</li>
+          <li><strong>Optional cloud convenience</strong> — use hosted services when you want sync, managed AI, or publishing convenience.</li>
+        </ul>
+
+        <h3 id="sharing">Sharing and publishing</h3>
+        <p>Publish any note or shareable artifact to the web as a read-only snapshot. You get a clean link at <strong>share.greentea.app</strong>. Shares expire after 30 days, and re-publishing resets the clock.</p>
+
+        <h3 id="customization">Make it yours</h3>
+        <p>Open <strong>Settings</strong> to choose your AI provider/model, log in with Anthropic or OpenAI, connect other providers, toggle Review vs. Auto approval, enable skills/plugins/MCP servers, and customize the theme.</p>
+      </section>
+
+      <section id="try-it">
+        <h2>Try it</h2>
+        <p>Open the chat sidebar and try:</p>
+        <pre><code>Research the best open source alternatives to Notion and turn the result into an HTML briefing report.</code></pre>
+        <p>Or:</p>
+        <pre><code>Every Monday at 8am, check the web for new developments in local-first AI tools and summarize them in this workspace.</code></pre>
+        <div class="callout"><strong>The Green Tea idea:</strong> your notes, your agents, your data — in an open source AI workspace you control.</div>
+      </section>
+
+      <div class="footer">Generated from “Welcome to Green Tea” as a docs-style HTML artifact.</div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import { ReactRenderer } from '@tiptap/react'
 import type { SuggestionProps, SuggestionKeyDownProps } from '@tiptap/suggestion'
-import { FileText } from 'lucide-react'
+import { FileText, Hash } from 'lucide-react'
 import type { WikiLinkSuggestionItem } from './extensions/wiki-link'
 
 interface WikiLinkListProps {
@@ -53,20 +53,24 @@ export const WikiLinkList = forwardRef<WikiLinkListRef, WikiLinkListProps>(
 
     return (
       <div className="bg-popover border border-border rounded-lg shadow-lg overflow-hidden py-1 w-64">
-        {items.map((item, index) => (
-          <button
-            key={item.id}
-            onClick={() => command(item)}
-            className={`flex items-center gap-2.5 w-full px-3 py-1.5 cursor-pointer text-sm text-left transition-colors ${
-              index === selectedIndex
-                ? 'bg-accent text-accent-foreground'
-                : 'text-foreground hover:bg-muted'
-            }`}
-          >
-            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="text-foreground truncate">{item.label}</span>
-          </button>
-        ))}
+        {items.map((item, index) => {
+          const isAnchor = !item.id && !!item.anchor
+          const Icon = isAnchor ? Hash : FileText
+          return (
+            <button
+              key={item.id ?? `#${item.anchor}`}
+              onClick={() => command(item)}
+              className={`flex items-center gap-2.5 w-full px-3 py-1.5 cursor-pointer text-sm text-left transition-colors ${
+                index === selectedIndex
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-foreground hover:bg-muted'
+              }`}
+            >
+              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="text-foreground truncate">{item.label || item.anchor}</span>
+            </button>
+          )
+        })}
       </div>
     )
   }

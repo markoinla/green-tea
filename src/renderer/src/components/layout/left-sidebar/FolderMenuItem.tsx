@@ -5,6 +5,8 @@ import {
   ChevronRight,
   ClipboardCopy,
   FilePlus,
+  FolderInput,
+  FolderSymlink,
   FolderPlus,
   Pencil,
   Shapes,
@@ -43,6 +45,8 @@ interface FolderMenuItemProps {
   onRenameDoc: (id: string, newTitle: string) => void
   onDeleteDoc: (id: string) => void
   onDuplicateDoc: (id: string) => void
+  onTransferDocToWorkspace: (id: string, mode: 'copy' | 'move') => void
+  onTransferFolderToWorkspace: (id: string, mode: 'copy' | 'move') => void
   onRenameFolder: (id: string, newName: string) => void
   onDeleteFolder: (id: string) => void
   onToggleFolder: (id: string, collapsed: number) => void
@@ -63,6 +67,8 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
   onRenameDoc,
   onDeleteDoc,
   onDuplicateDoc,
+  onTransferDocToWorkspace,
+  onTransferFolderToWorkspace,
   onRenameFolder,
   onDeleteFolder,
   onToggleFolder,
@@ -249,6 +255,14 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                   <ClipboardCopy className="h-3.5 w-3.5 mr-2" />
                   Copy Path
                 </ContextMenuItem>
+                <ContextMenuItem onClick={() => onTransferFolderToWorkspace(folder.id, 'copy')}>
+                  <FolderInput className="h-3.5 w-3.5 mr-2" />
+                  Copy to workspace…
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => onTransferFolderToWorkspace(folder.id, 'move')}>
+                  <FolderSymlink className="h-3.5 w-3.5 mr-2" />
+                  Move to workspace…
+                </ContextMenuItem>
                 <ContextMenuItem onClick={() => onDeleteFolder(folder.id)}>
                   <Trash2 className="h-3.5 w-3.5 mr-2" />
                   Delete
@@ -272,6 +286,8 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                     onRenameDoc={onRenameDoc}
                     onDeleteDoc={onDeleteDoc}
                     onDuplicateDoc={onDuplicateDoc}
+                    onTransferDocToWorkspace={onTransferDocToWorkspace}
+                    onTransferFolderToWorkspace={onTransferFolderToWorkspace}
                     onRenameFolder={onRenameFolder}
                     onDeleteFolder={onDeleteFolder}
                     onToggleFolder={onToggleFolder}
@@ -294,6 +310,7 @@ export const FolderMenuItem = React.memo(function FolderMenuItem({
                     onSelect={(e) => onSelectDoc(doc.id, { newTab: e.metaKey || e.ctrlKey })}
                     onRename={(newTitle) => onRenameDoc(doc.id, newTitle)}
                     onDuplicate={() => onDuplicateDoc(doc.id)}
+                    onTransferToWorkspace={(mode) => onTransferDocToWorkspace(doc.id, mode)}
                     onDelete={() => onDeleteDoc(doc.id)}
                   />
                 ))}

@@ -9,6 +9,7 @@ import * as workspaces from '../database/repositories/workspaces'
 import * as settings from '../database/repositories/settings'
 import * as conversations from '../database/repositories/conversations'
 import * as documents from '../vault/documents-service'
+import { copyItemToWorkspace, type CopyToWorkspaceParams } from '../vault/copy-service'
 import * as documentViewState from '../database/repositories/document-view-state'
 import { MAX_ARTIFACT_BYTES, atomicWriteFile } from '../vault/note-store'
 import { markSelfWrite } from '../vault/self-write'
@@ -193,6 +194,28 @@ export function registerDbHandlers({ db, mainWindow }: IpcHandlerContext): void 
     documents.reindexWorkspace(db, workspaceId)
     mainWindow?.webContents.send('documents:changed')
     mainWindow?.webContents.send('folders:changed')
+  })
+
+  // Copy or MOVE a single document or a whole folder subtree into a target
+  // workspace/folder. Filesystem-only copy first (fresh ids, collision-safe names),
+  // then reindex the TARGET workspace. For a move we additionally delete the source
+  // via the canonical delete helpers (which clean the source's disk + DB rows) —
+  // safe because the copy re-stamped notes with fresh ids, so the source id we
+  // delete never matches the new target row. Finally broadcast so both source and
+  // target trees/lists refresh live. Returns { createdCount } (files copied).
+  ipcMain.handle('db:documents:copyToWorkspace', async (_event, params: CopyToWorkspaceParams) => {
+    const result = copyItemToWorkspace(db, params)
+    documents.reindexWorkspace(db, params.targetWorkspaceId)
+    if (params.mode === 'move') {
+      if (params.kind === 'document' && params.documentId) {
+        await documents.deleteDocument(db, params.documentId)
+      } else if (params.kind === 'folder' && params.folderId) {
+        await documents.deleteFolder(db, params.folderId)
+      }
+    }
+    mainWindow?.webContents.send('documents:changed')
+    mainWindow?.webContents.send('folders:changed')
+    return result
   })
 
   ipcMain.handle('db:documents:search', (_event, query: string) => {

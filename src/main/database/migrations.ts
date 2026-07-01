@@ -116,7 +116,7 @@ export function runMigrations(db: Database.Database): void {
   if (hasWorkspaceIdDoc.cnt === 0) {
     // Create default workspace
     const defaultId = randomUUID()
-    db.prepare('INSERT INTO workspaces (id, name) VALUES (?, ?)').run(defaultId, 'Default')
+    db.prepare('INSERT INTO workspaces (id, name) VALUES (?, ?)').run(defaultId, 'Green Tea Workspace')
 
     // Add workspace_id to documents
     db.exec('ALTER TABLE documents ADD COLUMN workspace_id TEXT REFERENCES workspaces(id)')

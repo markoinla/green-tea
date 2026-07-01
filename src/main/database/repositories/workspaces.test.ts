@@ -34,7 +34,7 @@ describe('workspaces repository', () => {
   })
 
   it('lists workspaces ordered by created_at ASC', () => {
-    // Note: migration creates a 'Default' workspace
+    // Note: migration creates a 'Green Tea Workspace' workspace
     const existing = listWorkspaces(db)
     const ws = createWorkspace(db, { name: 'Second' })
 
@@ -74,11 +74,11 @@ describe('workspaces repository', () => {
     expect(ws.path).toBe('/tmp/some/picked')
   })
 
-  it('backfills the seeded Default workspace path on migration', () => {
+  it('backfills the seeded default workspace path on migration', () => {
     const all = listWorkspaces(db)
-    const def = all.find((w) => w.name === 'Default')
+    const def = all.find((w) => w.name === 'Green Tea Workspace')
     expect(def).toBeDefined()
-    expect(def!.path).toMatch(/Documents\/Green Tea\/Default$/)
+    expect(def!.path).toMatch(/Documents\/Green Tea\/Green Tea Workspace$/)
   })
 
   describe('path helpers', () => {

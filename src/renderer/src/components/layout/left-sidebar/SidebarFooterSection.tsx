@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Settings, Bug } from 'lucide-react'
+import { Settings, MessageSquare } from 'lucide-react'
 import {
   SidebarFooter,
   SidebarMenu,
@@ -19,13 +19,22 @@ interface SidebarFooterSectionProps {
 export function SidebarFooterSection({ selectedWorkspaceId }: SidebarFooterSectionProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined)
+  const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined)
   const [bugReportOpen, setBugReportOpen] = useState(false)
   const { status: updateStatus } = useAutoUpdate()
 
   useEffect(() => {
     function handleOpenSettingsTab(e: Event) {
-      const tab = (e as CustomEvent).detail as string
-      setSettingsTab(tab)
+      // Detail is either a plain tab name, or { tab, section } to also open a
+      // specific accordion section within that tab (e.g. AI model subscriptions).
+      const detail = (e as CustomEvent).detail as string | { tab: string; section?: string }
+      if (typeof detail === 'string') {
+        setSettingsTab(detail)
+        setSettingsSection(undefined)
+      } else {
+        setSettingsTab(detail.tab)
+        setSettingsSection(detail.section)
+      }
       setSettingsOpen(true)
     }
     window.addEventListener('open-settings-tab', handleOpenSettingsTab)
@@ -67,10 +76,10 @@ export function SidebarFooterSection({ selectedWorkspaceId }: SidebarFooterSecti
                   size="sm"
                   className="w-8 justify-center shrink-0"
                 >
-                  <Bug className="h-4 w-4" />
+                  <MessageSquare className="h-4 w-4" />
                 </SidebarMenuButton>
               </TooltipTrigger>
-              <TooltipContent side="top">Report a bug or issue</TooltipContent>
+              <TooltipContent side="top">Report a bug or share feedback</TooltipContent>
             </Tooltip>
           </div>
         </SidebarMenuItem>
@@ -80,9 +89,13 @@ export function SidebarFooterSection({ selectedWorkspaceId }: SidebarFooterSecti
         open={settingsOpen}
         onOpenChange={(open) => {
           setSettingsOpen(open)
-          if (!open) setSettingsTab(undefined)
+          if (!open) {
+            setSettingsTab(undefined)
+            setSettingsSection(undefined)
+          }
         }}
         defaultTab={settingsTab}
+        defaultSection={settingsSection}
       />
     </SidebarFooter>
   )

@@ -1,6 +1,6 @@
 {
   "name": "greentea",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Green Tea - knowledge work, caffeinated.",
   "main": "./out/main/index.js",
   "author": "Marko Stankovic <m@marko.la>",
@@ -39,8 +39,8 @@
     "@atlaskit/pragmatic-drag-and-drop": "^2.0.1",
     "@atlaskit/pragmatic-drag-and-drop-auto-scroll": "^3.0.0",
     "@atlaskit/pragmatic-drag-and-drop-hitbox": "^2.0.0",
-    "@earendil-works/pi-ai": "0.80.2",
-    "@earendil-works/pi-coding-agent": "0.80.2",
+    "@earendil-works/pi-ai": "0.80.3",
+    "@earendil-works/pi-coding-agent": "0.80.3",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@excalidraw/excalidraw": "^0.18.1",

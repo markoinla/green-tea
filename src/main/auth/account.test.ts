@@ -6,6 +6,17 @@ import { createHash } from 'crypto'
 // device-credential tests do so the round-trip works headless.
 const openExternalMock = vi.fn<(url: string) => Promise<void>>()
 
+// account.ts probes for installed Chromium binaries with fs.existsSync and, when one
+// is found, spawns a REAL `--app` browser window instead of shell.openExternal.
+// Pretend no Chromium is installed so openAuthWindow falls through to the mocked
+// shell.openExternal and the flow stays headless on machines with Chrome.
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  const existsSync = (path: Parameters<typeof actual.existsSync>[0]): boolean =>
+    String(path).startsWith('/Applications/') ? false : actual.existsSync(path)
+  return { ...actual, existsSync, default: { ...actual, existsSync } }
+})
+
 vi.mock('electron', () => ({
   safeStorage: {
     isEncryptionAvailable: () => true,
@@ -160,7 +171,7 @@ describe('signOut', () => {
     expect(out).toEqual({ revoked: true })
     expect(getSecret(db, ACCOUNT_TOKEN_KEY)).toBeNull()
     const call = fetchSpy.mock.calls[0]
-    expect(String(call[0])).toBe('https://account.test/auth/sign-out')
+    expect(String(call[0])).toBe('https://account.test/auth/desktop/revoke')
     expect((call[1] as RequestInit).headers).toMatchObject({
       Authorization: 'Bearer acct_tok_123'
     })

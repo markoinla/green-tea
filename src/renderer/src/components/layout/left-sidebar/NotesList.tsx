@@ -54,6 +54,10 @@ interface NotesListProps {
   onRenameDoc: (id: string, newTitle: string) => void
   onDeleteDoc: (id: string) => void
   onDuplicateDoc: (id: string) => void
+  /** Open the copy/move-to-workspace dialog for a document. */
+  onTransferDocToWorkspace: (id: string, mode: 'copy' | 'move') => void
+  /** Open the copy/move-to-workspace dialog for a folder. */
+  onTransferFolderToWorkspace: (id: string, mode: 'copy' | 'move') => void
   onRenameFolder: (id: string, newName: string) => void
   onDeleteFolder: (id: string) => void
   onToggleFolder: (id: string, collapsed: number) => void
@@ -129,6 +133,8 @@ export function NotesList({
   onRenameDoc,
   onDeleteDoc,
   onDuplicateDoc,
+  onTransferDocToWorkspace,
+  onTransferFolderToWorkspace,
   onRenameFolder,
   onDeleteFolder,
   onToggleFolder,
@@ -221,6 +227,8 @@ export function NotesList({
                       onRenameDoc={onRenameDoc}
                       onDeleteDoc={onDeleteDoc}
                       onDuplicateDoc={onDuplicateDoc}
+                      onTransferDocToWorkspace={onTransferDocToWorkspace}
+                      onTransferFolderToWorkspace={onTransferFolderToWorkspace}
                       onRenameFolder={onRenameFolder}
                       onDeleteFolder={onDeleteFolder}
                       onToggleFolder={onToggleFolder}
@@ -245,6 +253,7 @@ export function NotesList({
                         onSelect={(e) => onSelectDoc(doc.id, { newTab: e.metaKey || e.ctrlKey })}
                         onRename={(newTitle) => onRenameDoc(doc.id, newTitle)}
                         onDuplicate={() => onDuplicateDoc(doc.id)}
+                        onTransferToWorkspace={(mode) => onTransferDocToWorkspace(doc.id, mode)}
                         onDelete={() => onDeleteDoc(doc.id)}
                       />
                     ))}

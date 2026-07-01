@@ -5,7 +5,8 @@ import {
   ChevronDown,
   Plus,
   X as XIcon,
-  Settings2
+  Settings2,
+  Sparkles
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -173,6 +174,19 @@ export function ChatHeader({
                 )
               })}
               <DropdownMenuSeparator />
+              <button
+                className="flex w-full items-center gap-1.5 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent('open-settings-tab', {
+                      detail: { tab: 'accounts', section: 'ai-models' }
+                    })
+                  )
+                }}
+              >
+                <Sparkles className="h-3 w-3" />
+                Use your OpenAI or Anthropic subscription
+              </button>
               <button
                 className="flex w-full items-center gap-1.5 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 onClick={() => {

@@ -6,6 +6,11 @@ import type { InstalledPlugin, PluginManifest } from './types'
 import { downloadFromGitHub } from '../util/github-download'
 import { getSettingsDir } from '../agent/paths'
 import { getSetting } from '../database/repositories/settings'
+import {
+  registryDirName,
+  writeRegistryFile,
+  writeRegistryProvenance
+} from '../registry/install-files'
 
 export function getPluginsDir(db: Database.Database): string {
   const dir = join(getSettingsDir(db), 'plugins')
@@ -234,6 +239,75 @@ export async function installPluginFromUrl(
     manifest,
     dir: pluginDir,
     enabled: !disabled.includes(manifest.id)
+  }
+}
+
+/**
+ * Install a plugin from already-downloaded community-registry files. Lives here
+ * (not in registry/client.ts) so it can call the module-private `loadManifest`
+ * for the same validate-then-write shape as `installPluginFromUrl`.
+ *
+ * Registry installs are namespaced on disk as `<handle>--<slug>` (slugs are
+ * only unique per handle), and `loadManifest` requires id === dirname, so the
+ * server-validated manifest's `id` is rewritten to that derived name. The
+ * manifest is ALWAYS the server-validated one passed in `manifest` — a bundle
+ * file named `manifest.json` is rejected (it could shadow the validated copy).
+ * A `.registry.json` provenance marker records the registry item id + version
+ * for update checks, consent gating, and publish-button gating.
+ */
+export function installPluginFromRegistry(
+  db: Database.Database,
+  opts: {
+    itemId: string
+    version: string
+    manifest: Record<string, unknown>
+    files: { path: string; content: Buffer }[]
+  }
+): InstalledPlugin {
+  const dirName = registryDirName(opts.itemId)
+  const pluginDir = join(getPluginsDir(db), dirName)
+
+  // Updates overwrite in place; versions are immutable server-side, so the
+  // incoming files fully define the new state.
+  if (existsSync(pluginDir)) {
+    rmSync(pluginDir, { recursive: true })
+  }
+
+  try {
+    mkdirSync(pluginDir, { recursive: true })
+    for (const file of opts.files) {
+      if (file.path === 'manifest.json') {
+        throw new Error(
+          'Registry package illegally contains manifest.json (the validated manifest is served separately)'
+        )
+      }
+      writeRegistryFile(pluginDir, file.path, file.content)
+    }
+    writeFileSync(
+      join(pluginDir, 'manifest.json'),
+      JSON.stringify({ ...opts.manifest, id: dirName }, null, 2)
+    )
+    writeRegistryProvenance(pluginDir, {
+      itemId: opts.itemId,
+      type: 'plugin',
+      version: opts.version,
+      installedAt: new Date().toISOString()
+    })
+
+    const manifest = loadManifest(pluginDir)
+    const disabled = getDisabledPlugins(db)
+    return {
+      id: manifest.id,
+      manifest,
+      dir: pluginDir,
+      enabled: !disabled.includes(manifest.id)
+    }
+  } catch (err) {
+    // Clean up on any validation/write failure — never leave a half-written plugin.
+    if (existsSync(pluginDir)) {
+      rmSync(pluginDir, { recursive: true })
+    }
+    throw err
   }
 }
 

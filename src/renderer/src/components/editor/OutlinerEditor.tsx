@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { useEditor, EditorContent, type JSONContent } from '@tiptap/react'
+import { useEditor, EditorContent, type JSONContent, type Editor } from '@tiptap/react'
+import type { EditorView } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
@@ -27,12 +28,25 @@ import { TableContextMenu } from './TableContextMenu'
 import { SearchBar } from './SearchBar'
 import { renderSlashSuggestion } from './SlashCommandList'
 import { renderWikiLinkSuggestion } from './WikiLinkList'
+import { collectHeadings, headingSlug } from './heading-anchors'
 import { DocumentTitle } from './DocumentTitle'
 import { NoteFacetBar } from './NoteFacetBar'
 import { cn } from '@renderer/lib/utils'
 import type { Document } from '../../../../main/database/types'
 
 const lowlight = createLowlight()
+
+// Scroll the editor to the first heading whose slug matches `anchor` (a
+// same-note `[[#Heading]]` link). No-op when nothing matches, so a stale anchor
+// simply does nothing.
+function scrollToHeadingInView(view: EditorView, anchor: string): void {
+  const slug = headingSlug(anchor)
+  const match = collectHeadings(view.state.doc).find((h) => headingSlug(h.text) === slug)
+  if (!match) return
+  const dom = view.nodeDOM(match.pos)
+  const el = dom instanceof HTMLElement ? dom : ((dom as ChildNode | null)?.parentElement ?? null)
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
 
 interface OutlinerEditorProps {
   content?: JSONContent
@@ -149,7 +163,15 @@ export function OutlinerEditor({
       }),
       WikiLink.configure({
         suggestion: {
-          items: async ({ query }: { query: string }) => {
+          items: async ({ query, editor: e }: { query: string; editor: Editor }) => {
+            // `[[#frag` lists headings in the CURRENT note (same-note anchor).
+            if (query.startsWith('#')) {
+              const frag = headingSlug(query.slice(1))
+              return collectHeadings(e.state.doc)
+                .filter((h) => h.text && (frag === '' || headingSlug(h.text).includes(frag)))
+                .slice(0, 8)
+                .map((h) => ({ id: null, label: '', anchor: h.text }))
+            }
             const docs = (await window.api.documents.search(query)) as Array<{
               id: string
               title: string
@@ -162,12 +184,31 @@ export function OutlinerEditor({
       })
     ],
     editorProps: {
-      handleClickOn: (_view, _pos, node, _nodePos, event) => {
+      handleClickOn: (view, _pos, node, _nodePos, event) => {
         if (node.type.name !== 'wikiLink') return false
         const docId = node.attrs.docId as string | null
+        const anchor = node.attrs.anchor as string | null
+        const label = node.attrs.label as string | null
+        // Same-note anchor `[[#Heading]]` (empty label, no docId): scroll locally.
+        // A non-empty label with a null docId is a broken link — fall through.
+        if (anchor && !docId && !label) {
+          scrollToHeadingInView(view, anchor)
+          return true
+        }
         if (!docId) return false
         // Cmd/Ctrl-click opens the linked note in a new tab (matches the file tree).
         onNavigateToDocRef.current?.(docId, { newTab: event.metaKey || event.ctrlKey })
+        return true
+      },
+      // Standard markdown anchor links `[text](#slug)` render as real <a href="#…">
+      // (the Link mark). Without this the browser would hash-navigate to
+      // localhost/#slug and go nowhere; instead we scroll to the matching heading.
+      handleClick: (view, _pos, event) => {
+        const a = (event.target as HTMLElement | null)?.closest('a[href^="#"]')
+        if (!a) return false
+        event.preventDefault()
+        const slug = decodeURIComponent((a.getAttribute('href') ?? '#').slice(1))
+        if (slug) scrollToHeadingInView(view, slug)
         return true
       }
     },

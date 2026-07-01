@@ -1,0 +1,13 @@
+Competitor,Category,Open Source?,Local-First?,AI Approach,Agentic / Background Work?
+Green Tea,Open-source AI workspace / AI coworker,Yes,Yes,"Built-in, sign in with OpenAI or Anthropic, open-source model + BYOK / managed options","Yes — scheduled agents, skills, MCP, artifact creation"
+Notion / Notion AI,Cloud workspace + AI,No,No,Cloud AI; full AI features tied to paid tiers,"Partial — Notion AI Agents, but cloud-locked"
+Obsidian,Local Markdown PKM,No — proprietary,Yes,No native AI; plugin-based only,No
+AppFlowy,Open-source Notion alternative,Yes — AGPL,Yes,"Built-in assistive AI: writing, summarizing, table autofill, Ollama support",Limited — not meaningfully agentic
+Logseq,Outliner / graph PKM,Yes — AGPL,Yes,Plugin-based AI only,No
+Joplin,Open-source Evernote alternative,Yes — AGPL,Yes,Plugin-based AI only,No
+Anytype,P2P object workspace,Source-available — not true OSI open source,Yes,Built-in object generation / AI features,Limited — not agentic
+Mem.ai,AI-native notes / auto-organization,No,No,AI organizes and searches notes,Partial — but not task-execution oriented
+Reflect,Polished AI notes app,No,No,GPT-4o / Claude / Gemini for summarization and linking,No
+Apple Notes,Default personal notes,No,Yes — Apple ecosystem only,Apple Intelligence summaries / suggestions,No
+Claude Code,Developer AI agents,No,Yes,Full coding-agent workflow,"Yes — agentic, but developer-oriented"
+Lovable / Bolt / v0,AI app builders,No — mostly,No / mixed,Generate code/apps from prompts,Partial — developer/product-builder oriented

@@ -19,7 +19,25 @@ import type {
   RestoreResult as GitRestoreResult,
   VaultRestoreResult as GitVaultRestoreResult
 } from '../main/git/git-service'
-import type { AccountUser } from '../shared/share-contract'
+import type {
+  AccountUser,
+  PublishRegistryRequest,
+  PublishRegistryResponse,
+  RegistryItemType,
+  RegistryListItem
+} from '../shared/share-contract'
+import type { RegistryItemWithVersions } from '../main/registry/client'
+
+export type CopyToWorkspaceParams = {
+  kind: 'document' | 'folder'
+  mode?: 'copy' | 'move'
+  documentId?: string
+  sourceWorkspaceId?: string
+  folderName?: string
+  folderId?: string
+  targetWorkspaceId: string
+  targetFolder: string
+}
 
 interface PluginListItem extends InstalledPlugin {
   name: string
@@ -57,6 +75,22 @@ interface MarketplaceSkillInfo {
   version: string
   path: string
 }
+
+/** A registry-sourced install, read from the on-disk `.registry.json` marker. */
+interface RegistryInstalledRef {
+  itemId: string
+  /** 'skill' | 'plugin' — badging/gating must match on type + slug, not slug alone. */
+  type: 'skill' | 'plugin'
+  version: string
+}
+
+interface RegistryUpdateInfo {
+  itemId: string
+  installedVersion: string
+  latestVersion: string
+}
+
+type RegistryInstallResult = ({ type: 'plugin' } & PluginListItem) | ({ type: 'skill' } & SkillInfo)
 
 interface McpServerConfig {
   command?: string
@@ -151,6 +185,7 @@ interface GreenteaApi {
       patch: { path: number[]; oldText: string; newHTML: string }
     ): Promise<void>
     delete(id: string): Promise<void>
+    copyToWorkspace(params: CopyToWorkspaceParams): Promise<{ createdCount: number }>
   }
   metadata: {
     getTypes(workspaceId: string): Promise<PropertyTypeEntry[]>
@@ -311,6 +346,32 @@ interface GreenteaApi {
     getAccount(): Promise<AccountUser | null>
   }
   onAuthChanged(callback: () => void): () => void
+  registry: {
+    search(opts?: {
+      q?: string
+      sort?: 'installs' | 'recent'
+      type?: RegistryItemType
+    }): Promise<RegistryListItem[]>
+    item(itemId: string): Promise<RegistryItemWithVersions | null>
+    publish(request: PublishRegistryRequest): Promise<PublishRegistryResponse>
+    publishLocal(opts: {
+      type: RegistryItemType
+      localId: string
+      version: string
+      handle?: string
+    }): Promise<PublishRegistryResponse>
+    manifest(
+      itemId: string,
+      version?: string
+    ): Promise<{ version: string; manifest: Record<string, unknown> }>
+    report(itemId: string, reason: string): Promise<void>
+    claimHandle(handle: string): Promise<{ ok: boolean; error?: string }>
+    install(itemId: string, version?: string): Promise<RegistryInstallResult>
+    checkUpdates(
+      installed?: Pick<RegistryInstalledRef, 'itemId' | 'version'>[]
+    ): Promise<RegistryUpdateInfo[]>
+    installs(): Promise<RegistryInstalledRef[]>
+  }
   dialog: {
     pickFolder(): Promise<string | null>
   }
@@ -324,6 +385,7 @@ interface GreenteaApi {
   }
   bugReport: {
     submit(data: {
+      type?: 'bug' | 'feedback'
       name?: string
       email?: string
       description: string

@@ -1,4 +1,5 @@
-import { RefreshCw, Check, Loader2, Download } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { RefreshCw, Check, Loader2, Download, Search, ArrowUpCircle } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -9,25 +10,68 @@ import {
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { useMarketplace } from '@renderer/hooks/useMarketplace'
 import { useSkills } from '@renderer/hooks/useSkills'
+import {
+  registrySlug,
+  useCommunityInstall,
+  useCommunitySearch,
+  useRegistryStatus
+} from '@renderer/hooks/useRegistry'
+import { RegistryConsentDialog } from './RegistryConsentDialog'
 
 interface MarketplaceDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
+function SourceBadge({ source }: { source: 'official' | 'community' }) {
+  return (
+    <span
+      className={`text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 border shrink-0 ${
+        source === 'official'
+          ? 'bg-accent/10 text-accent border-accent/30'
+          : 'bg-muted text-muted-foreground border-border'
+      }`}
+    >
+      {source}
+    </span>
+  )
+}
+
 export function MarketplaceDialog({ open, onOpenChange }: MarketplaceDialogProps) {
   const { registry, loading, error, refresh } = useMarketplace()
   const { skills, installing, error: installError, installSkill } = useSkills()
+  const { installs, updates } = useRegistryStatus()
+  const community = useCommunitySearch('skill', open)
+  const communityInstall = useCommunityInstall()
+  const [query, setQuery] = useState('')
 
   const installedNames = new Set(skills.map((s) => s.name))
+  // Only SKILL provenance counts here — a same-id would be impossible, but a
+  // registry plugin must never mark a community skill card as installed.
+  const installedItemIds = new Set(installs.filter((i) => i.type === 'skill').map((i) => i.itemId))
+  const updatableItemIds = new Set(updates.map((u) => u.itemId))
 
   function skillUrl(path: string): string {
     return `https://github.com/markoinla/green-tea/tree/main/${path}`
   }
 
-  function handleInstall(path: string) {
-    installSkill(skillUrl(path))
+  // Official entries are filtered client-side; community entries are
+  // re-queried server-side from the same search box.
+  const officialFiltered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return registry
+    return registry.filter(
+      (entry) => entry.name.toLowerCase().includes(q) || entry.description.toLowerCase().includes(q)
+    )
+  }, [registry, query])
+
+  function setSearch(value: string) {
+    setQuery(value)
+    community.setQuery(value)
   }
+
+  const anyLoading = loading || community.loading
+  const busy = !!installing || !!communityInstall.installing
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -36,20 +80,42 @@ export function MarketplaceDialog({ open, onOpenChange }: MarketplaceDialogProps
           <div className="flex items-center justify-between">
             <div>
               <DialogTitle>Skill Marketplace</DialogTitle>
-              <DialogDescription>Browse and install skills for your agent.</DialogDescription>
+              <DialogDescription>
+                Browse and install official and community skills for your agent.
+              </DialogDescription>
             </div>
             <button
               type="button"
               className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
-              onClick={refresh}
-              disabled={loading}
+              onClick={() => {
+                refresh()
+                community.refresh()
+              }}
+              disabled={anyLoading}
             >
-              <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-4 ${anyLoading ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </DialogHeader>
 
-        {loading && (
+        <RegistryConsentDialog
+          request={communityInstall.consent}
+          onAllow={() => void communityInstall.confirmConsent()}
+          onCancel={communityInstall.cancelConsent}
+        />
+
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <input
+            type="text"
+            className="w-full h-9 rounded-lg border border-border bg-background text-foreground text-sm pl-9 pr-3"
+            placeholder="Search skills..."
+            value={query}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        {anyLoading && registry.length === 0 && community.items.length === 0 && (
           <div className="grid grid-cols-3 gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="rounded-lg border border-border p-4 space-y-3">
@@ -63,7 +129,7 @@ export function MarketplaceDialog({ open, onOpenChange }: MarketplaceDialogProps
         )}
 
         {error && !loading && (
-          <div className="text-center py-8 space-y-3">
+          <div className="text-center py-4 space-y-3">
             <p className="text-sm text-red-500">{error}</p>
             <button
               type="button"
@@ -74,53 +140,125 @@ export function MarketplaceDialog({ open, onOpenChange }: MarketplaceDialogProps
             </button>
           </div>
         )}
-
-        {!loading && !error && registry.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-sm text-muted-foreground">No skills available yet.</p>
-          </div>
+        {community.error && !community.loading && (
+          <p className="text-xs text-muted-foreground text-center">
+            Community skills unavailable: {community.error}
+          </p>
         )}
 
         {installError && <p className="text-sm text-red-500">{installError}</p>}
+        {communityInstall.error && <p className="text-sm text-red-500">{communityInstall.error}</p>}
 
-        {!loading && !error && registry.length > 0 && (
+        {!anyLoading && officialFiltered.length === 0 && community.items.length === 0 && !error && (
+          <div className="text-center py-8">
+            <p className="text-sm text-muted-foreground">
+              {query ? 'No skills match your search.' : 'No skills available yet.'}
+            </p>
+          </div>
+        )}
+
+        {(officialFiltered.length > 0 || community.items.length > 0) && (
           <div className="grid grid-cols-3 gap-3">
-            {registry.map((entry) => {
-              const isInstalled = installedNames.has(entry.name)
-              const isInstalling = installing === skillUrl(entry.path)
-              return (
-                <div
-                  key={entry.name}
-                  className="rounded-lg border border-border p-4 flex flex-col gap-2"
-                >
-                  <p className="text-sm font-medium">{entry.name}</p>
-                  <p className="text-xs text-muted-foreground line-clamp-2">{entry.description}</p>
-                  <p className="text-xs text-muted-foreground">by {entry.author}</p>
-                  <div className="mt-auto pt-2">
-                    {isInstalled ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-                        <Check className="size-3.5" />
-                        Installed
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent text-accent-foreground px-3 text-xs disabled:opacity-50"
-                        disabled={!!installing}
-                        onClick={() => handleInstall(entry.path)}
-                      >
-                        {isInstalling ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <Download className="size-3.5" />
-                        )}
-                        Install
-                      </button>
-                    )}
+            {!loading &&
+              officialFiltered.map((entry) => {
+                const isInstalled = installedNames.has(entry.name)
+                const isInstalling = installing === skillUrl(entry.path)
+                return (
+                  <div
+                    key={`official:${entry.name}`}
+                    className="rounded-lg border border-border p-4 flex flex-col gap-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">{entry.name}</p>
+                      <SourceBadge source="official" />
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {entry.description}
+                    </p>
+                    <p className="text-xs text-muted-foreground">by {entry.author}</p>
+                    <div className="mt-auto pt-2">
+                      {isInstalled ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                          <Check className="size-3.5" />
+                          Installed
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent text-accent-foreground px-3 text-xs disabled:opacity-50"
+                          disabled={busy}
+                          onClick={() => installSkill(skillUrl(entry.path))}
+                        >
+                          {isInstalling ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Download className="size-3.5" />
+                          )}
+                          Install
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            {!community.loading &&
+              community.items.map((item) => {
+                const isInstalled =
+                  installedItemIds.has(item.id) || installedNames.has(registrySlug(item.id))
+                const hasUpdate = updatableItemIds.has(item.id)
+                const isInstalling = communityInstall.installing === item.id
+                return (
+                  <div
+                    key={`community:${item.id}`}
+                    className="rounded-lg border border-border p-4 flex flex-col gap-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">{item.name}</p>
+                      <SourceBadge source="community" />
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-2">{item.description}</p>
+                    <p className="text-xs text-muted-foreground">
+                      by @{item.handle} · v{item.latestVersion} · {item.installCount} installs
+                    </p>
+                    <div className="mt-auto pt-2">
+                      {isInstalled && hasUpdate ? (
+                        <button
+                          type="button"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent text-accent-foreground px-3 text-xs disabled:opacity-50"
+                          disabled={busy}
+                          onClick={() => void communityInstall.requestInstall(item)}
+                        >
+                          {isInstalling ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <ArrowUpCircle className="size-3.5" />
+                          )}
+                          Update
+                        </button>
+                      ) : isInstalled ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                          <Check className="size-3.5" />
+                          Installed
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent text-accent-foreground px-3 text-xs disabled:opacity-50"
+                          disabled={busy}
+                          onClick={() => void communityInstall.requestInstall(item)}
+                        >
+                          {isInstalling ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Download className="size-3.5" />
+                          )}
+                          Install
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
           </div>
         )}
       </DialogContent>

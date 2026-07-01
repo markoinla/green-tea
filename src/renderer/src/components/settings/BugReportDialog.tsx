@@ -11,7 +11,10 @@ import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { Label } from '@renderer/components/ui/label'
-import { Loader2, CheckCircle2 } from 'lucide-react'
+import { cn } from '@renderer/lib/utils'
+import { Loader2, CheckCircle2, Bug, MessageSquare } from 'lucide-react'
+
+type FeedbackType = 'bug' | 'feedback'
 
 export function BugReportDialog({
   open,
@@ -20,6 +23,7 @@ export function BugReportDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const [type, setType] = useState<FeedbackType>('bug')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [description, setDescription] = useState('')
@@ -39,6 +43,7 @@ export function BugReportDialog({
   }, [open])
 
   const reset = () => {
+    setType('bug')
     setName('')
     setEmail('')
     setDescription('')
@@ -58,6 +63,7 @@ export function BugReportDialog({
 
     try {
       const result = await window.api.bugReport.submit({
+        type,
         name: name.trim() || undefined,
         email: email.trim() || undefined,
         description: description.trim()
@@ -84,19 +90,46 @@ export function BugReportDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Report a Bug</DialogTitle>
+          <DialogTitle>Share Feedback</DialogTitle>
           <DialogDescription>
-            Describe the issue you encountered and we&apos;ll look into it.
+            Report a bug or share feedback and we&apos;ll look into it.
           </DialogDescription>
         </DialogHeader>
 
         {status === 'success' ? (
           <div className="flex flex-col items-center gap-2 py-6">
             <CheckCircle2 className="h-8 w-8 text-green-500" />
-            <p className="text-sm text-muted-foreground">Thanks! Your report has been submitted.</p>
+            <p className="text-sm text-muted-foreground">
+              Thanks! Your {type === 'bug' ? 'report' : 'feedback'} has been submitted.
+            </p>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { value: 'bug', label: 'Bug', icon: Bug },
+                  { value: 'feedback', label: 'Feedback', icon: MessageSquare }
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setType(opt.value)}
+                  disabled={status === 'submitting'}
+                  className={cn(
+                    'flex items-center justify-center gap-2 rounded-md border py-2 text-sm transition-colors',
+                    type === opt.value
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:bg-accent'
+                  )}
+                >
+                  <opt.icon className="h-4 w-4" />
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
             <div className="grid gap-2">
               <Label htmlFor="bug-name">Name (optional)</Label>
               <Input
@@ -126,7 +159,11 @@ export function BugReportDialog({
               </Label>
               <Textarea
                 id="bug-description"
-                placeholder="What happened? What did you expect?"
+                placeholder={
+                  type === 'bug'
+                    ? 'What happened? What did you expect?'
+                    : 'What would you like to see? Share your thoughts.'
+                }
                 className="min-h-24"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}

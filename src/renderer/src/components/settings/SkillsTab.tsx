@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { ChevronLeft, Trash2, Store } from 'lucide-react'
+import { ChevronLeft, Trash2, Store, UploadCloud, ArrowUpCircle, Loader2 } from 'lucide-react'
 import { Switch } from '@renderer/components/ui/switch'
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog'
 import { useSkills } from '@renderer/hooks/useSkills'
+import { registrySlug, useCommunityInstall, useRegistryStatus } from '@renderer/hooks/useRegistry'
 import { MarketplaceDialog } from './MarketplaceDialog'
+import { PublishDialog, type PublishTarget } from './PublishDialog'
+import { RegistryConsentDialog } from './RegistryConsentDialog'
 
 export function SkillsTab() {
   const {
@@ -14,10 +17,21 @@ export function SkillsTab() {
     removeSkill,
     toggleSkill
   } = useSkills()
+  const { installs, updates } = useRegistryStatus()
+  const communityInstall = useCommunityInstall()
   const [skillUrl, setSkillUrl] = useState('')
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null)
   const [skillToDelete, setSkillToDelete] = useState<string | null>(null)
   const [marketplaceOpen, setMarketplaceOpen] = useState(false)
+  const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null)
+
+  // Registry-sourced skills: the provenance marker's slug equals the skill's
+  // name (publish pins slug === SKILL.md name). Scoped to SKILL provenance —
+  // a registry plugin whose slug coincides with a skill's name must not badge it.
+  const registryItemByName = new Map(
+    installs.filter((i) => i.type === 'skill').map((i) => [registrySlug(i.itemId), i.itemId])
+  )
+  const updateByItemId = new Map(updates.map((u) => [u.itemId, u]))
 
   return (
     <div className="space-y-4">
@@ -28,6 +42,16 @@ export function SkillsTab() {
         </p>
       </div>
       <MarketplaceDialog open={marketplaceOpen} onOpenChange={setMarketplaceOpen} />
+      <PublishDialog
+        open={!!publishTarget}
+        onOpenChange={(open) => !open && setPublishTarget(null)}
+        target={publishTarget}
+      />
+      <RegistryConsentDialog
+        request={communityInstall.consent}
+        onAllow={() => void communityInstall.confirmConsent()}
+        onCancel={communityInstall.cancelConsent}
+      />
       <ConfirmDeleteDialog
         open={!!skillToDelete}
         onOpenChange={(open) => !open && setSkillToDelete(null)}
@@ -45,6 +69,10 @@ export function SkillsTab() {
       {selectedSkill && skills.find((s) => s.id === selectedSkill) ? (
         (() => {
           const skill = skills.find((s) => s.id === selectedSkill)!
+          const registryItemId =
+            skill.source === 'user' ? registryItemByName.get(skill.name) : undefined
+          const update = registryItemId ? updateByItemId.get(registryItemId) : undefined
+          const publishable = skill.source === 'user' && !registryItemId
           return (
             <div className="space-y-4">
               <button
@@ -62,6 +90,11 @@ export function SkillsTab() {
                     {skill.source !== 'user' && (
                       <span className="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 bg-muted text-muted-foreground border border-border">
                         from {skill.source}
+                      </span>
+                    )}
+                    {registryItemId && (
+                      <span className="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 bg-muted text-muted-foreground border border-border">
+                        community · {registryItemId}
                       </span>
                     )}
                   </div>
@@ -88,6 +121,38 @@ export function SkillsTab() {
                 </div>
                 {skill.description && (
                   <p className="text-sm text-muted-foreground">{skill.description}</p>
+                )}
+                {update && registryItemId && (
+                  <button
+                    type="button"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent text-accent-foreground px-3 text-xs disabled:opacity-50"
+                    disabled={!!communityInstall.installing}
+                    onClick={() =>
+                      void communityInstall.requestInstall({ id: registryItemId, name: skill.name })
+                    }
+                  >
+                    {communityInstall.installing === registryItemId ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <ArrowUpCircle className="size-3.5" />
+                    )}
+                    Update to v{update.latestVersion}
+                  </button>
+                )}
+                {communityInstall.error && (
+                  <p className="text-xs text-red-500">{communityInstall.error}</p>
+                )}
+                {publishable && (
+                  <button
+                    type="button"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-muted px-3 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      setPublishTarget({ type: 'skill', localId: skill.name, name: skill.name })
+                    }
+                  >
+                    <UploadCloud className="size-3.5" />
+                    Publish to marketplace
+                  </button>
                 )}
                 {skill.source !== 'user' && (
                   <p className="text-xs text-muted-foreground">
@@ -136,31 +201,41 @@ export function SkillsTab() {
           {skillsError && <p className="text-xs text-red-500">{skillsError}</p>}
           {skills.length > 0 && (
             <div className="grid grid-cols-2 gap-2">
-              {skills.map((skill) => (
-                <button
-                  key={skill.id}
-                  type="button"
-                  className={`rounded-lg border border-border bg-muted p-3 text-left hover:border-foreground/20 transition-colors ${!skill.enabled ? 'opacity-60' : ''}`}
-                  onClick={() => setSelectedSkill(skill.id)}
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`size-1.5 rounded-full shrink-0 ${skill.enabled ? 'bg-green-500' : 'bg-foreground/20'}`}
-                    />
-                    <p className="text-sm font-medium truncate">{skill.name}</p>
-                    {skill.source !== 'user' && (
-                      <span className="ml-auto text-[10px] text-muted-foreground shrink-0">
-                        plugin
-                      </span>
+              {skills.map((skill) => {
+                const registryItemId =
+                  skill.source === 'user' ? registryItemByName.get(skill.name) : undefined
+                const hasUpdate = !!registryItemId && updateByItemId.has(registryItemId)
+                return (
+                  <button
+                    key={skill.id}
+                    type="button"
+                    className={`rounded-lg border border-border bg-muted p-3 text-left hover:border-foreground/20 transition-colors ${!skill.enabled ? 'opacity-60' : ''}`}
+                    onClick={() => setSelectedSkill(skill.id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`size-1.5 rounded-full shrink-0 ${skill.enabled ? 'bg-green-500' : 'bg-foreground/20'}`}
+                      />
+                      <p className="text-sm font-medium truncate">{skill.name}</p>
+                      {hasUpdate && (
+                        <span className="text-[10px] shrink-0 rounded px-1.5 py-0.5 bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                          update
+                        </span>
+                      )}
+                      {skill.source !== 'user' && (
+                        <span className="ml-auto text-[10px] text-muted-foreground shrink-0">
+                          plugin
+                        </span>
+                      )}
+                    </div>
+                    {skill.description && (
+                      <p className="text-xs text-muted-foreground line-clamp-1 mt-1">
+                        {skill.description}
+                      </p>
                     )}
-                  </div>
-                  {skill.description && (
-                    <p className="text-xs text-muted-foreground line-clamp-1 mt-1">
-                      {skill.description}
-                    </p>
-                  )}
-                </button>
-              ))}
+                  </button>
+                )
+              })}
             </div>
           )}
           {skills.length === 0 && !skillsError && (

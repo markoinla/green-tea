@@ -24,13 +24,13 @@ import {
 const LLM_ACCOUNTS = [
   {
     id: 'anthropic',
-    name: 'Claude (Pro / Max)',
+    name: 'Anthropic - Claude',
     description:
       'Power the agent with your Claude subscription. Usage is billed per token as extra usage, separate from Claude.ai plan limits.'
   },
   {
     id: 'openai-codex',
-    name: 'ChatGPT (Codex)',
+    name: 'OpenAI - ChatGPT',
     description: 'Power the agent with your ChatGPT Plus/Pro subscription via Codex.'
   }
 ] as const
@@ -294,7 +294,7 @@ function GreenTeaAccountSection() {
   )
 }
 
-export function AccountsTab() {
+export function AccountsTab({ defaultSection }: { defaultSection?: string } = {}) {
   const google = useGoogleAccount()
   const microsoft = useMicrosoftAccount()
   const llm = useLlmAccounts()
@@ -305,7 +305,7 @@ export function AccountsTab() {
   const anyLlmConnected = LLM_ACCOUNTS.some((a) => llm.isConnected(a.id))
 
   return (
-    <Accordion type="multiple" defaultValue={[]}>
+    <Accordion type="multiple" defaultValue={defaultSection ? [defaultSection] : []}>
       <AccordionItem value="greentea-account">
         <AccordionTrigger>Green Tea account</AccordionTrigger>
         <AccordionContent>
@@ -316,7 +316,7 @@ export function AccountsTab() {
       <AccordionItem value="ai-models">
         <AccordionTrigger>
           <span className="flex items-center gap-2">
-            AI model subscriptions
+            AI Model Providers
             <ConnectionDot connected={anyLlmConnected} />
           </span>
         </AccordionTrigger>

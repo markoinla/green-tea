@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Pencil, Copy, ClipboardCopy, Trash2 } from 'lucide-react'
+import { Pencil, Copy, ClipboardCopy, FolderInput, FolderSymlink, Trash2 } from 'lucide-react'
 import { draggable } from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
 import { iconForKind } from '@renderer/components/artifacts/registry'
 import type { DocumentKind } from '../../../../../main/database/types'
@@ -33,6 +33,7 @@ interface DocumentMenuItemProps {
   onSelect: (e: React.MouseEvent) => void
   onRename: (newTitle: string) => void
   onDuplicate: () => void
+  onTransferToWorkspace: (mode: 'copy' | 'move') => void
   onDelete: () => void
 }
 
@@ -46,6 +47,7 @@ export const DocumentMenuItem = React.memo(function DocumentMenuItem({
   onSelect,
   onRename,
   onDuplicate,
+  onTransferToWorkspace,
   onDelete
 }: DocumentMenuItemProps) {
   const Icon = iconForKind(kind)
@@ -127,6 +129,14 @@ export const DocumentMenuItem = React.memo(function DocumentMenuItem({
                   Copy Path
                 </ContextMenuItem>
               )}
+              <ContextMenuItem onClick={() => onTransferToWorkspace('copy')}>
+                <FolderInput className="h-3.5 w-3.5 mr-2" />
+                Copy to workspace…
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => onTransferToWorkspace('move')}>
+                <FolderSymlink className="h-3.5 w-3.5 mr-2" />
+                Move to workspace…
+              </ContextMenuItem>
               <ContextMenuItem onClick={onDelete}>
                 <Trash2 className="h-3.5 w-3.5 mr-2" />
                 Delete

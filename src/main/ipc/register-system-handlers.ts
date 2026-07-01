@@ -170,7 +170,7 @@ export function registerSystemHandlers({ db, mainWindow }: IpcHandlerContext): v
     'bug-report:submit',
     async (
       _event,
-      data: { name?: string; email?: string; description: string }
+      data: { type?: 'bug' | 'feedback'; name?: string; email?: string; description: string }
     ): Promise<{ success: boolean; issue_url?: string; error?: string }> => {
       const res = await fetch('https://greentea-proxy.m-6bb.workers.dev/v1/bug-report', {
         method: 'POST',

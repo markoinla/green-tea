@@ -14,6 +14,10 @@ import { uniqueFolderName } from './left-sidebar/folderTree'
 import { WorkspaceFilesSection } from './left-sidebar/WorkspaceFilesSection'
 import { SidebarFooterSection } from './left-sidebar/SidebarFooterSection'
 import { ConfirmDeleteDialog } from '@renderer/components/settings/ConfirmDeleteDialog'
+import {
+  CopyToWorkspaceDialog,
+  type CopyToWorkspaceSource
+} from './left-sidebar/CopyToWorkspaceDialog'
 
 interface LeftSidebarProps {
   selectedDocId: string | null
@@ -56,6 +60,8 @@ export function LeftSidebar({
     id: string
     name: string
   } | null>(null)
+  // The item queued for the copy-to-workspace dialog (null = dialog closed).
+  const [copySource, setCopySource] = useState<CopyToWorkspaceSource | null>(null)
 
   // Active metadata filter (Phase 4). When set, the note list is restricted to
   // the matching documents via db:metadata:listByProperty; clearing restores the
@@ -278,6 +284,37 @@ export function LeftSidebar({
     [folders]
   )
 
+  const handleTransferDocToWorkspace = useCallback(
+    (id: string, mode: 'copy' | 'move') => {
+      if (!selectedWorkspaceId) return
+      const doc = documents.find((d) => d.id === id)
+      setCopySource({
+        kind: 'document',
+        mode,
+        documentId: id,
+        sourceWorkspaceId: selectedWorkspaceId,
+        displayName: doc?.title || 'Untitled'
+      })
+    },
+    [documents, selectedWorkspaceId]
+  )
+
+  const handleTransferFolderToWorkspace = useCallback(
+    (id: string, mode: 'copy' | 'move') => {
+      const folder = folders.find((f) => f.id === id)
+      if (!folder) return
+      setCopySource({
+        kind: 'folder',
+        mode,
+        sourceWorkspaceId: folder.workspace_id,
+        folderName: folder.name,
+        folderId: folder.id,
+        displayName: folder.name
+      })
+    },
+    [folders]
+  )
+
   const handleConfirmTrash = useCallback(async () => {
     if (!pendingTrash) return
     const { kind, id } = pendingTrash
@@ -395,6 +432,8 @@ export function LeftSidebar({
           onRenameDoc={handleRenameDoc}
           onDeleteDoc={handleDeleteDoc}
           onDuplicateDoc={handleDuplicateDoc}
+          onTransferDocToWorkspace={handleTransferDocToWorkspace}
+          onTransferFolderToWorkspace={handleTransferFolderToWorkspace}
           onRenameFolder={handleRenameFolder}
           onDeleteFolder={handleDeleteFolder}
           onToggleFolder={handleToggleFolder}
@@ -431,6 +470,12 @@ export function LeftSidebar({
         }
         confirmLabel="Move to Trash"
         onConfirm={handleConfirmTrash}
+      />
+
+      <CopyToWorkspaceDialog
+        open={copySource !== null}
+        onOpenChange={(open) => !open && setCopySource(null)}
+        source={copySource}
       />
     </Sidebar>
   )
