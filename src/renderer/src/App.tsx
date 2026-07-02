@@ -12,6 +12,9 @@ import { usePythonCheck } from './hooks/usePythonCheck'
 import { MetadataFilterProvider } from './contexts/MetadataFilterContext'
 import { getFontStack } from './components/settings/constants'
 import { setPluginViewers } from './components/artifacts/registry'
+import { WelcomeDialog } from './components/onboarding/WelcomeDialog'
+
+const WELCOME_SEEN_KEY = 'hasSeenWelcome'
 
 const THEME_CSS_KEYS = [
   'background',
@@ -131,6 +134,19 @@ export default function App() {
   selectedWorkspaceIdRef.current = selectedWorkspaceId
   useTaskNotifications()
   usePythonCheck()
+
+  // First-run welcome. `null` = flag not yet read (render nothing to avoid a flash);
+  // resolves to true only when the setting has never been written.
+  const [showWelcome, setShowWelcome] = useState<boolean | null>(null)
+  useEffect(() => {
+    window.api.settings.get(WELCOME_SEEN_KEY).then((seen) => {
+      setShowWelcome(seen !== 'true')
+    })
+  }, [])
+  const dismissWelcome = useCallback(() => {
+    setShowWelcome(false)
+    window.api.settings.set(WELCOME_SEEN_KEY, 'true')
+  }, [])
 
   const clearSelection = useCallback(() => setSelectionContext(null), [])
 
@@ -360,6 +376,7 @@ export default function App() {
         )}
       </AppLayout>
       <Toaster theme={appTheme} position="bottom-right" richColors closeButton />
+      {showWelcome === true && <WelcomeDialog open onFinish={dismissWelcome} />}
     </MetadataFilterProvider>
   )
 }
