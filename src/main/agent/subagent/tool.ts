@@ -42,7 +42,8 @@ function formatAgentList(agents: Map<string, AgentConfig>): string {
 export function createSubagentTool(
   db: Database.Database,
   window: BrowserWindow,
-  workspaceId?: string
+  workspaceId?: string,
+  conversationId?: string
 ): ToolDefinition {
   return {
     name: 'subagent',
@@ -81,7 +82,10 @@ Agents are defined in ~/.greentea/agents/*.md. Use exactly one mode per call.`,
       )
     }),
 
-    async execute(_toolCallId, params, signal) {
+    async execute(toolCallId, params, signal) {
+      // Tags forwarded subagent events so the renderer can route them to the
+      // conversation (and subagent card) that spawned them.
+      const eventContext = { conversationId, parentToolCallId: toolCallId }
       const p = params as {
         agent?: string
         task?: string
@@ -130,7 +134,15 @@ Agents are defined in ~/.greentea/agents/*.md. Use exactly one mode per call.`,
           }
         }
 
-        const result = await runSubagent(db, window, agentConfig, p.task!, workspaceId, signal)
+        const result = await runSubagent(
+          db,
+          window,
+          agentConfig,
+          p.task!,
+          workspaceId,
+          signal,
+          eventContext
+        )
 
         return {
           content: [{ type: 'text' as const, text: result.output }],
@@ -173,7 +185,7 @@ Agents are defined in ~/.greentea/agents/*.md. Use exactly one mode per call.`,
 
         const results = await mapWithConcurrencyLimit(taskList, MAX_CONCURRENCY, async (t) => {
           const agentConfig = agents.get(t.agent)!
-          return runSubagent(db, window, agentConfig, t.task, workspaceId, signal)
+          return runSubagent(db, window, agentConfig, t.task, workspaceId, signal, eventContext)
         })
 
         const outputParts = results.map((r, i) => {
@@ -227,7 +239,8 @@ Agents are defined in ~/.greentea/agents/*.md. Use exactly one mode per call.`,
             agentConfig,
             taskWithContext,
             workspaceId,
-            signal
+            signal,
+            eventContext
           )
 
           stepOutputs.push(

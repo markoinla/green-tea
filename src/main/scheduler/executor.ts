@@ -27,6 +27,7 @@ import type { ScheduledTask } from '../database/types'
 import {
   loadSandboxConfig,
   initializeSandbox,
+  resetSandbox,
   createSandboxedBashOps,
   isSandboxInitialized
 } from '../agent/sandbox'
@@ -63,6 +64,11 @@ export async function executeScheduledTask(
 ): Promise<void> {
   const startedAt = new Date().toISOString()
 
+  // Per-run sandbox scope so this task's filesystem write scope can't clobber
+  // (or be clobbered by) concurrent chat sessions in other workspaces; unique
+  // per run so back-to-back runs of the same task never share a scope.
+  const sandboxScope = `task:${task.id}:${Date.now()}`
+
   // Notify renderer that task is running
   if (!window.isDestroyed()) {
     window.webContents.send('scheduler:task-running', { taskId: task.id, running: true })
@@ -83,13 +89,13 @@ export async function executeScheduledTask(
     const agentBaseDir = getAgentBaseDir(db)
     const workspaceVaultDir = getWorkspaceDir(db, task.workspace_id)
     const sandboxConfig = loadSandboxConfig(agentBaseDir, [workspaceVaultDir])
-    await initializeSandbox(sandboxConfig)
+    await initializeSandbox(sandboxConfig, sandboxScope)
 
     // Sandboxed bash shares the built-in tool name 'bash' so it overrides the built-in.
     const sandboxedBash: ToolDefinition[] = isSandboxInitialized()
       ? [
           createBashToolDefinition(agentWorkDir, {
-            operations: createSandboxedBashOps()
+            operations: createSandboxedBashOps(sandboxScope)
           }) as ToolDefinition
         ]
       : []
@@ -214,6 +220,10 @@ export async function executeScheduledTask(
 
     notifyBackground(window, task, false, errorMessage)
   }
+
+  // Release this run's sandbox scope (a no-op if init never got that far).
+  // The shared sandbox tears down only when no other scope is still active.
+  await resetSandbox(sandboxScope)
 
   // Notify renderer that task is no longer running
   if (!window.isDestroyed()) {

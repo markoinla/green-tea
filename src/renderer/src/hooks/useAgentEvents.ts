@@ -14,17 +14,56 @@ interface UseAgentEventsResult {
   streamingStartTimeRef: MutableRefObject<Map<string, number>>
 }
 
+// Fields the main process tags onto forwarded subagent events at the emit site
+// (src/main/agent/subagent/session-factory.ts) so they can be routed per
+// conversation. Absent on events from older/legacy emitters.
+export interface TaggedSubagentEvent extends SubagentEvent {
+  conversationId?: string
+  parentToolCallId?: string
+}
+
+// Picks the subagentEventsRef bucket an incoming subagent event belongs to.
+// Prefer the emit-site tag: parentToolCallId is trusted only when its bucket
+// exists — nested subagents forward events tagged with an inner toolCallId that
+// has no card, so those roll up to the conversation's active (outer) subagent
+// call. Untagged events keep the legacy global-ref routing.
+export function resolveSubagentEventKey(
+  event: Pick<TaggedSubagentEvent, 'conversationId' | 'parentToolCallId'>,
+  buckets: ReadonlyMap<string, SubagentEvent[]>,
+  activeByConversation: ReadonlyMap<string, string>,
+  globalActiveToolCallId: string | null
+): string | null {
+  if (event.parentToolCallId && buckets.has(event.parentToolCallId)) {
+    return event.parentToolCallId
+  }
+  if (event.conversationId) {
+    return activeByConversation.get(event.conversationId) ?? null
+  }
+  return globalActiveToolCallId
+}
+
 export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEventsResult {
   const streamingStartTimeRef = useRef<Map<string, number>>(new Map())
   const subagentEventsRef = useRef<Map<string, SubagentEvent[]>>(new Map())
   const [subagentEventVersion, setSubagentEventVersion] = useState(0)
+  // Legacy global pointer to the most recent subagent tool call. Still exported
+  // (ChatMessageList uses it for the running indicator) and kept as the routing
+  // fallback for events that arrive untagged.
   const activeSubagentToolCallId = useRef<string | null>(null)
+  // Per-conversation active subagent tool call — routes tagged events correctly
+  // when several conversations stream (and spawn subagents) concurrently.
+  const activeSubagentByConversation = useRef<Map<string, string>>(new Map())
 
   // Subscribe to subagent events and accumulate them
   useEffect(() => {
     const unsub = window.api.agent.onSubagentEvent((data: unknown) => {
-      const event = data as SubagentEvent
-      const key = activeSubagentToolCallId.current
+      const event = data as TaggedSubagentEvent
+      const key = resolveSubagentEventKey(
+        event,
+        subagentEventsRef.current,
+        activeSubagentByConversation.current,
+        activeSubagentToolCallId.current
+      )
       if (!key) return
 
       const existing = subagentEventsRef.current.get(key) || []
@@ -148,6 +187,7 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
             // Track active subagent invocation for event routing
             if (event.toolName === 'subagent' && event.toolCallId) {
               activeSubagentToolCallId.current = event.toolCallId
+              activeSubagentByConversation.current.set(convId, event.toolCallId)
               subagentEventsRef.current.set(event.toolCallId, [])
             }
 
@@ -200,11 +240,13 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
 
         case 'tool_end': {
           // Clear active subagent tracking when subagent tool finishes
-          if (
-            event.toolName === 'subagent' &&
-            event.toolCallId === activeSubagentToolCallId.current
-          ) {
-            activeSubagentToolCallId.current = null
+          if (event.toolName === 'subagent' && event.toolCallId) {
+            if (activeSubagentByConversation.current.get(convId) === event.toolCallId) {
+              activeSubagentByConversation.current.delete(convId)
+            }
+            if (event.toolCallId === activeSubagentToolCallId.current) {
+              activeSubagentToolCallId.current = null
+            }
             setSubagentEventVersion((v) => v + 1)
           }
 
@@ -298,6 +340,8 @@ export function useAgentEvents({ dispatchTo }: UseAgentEventsOpts): UseAgentEven
 
         case 'agent_end': {
           streamingStartTimeRef.current.delete(convId)
+          // Aborted turns can end without a subagent tool_end — drop any stale pointer
+          activeSubagentByConversation.current.delete(convId)
           dispatchTo(convId, { type: 'set_streaming', streaming: false })
           if (event.tokens) {
             dispatchTo(convId, { type: 'set_tokens', tokens: event.tokens })

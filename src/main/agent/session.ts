@@ -251,7 +251,12 @@ export async function applyEdit(db: Database.Database, logId: string): Promise<v
       throw new Error(`Could not read current markdown for document: ${log.document_id}`)
     }
 
-    if (!current.markdown.includes(log.old_text)) {
+    // Propose time (notes-write.ts) enforced that old_text occurs exactly once;
+    // re-check at apply time. If the user edited the note in between and old_text
+    // now matches zero OR multiple places, .replace() would silently hit the wrong
+    // (first) instance — treat both as a stale proposal instead.
+    const occurrences = current.markdown.split(log.old_text).length - 1
+    if (occurrences !== 1) {
       updateAgentLogStatus(db, logId, 'stale')
       throw new Error('This edit is outdated — the document has changed since it was proposed.')
     }
@@ -346,8 +351,19 @@ export function applyMetadataEdit(
 
 // ---- Agent Session Management ----
 
-const activeSessions = new Map<string, AgentSession>()
+// Keyed by conversationId. Sessions are stored as the CREATION PROMISE (set
+// synchronously, before any await) so two concurrent prompts for the same
+// conversation can never both create a session — the second awaits the first's.
+const activeSessions = new Map<string, Promise<AgentSession>>()
 const activeAbortControllers = new Map<string, AbortController>()
+// abortAgent's delayed agent_end safety-net timers; cleared when a new prompt
+// starts so a stale agent_end can't land mid-turn and flip the UI out of streaming.
+const pendingAbortEndTimers = new Map<string, NodeJS.Timeout>()
+
+// Per-conversation sandbox scope key — sessions register their workspace's
+// filesystem scope under it and release it on reset (see sandbox.ts lifecycle
+// notes; concurrent sessions/scheduled tasks each hold their own scope).
+const chatSandboxScope = (conversationId: string): string => `chat:${conversationId}`
 
 export async function createNotesAgentSession(
   db: Database.Database,
@@ -364,7 +380,7 @@ export async function createNotesAgentSession(
     .getServerStatuses()
     .filter((s) => s.status === 'connected')
     .map((s) => s.name)
-  const customTools = createNotesTools(db, window, workspaceId)
+  const customTools = createNotesTools(db, window, workspaceId, undefined, conversationId)
 
   // Scope agent working directory per workspace
   const agentWorkDir = getAgentWorkDir(db, workspaceId)
@@ -376,7 +392,8 @@ export async function createNotesAgentSession(
   const agentBaseDir = getAgentBaseDir(db)
   const workspaceVaultDir = getWorkspaceDir(db, workspaceId)
   const sandboxConfig = loadSandboxConfig(agentBaseDir, [workspaceVaultDir])
-  await initializeSandbox(sandboxConfig)
+  const sandboxScope = chatSandboxScope(conversationId)
+  await initializeSandbox(sandboxConfig, sandboxScope)
 
   // When the sandbox is active, supply a custom bash tool backed by sandboxed
   // operations. It shares the built-in tool name 'bash', so the session registry
@@ -384,7 +401,7 @@ export async function createNotesAgentSession(
   const sandboxedBash: ToolDefinition[] = isSandboxInitialized()
     ? [
         createBashToolDefinition(agentWorkDir, {
-          operations: createSandboxedBashOps()
+          operations: createSandboxedBashOps(sandboxScope)
         }) as ToolDefinition
       ]
     : []
@@ -547,12 +564,66 @@ export async function promptAgent(
   images?: { data: string; mimeType: string }[],
   files?: { name: string; path: string }[]
 ): Promise<void> {
-  if (!activeSessions.has(conversationId)) {
-    const session = await createNotesAgentSession(db, window, conversationId, workspaceId)
-    activeSessions.set(conversationId, session)
+  // A new prompt supersedes any pending post-abort agent_end safety net for this
+  // conversation — otherwise that stale event would land mid-turn (see abortAgent).
+  const pendingEndTimer = pendingAbortEndTimers.get(conversationId)
+  if (pendingEndTimer !== undefined) {
+    clearTimeout(pendingEndTimer)
+    pendingAbortEndTimers.delete(conversationId)
   }
 
-  const session = activeSessions.get(conversationId)!
+  try {
+    await promptAgentInner(
+      db,
+      window,
+      message,
+      conversationId,
+      documentId,
+      workspaceId,
+      references,
+      images,
+      files
+    )
+  } catch (err) {
+    // Failure safety net: if session creation or the prompt itself rejects, main
+    // would otherwise never emit agent_end and the renderer stays stuck "thinking".
+    if (!window.isDestroyed()) {
+      window.webContents.send('agent:event', { type: 'agent_end', conversationId })
+    }
+    throw err
+  }
+}
+
+async function promptAgentInner(
+  db: Database.Database,
+  window: BrowserWindow,
+  message: string,
+  conversationId: string,
+  documentId?: string,
+  workspaceId?: string,
+  references?: { id: string; title: string }[],
+  images?: { data: string; mimeType: string }[],
+  files?: { name: string; path: string }[]
+): Promise<void> {
+  let sessionPromise = activeSessions.get(conversationId)
+  if (!sessionPromise) {
+    // Store the promise BEFORE awaiting so a concurrent prompt for the same
+    // conversation joins this creation instead of racing a duplicate session
+    // (which would never be disposed and keep forwarding duplicate agent:events).
+    const creation = createNotesAgentSession(db, window, conversationId, workspaceId)
+    sessionPromise = creation
+    activeSessions.set(conversationId, creation)
+    // If creation fails, drop the rejected promise so the next prompt can retry.
+    creation.catch(() => {
+      if (activeSessions.get(conversationId) === creation) {
+        activeSessions.delete(conversationId)
+      }
+      // Creation may have registered a sandbox scope before failing — release it.
+      void resetSandbox(chatSandboxScope(conversationId))
+    })
+  }
+
+  const session = await sessionPromise
 
   // Add attached file paths to prompt context
   if (files && files.length > 0) {
@@ -649,21 +720,38 @@ export async function promptAgent(
 }
 
 export async function resetSession(conversationId?: string): Promise<void> {
+  const disposeSession = async (sessionPromise: Promise<AgentSession>): Promise<void> => {
+    try {
+      const session = await sessionPromise
+      session.dispose()
+    } catch {
+      // creation failed — nothing to dispose
+    }
+  }
+
   if (conversationId) {
-    const session = activeSessions.get(conversationId)
-    if (session) {
-      session.dispose()
-      activeSessions.delete(conversationId)
-    }
+    const sessionPromise = activeSessions.get(conversationId)
+    activeSessions.delete(conversationId)
     activeAbortControllers.delete(conversationId)
-  } else {
-    for (const [, session] of activeSessions) {
-      session.dispose()
+    if (sessionPromise) {
+      await disposeSession(sessionPromise)
     }
+    // Release only this conversation's sandbox scope; the shared sandbox stays
+    // up while other sessions or scheduled tasks still hold scopes.
+    await resetSandbox(chatSandboxScope(conversationId))
+  } else {
+    const conversationIds = [...activeSessions.keys()]
+    const sessionPromises = [...activeSessions.values()]
     activeSessions.clear()
     activeAbortControllers.clear()
+    await Promise.all(sessionPromises.map(disposeSession))
+    // Release every chat scope, then tear down — resetSandbox() refuses the
+    // teardown if something else (e.g. a running scheduled task) is active.
+    for (const id of conversationIds) {
+      await resetSandbox(chatSandboxScope(id))
+    }
+    await resetSandbox()
   }
-  await resetSandbox()
 }
 
 export function abortAgent(conversationId: string, window?: BrowserWindow): void {
@@ -672,20 +760,26 @@ export function abortAgent(conversationId: string, window?: BrowserWindow): void
     controller.abort()
     activeAbortControllers.delete(conversationId)
   }
-  const session = activeSessions.get(conversationId)
-  if (session) {
-    session.abort()
+  const sessionPromise = activeSessions.get(conversationId)
+  if (sessionPromise) {
+    sessionPromise.then((session) => session.abort()).catch(() => {})
   }
 
-  // Safety net: always send agent_end so the UI never gets stuck in streaming state.
+  // Safety net: send agent_end so the UI never gets stuck in streaming state.
   // The library should fire this on its own, but if it doesn't (stuck API call, etc.)
-  // we ensure the renderer recovers.
+  // we ensure the renderer recovers. The timer is tracked per conversation and
+  // cancelled by promptAgent, so an abort-then-immediate-re-prompt doesn't get a
+  // stale agent_end landing mid-new-turn.
   if (window && !window.isDestroyed()) {
-    setTimeout(() => {
+    const existing = pendingAbortEndTimers.get(conversationId)
+    if (existing !== undefined) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      pendingAbortEndTimers.delete(conversationId)
       if (!window.isDestroyed()) {
         window.webContents.send('agent:event', { type: 'agent_end', conversationId })
       }
     }, 500)
+    pendingAbortEndTimers.set(conversationId, timer)
   }
 }
 

@@ -1,4 +1,5 @@
 import { Extension } from '@tiptap/core'
+import { TextSelection } from '@tiptap/pm/state'
 
 export const OutlinerKeymap = Extension.create({
   name: 'outlinerKeymap',
@@ -21,8 +22,9 @@ export const OutlinerKeymap = Extension.create({
   }
 })
 
+// Exported for tests
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function moveItem(editor: any, direction: 'up' | 'down'): boolean {
+export function moveItem(editor: any, direction: 'up' | 'down'): boolean {
   const { state, dispatch } = editor.view
   const { $from } = state.selection
 
@@ -69,9 +71,9 @@ function moveItem(editor: any, direction: 'up' | 'down'): boolean {
     // Adjust selection to follow the moved item
     const newItemPos = direction === 'up' ? firstPos : firstPos + secondNode.nodeSize
 
-    tr.setSelection(
-      state.selection.constructor.create(tr.doc, newItemPos + 1) as typeof state.selection
-    )
+    // newItemPos + 1 sits between the item boundary and its first child (not an
+    // inline position), so resolve to the nearest valid text position forward
+    tr.setSelection(TextSelection.near(tr.doc.resolve(newItemPos + 1), 1))
     dispatch(tr)
   }
 

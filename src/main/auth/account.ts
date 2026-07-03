@@ -15,8 +15,11 @@ import type {
  * Marketplace account sign-in (auth layer one, client side).
  *
  * This is the system-browser + loopback + PKCE machinery cloned from
- * `src/main/google/auth.ts`, re-pointed at our worker's hosted `/signin` page and
- * the `/auth/desktop/token` exchange (RFC 8252 native-app OAuth). The internals of
+ * `src/main/google/auth.ts`, re-pointed at the worker's desktop auth endpoints
+ * (`/auth/desktop/google` kickoff, `/auth/desktop/authorize` callback) and the
+ * `/auth/desktop/token` exchange (RFC 8252 native-app OAuth). There is no hosted
+ * sign-in page — the provider chooser/email entry live in-app; only Google's own
+ * consent screen appears in the browser. The internals of
  * `google/auth.ts` are module-private, so this is a deliberate copy rather than an
  * import — the two concerns (Google *data* APIs vs. Green Tea *account* identity)
  * are separate and evolve independently.
@@ -132,6 +135,62 @@ interface CallbackServer {
 }
 
 /**
+ * The little HTML page shown in the browser tab that catches the loopback
+ * redirect. Branded to match greentea.app (Outfit + Plus Jakarta Sans, #fafafa
+ * ground, #3d9a72 green, the tea-leaf mark) instead of bare system-ui text. All
+ * copy is static (no interpolation of untrusted input). The success page
+ * best-effort self-closes — Chrome only honors `window.close()` for
+ * script-opened windows, so an OS-launched `--app` window usually ignores it and
+ * the app just steals focus back (see the caller).
+ */
+function callbackPage(opts: { heading: string; message: string; selfClose?: boolean }): string {
+  const selfClose = opts.selfClose
+    ? '<script>function c(){try{window.close()}catch(e){}}c();setTimeout(c,300);setTimeout(c,1000)</script>'
+    : ''
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Green Tea</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #fafafa; color: #1a1a1a;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 2rem; -webkit-font-smoothing: antialiased;
+  }
+  .mark {
+    width: 72px; height: 72px; margin-bottom: 1.75rem;
+    filter: drop-shadow(0 0 40px rgba(61, 154, 114, 0.18));
+  }
+  .mark path { fill: #3d9a72; }
+  h1 {
+    font-family: 'Outfit', sans-serif; font-weight: 500; font-size: 1.875rem;
+    letter-spacing: -0.02em; color: #111111;
+  }
+  p {
+    margin-top: 0.75rem; font-size: 1rem; font-weight: 400;
+    color: #6b7472; letter-spacing: 0.01em; max-width: 26rem;
+  }
+</style>
+</head>
+<body>
+  <svg class="mark" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 128 128"><path d="M50.4 78.5a75.1 75.1 0 0 0-28.5 6.9l24.2-65.7c.7-2 1.9-3.2 3.4-3.2h29c1.5 0 2.7 1.2 3.4 3.2l24.2 65.7s-11.6-7-28.5-7L67 45.5c-.4-1.7-1.6-2.8-2.9-2.8-1.3 0-2.5 1.1-2.9 2.7L50.4 78.5Zm-1.1 28.2Zm-4.2-20.2c-2 6.6-.6 15.8 4.2 20.2a17.5 17.5 0 0 1 .2-.7 5.5 5.5 0 0 1 5.7-4.5c2.8.1 4.3 1.5 4.7 4.7.2 1.1.2 2.3.2 3.5v.4c0 2.7.7 5.2 2.2 7.4a13 13 0 0 0 5.7 4.9v-.3l-.2-.3c-1.8-5.6-.5-9.5 4.4-12.8l1.5-1a73 73 0 0 0 3.2-2.2 16 16 0 0 0 6.8-11.4c.3-2 .1-4-.6-6l-.8.6-1.6 1a37 37 0 0 1-22.4 2.7c-5-.7-9.7-2-13.2-6.2Z" /></svg>
+  <h1>${opts.heading}</h1>
+  <p>${opts.message}</p>
+  ${selfClose}
+</body>
+</html>`
+}
+
+/**
  * Start a loopback listener on an EPHEMERAL 127.0.0.1 port (`listen(0)`), returning
  * the concrete `redirectUri` once bound. The 127.0.0.1-only bind is preserved — the
  * callback is never reachable off-host. Resolves the callback with both `code` and
@@ -160,10 +219,13 @@ function startCallbackServer(timeoutMs = 120_000): Promise<CallbackServer> {
       const state = url.searchParams.get('state')
       const error = url.searchParams.get('error')
 
-      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       if (error) {
         res.end(
-          '<html><body style="font-family:system-ui;text-align:center;padding:40px"><h2>Sign-in failed</h2><p>You can close this tab.</p></body></html>'
+          callbackPage({
+            heading: 'Sign-in failed',
+            message: 'Something went wrong. You can close this window and try again in Green Tea.'
+          })
         )
         if (!settled) {
           settled = true
@@ -171,11 +233,11 @@ function startCallbackServer(timeoutMs = 120_000): Promise<CallbackServer> {
         }
       } else if (code && state) {
         res.end(
-          // Best-effort self-close. Chrome only honors window.close() for windows
-          // opened by script, so an OS-launched `--app` window usually ignores
-          // this — the app steals focus back regardless (see focusApp). Try a few
-          // times in case the browser permits it.
-          '<html><body style="font-family:system-ui;text-align:center;padding:40px"><h2>Signed in to Green Tea</h2><p>You can close this window and return to Green Tea.</p><script>function c(){try{window.close()}catch(e){}}c();setTimeout(c,300);setTimeout(c,1000)</script></body></html>'
+          callbackPage({
+            heading: 'Signed in to Green Tea',
+            message: 'You can close this window and return to the app.',
+            selfClose: true
+          })
         )
         if (!settled) {
           settled = true
@@ -183,7 +245,10 @@ function startCallbackServer(timeoutMs = 120_000): Promise<CallbackServer> {
         }
       } else {
         res.end(
-          '<html><body style="font-family:system-ui;text-align:center;padding:40px"><h2>Missing authorization code</h2></body></html>'
+          callbackPage({
+            heading: 'Sign-in incomplete',
+            message: 'No authorization code was returned. You can close this window and try again.'
+          })
         )
       }
     })
@@ -261,11 +326,12 @@ async function exchangeCodeForToken(
 
 /**
  * Run the full Google sign-in flow: gen PKCE + state, start the ephemeral
- * loopback, open a chromeless Chrome `--app` window straight to Google
- * (`provider=google` skips the mirrored chooser; `finish=1` auto-authorizes on
- * return), catch `/callback?code&state`, STRICT-compare `state`, exchange for a
- * bearer, and persist it. Returns a `{ success }` discriminated union so the IPC
- * layer can surface failures without throwing.
+ * loopback, open a chromeless Chrome `--app` window at the worker's
+ * `/auth/desktop/google` kickoff (which sets the OAuth-state cookie and 302s to
+ * Google; on return the worker mints the code and 302s to our loopback), catch
+ * `/callback?code&state`, STRICT-compare `state`, exchange for a bearer, and
+ * persist it. Returns a `{ success }` discriminated union so the IPC layer can
+ * surface failures without throwing.
  */
 export async function signIn(
   db: Database.Database
@@ -283,11 +349,9 @@ export async function signIn(
     const params = new URLSearchParams({
       redirect: callbackServer.redirectUri,
       state,
-      code_challenge: codeChallenge,
-      provider: 'google',
-      finish: '1'
+      code_challenge: codeChallenge
     })
-    await openAuthWindow(`${baseUrl}/signin?${params.toString()}`)
+    await openAuthWindow(`${baseUrl}/auth/desktop/google?${params.toString()}`)
 
     const result = await callbackServer.waitForCallback()
     callbackServer.close()
@@ -318,12 +382,13 @@ export async function signIn(
 
 /**
  * Email / magic-link sign-in. Starts the loopback, asks the worker to email a
- * sign-in link (`callbackURL` → our `/signin?...&finish=1`, so clicking it
- * auto-authorizes), and returns as soon as the email is sent so the UI can show
- * "check your inbox". The loopback round-trip (user clicks the link → browser →
- * loopback) is awaited in the BACKGROUND; on success we exchange, persist, and
- * call `onSignedIn` so the renderer refreshes. The wait window is long (10 min)
- * because the user has to switch to their inbox.
+ * sign-in link (`callbackURL` → `/auth/desktop/authorize?...`, so clicking it
+ * verifies the link, sets the session, and immediately mints the code → loopback),
+ * and returns as soon as the email is sent so the UI can show "check your inbox".
+ * The loopback round-trip (user clicks the link → browser → loopback) is awaited
+ * in the BACKGROUND; on success we exchange, persist, and call `onSignedIn` so the
+ * renderer refreshes. The wait window is long (10 min) because the user has to
+ * switch to their inbox.
  */
 export async function sendMagicLink(
   db: Database.Database,
@@ -342,10 +407,9 @@ export async function sendMagicLink(
     const params = new URLSearchParams({
       redirect: callbackServer.redirectUri,
       state,
-      code_challenge: codeChallenge,
-      finish: '1'
+      code_challenge: codeChallenge
     })
-    const callbackURL = `${baseUrl}/signin?${params.toString()}`
+    const callbackURL = `${baseUrl}/auth/desktop/authorize?${params.toString()}`
 
     const res = await fetch(`${baseUrl}/auth/sign-in/magic-link`, {
       method: 'POST',

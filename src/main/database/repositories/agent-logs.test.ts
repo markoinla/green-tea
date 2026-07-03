@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import { createTestDb } from '../__test__/setup'
-import { listAgentLogs, createAgentLog, updateAgentLogStatus } from './agent-logs'
+import { listAgentLogs, createAgentLog, updateAgentLogStatus, pruneAgentLogs } from './agent-logs'
 import { createDocument } from './documents'
 import { createWorkspace } from './workspaces'
 
@@ -92,6 +92,59 @@ describe('agent-logs repository', () => {
 
   it('throws when updating nonexistent log', () => {
     expect(() => updateAgentLogStatus(db, 'nope', 'applied')).toThrow('Agent log not found')
+  })
+
+  describe('pruneAgentLogs', () => {
+    function createLogWithAge(status: string, ageDays: number): string {
+      const { doc } = setup()
+      const log = createAgentLog(db, {
+        document_id: doc.id,
+        agent_name: 'test',
+        action_type: 'propose_patch'
+      })
+      updateAgentLogStatus(db, log.id, status)
+      db.prepare("UPDATE agent_logs SET created_at = datetime('now', ?) WHERE id = ?").run(
+        `-${ageDays} days`,
+        log.id
+      )
+      return log.id
+    }
+
+    it('deletes resolved rows older than 30 days', () => {
+      createLogWithAge('applied', 31)
+      createLogWithAge('rejected', 31)
+      createLogWithAge('stale', 31)
+
+      const deleted = pruneAgentLogs(db)
+      expect(deleted).toBe(3)
+      expect(listAgentLogs(db).length).toBe(0)
+    })
+
+    it('keeps resolved rows newer than 30 days', () => {
+      createLogWithAge('applied', 29)
+      createLogWithAge('rejected', 1)
+
+      const deleted = pruneAgentLogs(db)
+      expect(deleted).toBe(0)
+      expect(listAgentLogs(db).length).toBe(2)
+    })
+
+    it('keeps pending rows forever', () => {
+      createLogWithAge('pending', 365)
+
+      const deleted = pruneAgentLogs(db)
+      expect(deleted).toBe(0)
+      expect(listAgentLogs(db, { status: 'pending' }).length).toBe(1)
+    })
+
+    it('respects a custom maxAgeDays', () => {
+      createLogWithAge('applied', 8)
+      createLogWithAge('applied', 5)
+
+      const deleted = pruneAgentLogs(db, 7)
+      expect(deleted).toBe(1)
+      expect(listAgentLogs(db).length).toBe(1)
+    })
   })
 
   it('stores old_text and new_text', () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ChevronRight, AlertCircle, Users } from 'lucide-react'
 import { getToolDescription, getToolIcon } from './ChatMessage'
 
@@ -36,7 +36,34 @@ function getModeSummary(args: Record<string, unknown>): string {
   return 'subagent'
 }
 
-export function SubagentActivityGroup({
+// The subagentEvents array is mutated in place by useAgentEvents (events are
+// pushed into the same array), so prev/next props can share one reference with
+// different contents — no prop comparison can detect that. While running we
+// always re-render (live updates); only settled groups memoize, at which point
+// the events array no longer changes.
+function propsAreEqual(
+  prev: SubagentActivityGroupProps,
+  next: SubagentActivityGroupProps
+): boolean {
+  if (prev.isRunning || next.isRunning) return false
+  // ChatMessageList passes fresh `{}` / `[]` fallbacks per render — treat empty
+  // as equal; otherwise identity tracks content (reducer replaces on change).
+  const argsEqual =
+    prev.toolArgs === next.toolArgs ||
+    (Object.keys(prev.toolArgs).length === 0 && Object.keys(next.toolArgs).length === 0)
+  const eventsEqual =
+    prev.subagentEvents === next.subagentEvents ||
+    (prev.subagentEvents.length === 0 && next.subagentEvents.length === 0)
+  return (
+    argsEqual &&
+    eventsEqual &&
+    prev.toolResult === next.toolResult &&
+    prev.toolIsError === next.toolIsError &&
+    prev.resolveDocName === next.resolveDocName
+  )
+}
+
+export const SubagentActivityGroup = memo(function SubagentActivityGroup({
   toolArgs,
   toolResult,
   toolIsError,
@@ -139,4 +166,4 @@ export function SubagentActivityGroup({
       )}
     </div>
   )
-}
+}, propsAreEqual)

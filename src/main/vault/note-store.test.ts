@@ -14,6 +14,7 @@ import {
   readNote,
   writeNote,
   listVaultNotes,
+  atomicWriteFile,
   backfillFrontmatter,
   slugifyTitle,
   uniqueNotePath,
@@ -147,5 +148,24 @@ describe('vault listing', () => {
     expect(note?.id).toBeNull()
     // listing must not write to the file
     expect(readFileSync(join(dir, 'Raw.md'), 'utf-8')).toBe('# raw\n')
+  })
+})
+
+describe('atomicWriteFile', () => {
+  const tmpFiles = (): string[] => readdirSync(dir).filter((n) => n.includes('.tmp-'))
+
+  it('writes via temp+rename and leaves no temp file behind', () => {
+    const target = join(dir, 'out.md')
+    atomicWriteFile(target, 'hello')
+    expect(readFileSync(target, 'utf-8')).toBe('hello')
+    expect(tmpFiles()).toEqual([])
+  })
+
+  it('unlinks the temp file when the rename fails', () => {
+    const target = join(dir, 'taken')
+    mkdirSync(target) // renaming a file over a directory throws
+    expect(() => atomicWriteFile(target, 'x')).toThrow()
+    expect(tmpFiles()).toEqual([])
+    expect(existsSync(target)).toBe(true) // the obstruction is untouched
   })
 })

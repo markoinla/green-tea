@@ -4,7 +4,11 @@ import { cpSync, existsSync } from 'fs'
 import { join } from 'path'
 import { reindexWorkspace } from '../vault/documents-service'
 import { ensureVaultDir, getWorkspaceVaultDir } from '../vault/paths'
+import { setSetting } from './repositories/settings'
 import { listWorkspaces } from './repositories/workspaces'
+
+/** Filename of the starter note to auto-open in the editor on a fresh install. */
+const WELCOME_NOTE_FILENAME = 'Welcome to Green Tea.md'
 
 /**
  * Locate the bundled default-workspace seed content. In production it sits at
@@ -52,4 +56,19 @@ export function seedDefaultWorkspace(db: Database.Database): void {
   // disk afterward to surface them (and mint ids/frontmatter for the seed notes).
   cpSync(sourceDir, destDir, { recursive: true })
   reindexWorkspace(db, workspaceId)
+
+  // Auto-open the welcome note on this first launch by pre-seeding the workspace's
+  // persisted tab state. The renderer hydrates `openTabs:<workspaceId>` and opens
+  // whatever it points at, so this beats relying on document order (all seed files
+  // share a near-identical mtime). No-op if the welcome note isn't present.
+  const welcome = db
+    .prepare("SELECT id FROM documents WHERE workspace_id = ? AND file_path LIKE '%' || ?")
+    .get(workspaceId, WELCOME_NOTE_FILENAME) as { id: string } | undefined
+  if (welcome) {
+    setSetting(
+      db,
+      `openTabs:${workspaceId}`,
+      JSON.stringify({ openDocIds: [welcome.id], activeDocId: welcome.id })
+    )
+  }
 }

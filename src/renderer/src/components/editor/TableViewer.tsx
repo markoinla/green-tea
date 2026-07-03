@@ -41,6 +41,21 @@ const VIEWSTATE_DEBOUNCE_MS = 500
 // external reload is deferred so it can't yank the grid out from under them.
 const INTERACTION_QUIET_MS = 1200
 const DEFAULT_COL_WIDTH = 160
+// Empty "filler" columns extend the grid to the right edge when the real columns
+// don't fill the viewport — purely visual, never serialized or editable. Each gets
+// a small base width plus `grow: 1` so Glide distributes the TRUE leftover space
+// evenly across them to the edge (exact fill, no scrollbar, regardless of the
+// row-marker gutter width). The count is approximate; grow makes the fill exact.
+const FILLER_BASE_WIDTH = 48
+const FILLER_ID_PREFIX = '__filler_'
+// Rough width of the number row-marker gutter. Only affects the filler COUNT (how
+// many empty columns appear), not the exact fill, so an estimate is fine.
+const ROW_MARKER_WIDTH = 60
+// Glide's default row + header heights (we don't override them). Used to compute how
+// many blank "ghost" rows to render so the grid fills the viewport (Sheets-like) and
+// there's always a next row to type into.
+const GRID_ROW_HEIGHT = 34
+const GRID_HEADER_HEIGHT = 36
 
 export interface TableViewerProps {
   /** The artifact host id (a document id). Bytes flow over the readArtifact/
@@ -91,6 +106,17 @@ const DARK_THEME: Partial<Theme> = {
 const LIGHT_THEME: Partial<Theme> = {
   linkColor: '#2563eb'
 }
+
+// One undoable state of the editable model (content + structure + widths). Sort is
+// excluded — it's a non-destructive view overlay, not content.
+interface TableSnapshot {
+  header: string[]
+  rows: string[][]
+  colTypes: ColumnType[]
+  widths: number[]
+}
+// Bound the in-memory history so a long editing session can't grow it unbounded.
+const HISTORY_LIMIT = 200
 
 interface ParsedTable {
   header: string[]
@@ -347,6 +373,23 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [chromeTheme, setChromeTheme] = useState<'light' | 'dark'>(readChromeTheme)
+  // Pixel size of the grid viewport. Passed to DataEditor as explicit width/height
+  // (Glide's container otherwise sizes to its COLUMN content, not its parent — see
+  // setGridWrap), and used to size the edge-filler columns (see the columns memo).
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0
+  })
+  const resizeObserverRef = useRef<ResizeObserver | null>(null)
+  // The grid wrap element, kept so the undo key handler can scope itself to when the
+  // grid actually holds focus.
+  const gridElRef = useRef<HTMLDivElement | null>(null)
+
+  // Undo/redo history — in-memory, session-scoped (like a spreadsheet's; not
+  // persisted). Entries snapshot the editable model; because every edit produces
+  // fresh immutable arrays, a snapshot just stores references (cheap, no deep clone).
+  const undoStackRef = useRef<TableSnapshot[]>([])
+  const redoStackRef = useRef<TableSnapshot[]>([])
 
   // Header + rows live in BOTH refs (so getCellContent reads the latest synchronously)
   // and state (so edits trigger a re-render / recompute of columns).
@@ -412,6 +455,9 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     value: string
     x: number
     y: number
+    // When true this inline editor CREATES a new (appended) column on commit rather
+    // than renaming an existing one — the "type in the empty header to add a column".
+    create?: boolean
   } | null>(null)
 
   // --- serialize the current model in its captured dialect -------------------
@@ -462,6 +508,11 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       clearTimeout(viewStateTimer.current)
       viewStateTimer.current = null
     }
+    // A null baseline means the initial load hasn't adopted yet — flushing now
+    // would serialize an empty header and overwrite the persisted widths/sort
+    // (StrictMode's synthetic unmount and early pagehide/visibility both hit
+    // this window). Nothing has changed before load, so there's nothing to save.
+    if (viewStateSavedRef.current === null) return Promise.resolve()
     const json = serializeViewState()
     if (json === viewStateSavedRef.current) return Promise.resolve()
     // Return the write promise so the registered flusher (and thus the quit
@@ -553,6 +604,10 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       // Adopt the reserialized form as the saved baseline so a freshly loaded
       // table isn't immediately written back.
       lastSavedRef.current = serialize()
+      // A fresh load (or external/agent reload) is a new base — drop undo history so
+      // undo can't reach across it into a stale model.
+      undoStackRef.current = []
+      redoStackRef.current = []
     },
     [serialize, serializeViewState, rebuildView]
   )
@@ -562,6 +617,10 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     let cancelled = false
     setStatus('loading')
     setError(null)
+    // Disarm view-state flushes until adopt() re-baselines. Without this, a
+    // flush during the load window would persist the PREVIOUS document's
+    // widths/sort under this gtFileId (viewer reused across a doc switch).
+    viewStateSavedRef.current = null
     // Read the CSV, its schema sidecar, and the DB view-state together so types +
     // widths are resolved against the same header the data is parsed from. Both
     // sidecar reads return null when absent (plain table / never sized) — not errors.
@@ -595,6 +654,44 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     return () => observer.disconnect()
   }, [])
 
+  // --- track the grid viewport size (drives DataEditor width/height + fillers) --
+  // A callback ref (not an effect) so the observer attaches exactly when the wrap
+  // div mounts — the div depends on BOTH `status === 'ready'` AND the async Glide
+  // load, so an effect keyed on `status` alone would miss it when Glide resolves
+  // last (the size would stay 0 and the grid would collapse to its content width).
+  const setGridWrap = useCallback((el: HTMLDivElement | null): void => {
+    resizeObserverRef.current?.disconnect()
+    resizeObserverRef.current = null
+    gridElRef.current = el
+    if (!el) return
+    const measure = (): void => setContainerSize({ width: el.clientWidth, height: el.clientHeight })
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    resizeObserverRef.current = observer
+  }, [])
+
+  // --- undo/redo history ----------------------------------------------------
+  // Snapshot the current editable model (references, not copies — safe because edits
+  // never mutate arrays in place, they replace them).
+  const snapshot = useCallback(
+    (): TableSnapshot => ({
+      header: headerRef.current,
+      rows: rowsRef.current,
+      colTypes: colTypesRef.current,
+      widths: widthsRef.current
+    }),
+    []
+  )
+
+  // Record the CURRENT (pre-change) model onto the undo stack and drop the redo
+  // stack. Called at the top of every content/structure mutation.
+  const pushHistory = useCallback((): void => {
+    undoStackRef.current.push(snapshot())
+    if (undoStackRef.current.length > HISTORY_LIMIT) undoStackRef.current.shift()
+    redoStackRef.current = []
+  }, [snapshot])
+
   // --- autosave: serialize and write back ----------------------------------
   const flush = useCallback((): Promise<void> => {
     if (saveTimer.current) {
@@ -627,6 +724,8 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   // -render) and arm the debounced save.
   const commit = useCallback(
     (nextHeader: string[], nextRows: string[][], nextWidths?: number[]): void => {
+      // Record the pre-change model for undo before we overwrite the refs.
+      pushHistory()
       // Rebuild the sort view when the row COUNT changes (add/delete) so the index
       // stays valid; a pure value edit keeps the existing order (rows don't jump
       // mid-edit). Done before setRows so getCellContent reads a consistent map.
@@ -642,7 +741,7 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       }
       scheduleSave()
     },
-    [scheduleSave, rebuildView]
+    [scheduleSave, rebuildView, pushHistory]
   )
 
   // Persist the schema sidecar. Called only on type/column changes (NOT cell
@@ -662,6 +761,7 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   // state for repaint) and persist the sidecar. The .csv bytes are untouched.
   const setColumnType = useCallback(
     (col: number, type: ColumnType): void => {
+      pushHistory() // retyping a column is an undoable change (not routed via commit)
       const next = colTypesRef.current.slice()
       while (next.length < headerRef.current.length) next.push('text')
       next[col] = type
@@ -673,8 +773,65 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       setColTypes(next)
       persistMeta()
     },
-    [persistMeta, rebuildView]
+    [persistMeta, rebuildView, pushHistory]
   )
+
+  // Apply a history snapshot wholesale (used by both undo and redo). Restores content
+  // + structure + widths, rebuilds the sort view (dropping to identity if the sorted
+  // column vanished), and persists the reverted state. Bypasses pushHistory (the
+  // caller manages the stacks).
+  const restore = useCallback(
+    (snap: TableSnapshot): void => {
+      headerRef.current = snap.header
+      rowsRef.current = snap.rows
+      colTypesRef.current = snap.colTypes
+      widthsRef.current = snap.widths
+      setHeader(snap.header)
+      setRows(snap.rows)
+      setColTypes(snap.colTypes)
+      setWidths(snap.widths)
+      rebuildView(snap.rows)
+      scheduleSave()
+      persistMeta()
+      scheduleViewStateSave()
+    },
+    [rebuildView, scheduleSave, persistMeta, scheduleViewStateSave]
+  )
+
+  const undo = useCallback((): void => {
+    const prev = undoStackRef.current.pop()
+    if (!prev) return
+    redoStackRef.current.push(snapshot())
+    restore(prev)
+  }, [snapshot, restore])
+
+  const redo = useCallback((): void => {
+    const next = redoStackRef.current.pop()
+    if (!next) return
+    undoStackRef.current.push(snapshot())
+    restore(next)
+  }, [snapshot, restore])
+
+  // Cmd/Ctrl+Z to undo, Cmd/Ctrl+Shift+Z (or Ctrl+Y) to redo — but only while the
+  // grid holds focus and no cell editor is open (so the text overlay keeps its own
+  // native undo). Capture phase so we win before Glide's canvas key handling.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      const k = e.key.toLowerCase()
+      const isUndo = k === 'z' && !e.shiftKey
+      const isRedo = (k === 'z' && e.shiftKey) || k === 'y'
+      if (!isUndo && !isRedo) return
+      if (editorOpenRef.current) return
+      const el = gridElRef.current
+      if (!el || !el.contains(document.activeElement)) return
+      e.preventDefault()
+      if (isRedo) redo()
+      else undo()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [undo, redo])
 
   // Flush on unmount, window hide, and visibility-hidden; register into the
   // global flush registry so the quit handshake awaits this write too.
@@ -745,7 +902,7 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
 
   // --- grid data plumbing ---------------------------------------------------
   const columns = useMemo<GridColumn[]>(() => {
-    return header.map((title, i) => {
+    const real: GridColumn[] = header.map((title, i) => {
       const base = title === '' ? `Column ${i + 1}` : title
       // Append a sort arrow to the active sort column's header for feedback.
       const arrow =
@@ -759,15 +916,39 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
         hasMenu: true
       }
     })
+    // Pad to the right edge with empty grow-columns when the real columns don't
+    // fill the viewport. Count is derived from the leftover gap (approximate);
+    // grow makes the on-screen fill exact. Skipped when there's no header or the
+    // real columns already overflow (gap <= 0).
+    const realWidth = header.reduce((sum, _, i) => sum + (widths[i] ?? DEFAULT_COL_WIDTH), 0)
+    const gap = containerSize.width - ROW_MARKER_WIDTH - realWidth
+    const fillerCount =
+      header.length > 0 && containerSize.width > 0
+        ? Math.max(0, Math.round(gap / DEFAULT_COL_WIDTH))
+        : 0
+    for (let i = 0; i < fillerCount; i++) {
+      real.push({ title: '', id: `${FILLER_ID_PREFIX}${i}`, width: FILLER_BASE_WIDTH, grow: 1 })
+    }
+    return real
     // colTypes is an intentional dep: a type change isn't read in this body, but it
     // must yield a fresh `columns` array so Glide (which memoizes on prop identity)
     // repaints cells with their new kind. (sort is read, for the arrow.)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [header, widths, colTypes, sort])
+  }, [header, widths, colTypes, sort, containerSize.width])
 
   const getCellContent = useCallback((cell: Item): GridCell => {
     const g = glideRef.current
     const [col, row] = cell
+    // Edge-filler column (beyond the real header): blank but EDITABLE — typing in it
+    // materializes the column (see onCellEdited).
+    if (col >= headerRef.current.length) {
+      return {
+        kind: (g?.GridCellKind.Text ?? 'text') as GridCell['kind'] & 'text',
+        data: '',
+        displayData: '',
+        allowOverlay: true
+      }
+    }
     const dataRow = viewToDataRef.current[row] ?? row
     const value = rowsRef.current[dataRow]?.[col] ?? ''
     const type = colTypesRef.current[col] ?? 'text'
@@ -813,11 +994,33 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
       if (text === null) return
       const [col, row] = cell
       const dataRow = toDataRow(row)
-      const nextRows = rowsRef.current.map((r) => r.slice())
-      if (!nextRows[dataRow]) return
+      const ghostCol = col >= headerRef.current.length
+      const ghostRow = dataRow >= rowsRef.current.length
+      // Typing in a not-yet-existing column or row creates it (grow the model up to
+      // it); an empty commit there is a no-op so a stray click never materializes.
+      if (text === '' && (ghostCol || ghostRow)) return
+      const newWidth = Math.max(headerRef.current.length, col + 1)
+      const nextHeader = headerRef.current.slice()
+      const nextTypes = colTypesRef.current.slice()
+      const nextWidths = widthsRef.current.slice()
+      while (nextHeader.length < newWidth) {
+        nextHeader.push('')
+        nextTypes.push('text')
+        nextWidths.push(DEFAULT_COL_WIDTH)
+      }
+      const nextRows = rowsRef.current.map((r) => {
+        const c = r.slice()
+        while (c.length < newWidth) c.push('')
+        return c
+      })
+      while (nextRows.length <= dataRow) nextRows.push(new Array<string>(newWidth).fill(''))
       nextRows[dataRow][col] = text
+      if (ghostCol) {
+        colTypesRef.current = nextTypes
+        setColTypes(nextTypes)
+      }
       editorOpenRef.current = false
-      commit(headerRef.current, nextRows)
+      commit(nextHeader, nextRows, ghostCol ? nextWidths : undefined)
     },
     [commit, toDataRow]
   )
@@ -840,16 +1043,47 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     (newValues: readonly { location: Item; value: EditableGridCell }[]): boolean => {
       const g = glideRef.current
       if (!g) return false
-      const nextRows = rowsRef.current.map((r) => r.slice())
+      // Collect the edits, growing the target width/height to cover any that land in
+      // not-yet-existing columns/rows. An empty edit outside the current bounds is
+      // dropped (a fill-drag over blanks shouldn't materialize empty cols/rows).
+      const curWidth = headerRef.current.length
+      const curRows = rowsRef.current.length
+      let newWidth = curWidth
+      let maxDataRow = curRows - 1
+      const edits: { col: number; dataRow: number; text: string }[] = []
       for (const { location, value } of newValues) {
         const text = editableToText(g, value)
         if (text === null) continue
         const [col, row] = location
         const dataRow = toDataRow(row)
-        if (nextRows[dataRow]) nextRows[dataRow][col] = text
+        if (text === '' && (col >= curWidth || dataRow >= curRows)) continue
+        edits.push({ col, dataRow, text })
+        if (col + 1 > newWidth) newWidth = col + 1
+        if (dataRow > maxDataRow) maxDataRow = dataRow
+      }
+      if (edits.length === 0) return true
+      const ghostCol = newWidth > curWidth
+      const nextHeader = headerRef.current.slice()
+      const nextTypes = colTypesRef.current.slice()
+      const nextWidths = widthsRef.current.slice()
+      while (nextHeader.length < newWidth) {
+        nextHeader.push('')
+        nextTypes.push('text')
+        nextWidths.push(DEFAULT_COL_WIDTH)
+      }
+      const nextRows = rowsRef.current.map((r) => {
+        const c = r.slice()
+        while (c.length < newWidth) c.push('')
+        return c
+      })
+      while (nextRows.length <= maxDataRow) nextRows.push(new Array<string>(newWidth).fill(''))
+      for (const { col, dataRow, text } of edits) nextRows[dataRow][col] = text
+      if (ghostCol) {
+        colTypesRef.current = nextTypes
+        setColTypes(nextTypes)
       }
       editorOpenRef.current = false
-      commit(headerRef.current, nextRows)
+      commit(nextHeader, nextRows, ghostCol ? nextWidths : undefined)
       return true
     },
     [commit, toDataRow]
@@ -884,13 +1118,6 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     [commit]
   )
 
-  // Trailing-row affordance: append an empty row of header width.
-  const onRowAppended = useCallback((): void => {
-    const width = headerRef.current.length
-    const nextRows = [...rowsRef.current, new Array<string>(width).fill('')]
-    commit(headerRef.current, nextRows)
-  }, [commit])
-
   // Delete key: drop fully-selected rows; otherwise clear the selected cells.
   const onDelete = useCallback(
     (selection: GridSelection): GridSelection | boolean => {
@@ -909,6 +1136,7 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
 
   const onColumnResize = useCallback(
     (_column: GridColumn, newSize: number, colIndex: number): void => {
+      if (colIndex >= headerRef.current.length) return // edge-filler column
       const next = widthsRef.current.slice()
       next[colIndex] = newSize
       widthsRef.current = next
@@ -921,7 +1149,19 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   // Left-click a header to cycle its sort: none → asc → desc → none. View-only —
   // the stored CSV order is untouched; only the display→data index changes.
   const onHeaderClicked = useCallback(
-    (colIndex: number): void => {
+    (colIndex: number, event: HeaderClickedEventArgs): void => {
+      // Click an empty edge-filler header to name-and-create a new column inline.
+      if (colIndex >= headerRef.current.length) {
+        setMenu(null)
+        setRenaming({
+          col: headerRef.current.length,
+          value: '',
+          x: event.bounds.x + (event.localEventX ?? 0),
+          y: event.bounds.y + (event.localEventY ?? 0),
+          create: true
+        })
+        return
+      }
       const name = headerRef.current[colIndex]
       if (!name) return // unnamed column has no stable sort anchor
       const cur = sortRef.current
@@ -950,6 +1190,22 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
     setColTypes(nextTypes)
     commit(nextHeader, nextRows, [...widthsRef.current, DEFAULT_COL_WIDTH])
   }, [commit])
+
+  // Append a NAMED column — the commit path for the inline "type in the empty header"
+  // editor. A blank name cancels (so clicking a ghost header and dismissing is a no-op
+  // that never litters the table with an empty column).
+  const createColumnNamed = useCallback(
+    (value: string): void => {
+      if (value.trim() === '') return
+      const nextHeader = [...headerRef.current, value]
+      const nextRows = rowsRef.current.map((r) => [...r, ''])
+      const nextTypes = [...colTypesRef.current, 'text' as ColumnType]
+      colTypesRef.current = nextTypes
+      setColTypes(nextTypes)
+      commit(nextHeader, nextRows, [...widthsRef.current, DEFAULT_COL_WIDTH])
+    },
+    [commit]
+  )
 
   const deleteColumn = useCallback(
     (col: number): void => {
@@ -1015,6 +1271,7 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   const onHeaderContextMenu = useCallback(
     (colIndex: number, event: HeaderClickedEventArgs): void => {
       event.preventDefault()
+      if (colIndex >= headerRef.current.length) return // edge-filler column
       setRenaming(null)
       setMenu({
         type: 'header',
@@ -1029,8 +1286,9 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
 
   const onCellContextMenu = useCallback((cell: Item, event: CellClickedEventArgs): void => {
     event.preventDefault()
-    setRenaming(null)
     const [col, row] = cell
+    if (col >= headerRef.current.length) return // edge-filler column
+    setRenaming(null)
     setMenu({
       type: 'cell',
       col,
@@ -1069,6 +1327,16 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
   const DataEditor = glide?.DataEditor
   const ready = status === 'ready' && DataEditor
 
+  // Render enough blank "ghost" rows to fill the viewport (Sheets-like) — always at
+  // least one past the data so there's a next row to type into. Editing a ghost row
+  // materializes it (see onCellEdited). `floor` avoids a spurious scrollbar from a
+  // partial trailing row.
+  const rowsToFill =
+    containerSize.height > 0
+      ? Math.floor((containerSize.height - GRID_HEADER_HEIGHT) / GRID_ROW_HEIGHT)
+      : 0
+  const displayRowCount = Math.max(rows.length + 1, rowsToFill)
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex items-center gap-2 px-4 py-2 border-b dark:border-white/5 border-black/5 bg-muted/50 shrink-0">
@@ -1093,6 +1361,7 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
 
       {ready && DataEditor && (
         <div
+          ref={setGridWrap}
           className="flex-1 min-h-0 relative"
           onPointerDown={() => {
             pointerDownRef.current = true
@@ -1108,10 +1377,17 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
         >
           <DataEditor
             className="h-full w-full"
+            // Glide's container sizes to its column content unless given explicit
+            // dimensions (its inline width overrides `w-full`), which left empty
+            // space to the right; feed it the measured viewport so it fills the pane
+            // and `grow` can distribute the slack to the edge-filler columns.
+            {...(containerSize.width > 0
+              ? { width: containerSize.width, height: containerSize.height }
+              : {})}
             theme={chromeTheme === 'dark' ? DARK_THEME : LIGHT_THEME}
             getCellContent={getCellContent}
             columns={columns}
-            rows={rows.length}
+            rows={displayRowCount}
             rowMarkers="number"
             fillHandle
             keybindings={{ copy: true, paste: true, selectAll: true }}
@@ -1122,12 +1398,10 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
             onFinishedEditing={onFinishedEditing}
             onPaste={onPaste}
             onDelete={onDelete}
-            onRowAppended={onRowAppended}
             onColumnResize={onColumnResize}
             onHeaderClicked={onHeaderClicked}
             onHeaderContextMenu={onHeaderContextMenu}
             onCellContextMenu={onCellContextMenu}
-            trailingRowOptions={{ sticky: true, tint: true, hint: 'Add row…' }}
           />
 
           {menu && (
@@ -1214,19 +1488,22 @@ export function TableViewer({ gtFileId, fileName, watchDocId }: TableViewerProps
               autoFocus
               className="fixed z-50 rounded-md border border-black/10 dark:border-white/10 bg-popover px-2 py-1 text-sm shadow-md outline-none"
               style={{ left: renaming.x, top: renaming.y }}
+              placeholder={renaming.create ? 'New column…' : ''}
               value={renaming.value}
               onMouseDown={(e) => e.stopPropagation()}
               onChange={(e) => setRenaming({ ...renaming, value: e.target.value })}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  renameColumn(renaming.col, renaming.value)
+                  if (renaming.create) createColumnNamed(renaming.value)
+                  else renameColumn(renaming.col, renaming.value)
                   setRenaming(null)
                 } else if (e.key === 'Escape') {
                   setRenaming(null)
                 }
               }}
               onBlur={() => {
-                renameColumn(renaming.col, renaming.value)
+                if (renaming.create) createColumnNamed(renaming.value)
+                else renameColumn(renaming.col, renaming.value)
                 setRenaming(null)
               }}
             />

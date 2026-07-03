@@ -51,7 +51,9 @@ export function listConversationMessages(
 ): ConversationMessage[] {
   return db
     .prepare(
-      'SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at ASC'
+      // created_at has second precision and one agent turn inserts several rows
+      // within the same second — tiebreak on rowid to preserve insertion order.
+      'SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC'
     )
     .all(conversationId) as ConversationMessage[]
 }

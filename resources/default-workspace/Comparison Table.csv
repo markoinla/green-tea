@@ -9,5 +9,5 @@ Anytype,P2P object workspace,Source-available — not true OSI open source,Yes,B
 Mem.ai,AI-native notes / auto-organization,No,No,AI organizes and searches notes,Partial — but not task-execution oriented
 Reflect,Polished AI notes app,No,No,GPT-4o / Claude / Gemini for summarization and linking,No
 Apple Notes,Default personal notes,No,Yes — Apple ecosystem only,Apple Intelligence summaries / suggestions,No
-Claude Code,Developer AI agents,No,Yes,Full coding-agent workflow,"Yes — agentic, but developer-oriented"
+Claude Cowork,AI Workspace,No,Yes,Full coding-agent workflow,"Yes — agentic, but developer-oriented"
 Lovable / Bolt / v0,AI app builders,No — mostly,No / mixed,Generate code/apps from prompts,Partial — developer/product-builder oriented

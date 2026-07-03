@@ -122,4 +122,33 @@ describe('workspaces repository', () => {
     const folders = db.prepare('SELECT * FROM folders WHERE workspace_id = ?').all(ws1.id)
     expect(folders.length).toBe(0)
   })
+
+  it('deleteWorkspace cleans notes_fts and note_links for its documents only', () => {
+    const ws1 = createWorkspace(db, { name: 'WS1' })
+    const ws2 = createWorkspace(db, { name: 'WS2' })
+    const doc1 = createDocument(db, { title: 'Doc 1', workspace_id: ws1.id })
+    const doc2 = createDocument(db, { title: 'Doc 2', workspace_id: ws2.id })
+
+    // notes_fts / note_links have no FKs — populate them directly, as the
+    // vault indexer would.
+    const insertFts = db.prepare('INSERT INTO notes_fts (title, body, id) VALUES (?, ?, ?)')
+    insertFts.run('Doc 1', 'body one', doc1.id)
+    insertFts.run('Doc 2', 'body two', doc2.id)
+    const insertLink = db.prepare(
+      'INSERT INTO note_links (source_id, target_label, label_fold, snippet, workspace_id) VALUES (?, ?, ?, ?, ?)'
+    )
+    insertLink.run(doc1.id, 'Doc 2', 'doc 2', '[[Doc 2]]', ws1.id)
+    insertLink.run(doc2.id, 'Doc 1', 'doc 1', '[[Doc 1]]', ws2.id)
+
+    deleteWorkspace(db, ws1.id)
+
+    const ftsIds = (db.prepare('SELECT id FROM notes_fts').all() as { id: string }[]).map(
+      (r) => r.id
+    )
+    expect(ftsIds).toEqual([doc2.id])
+    const linkSources = (
+      db.prepare('SELECT source_id FROM note_links').all() as { source_id: string }[]
+    ).map((r) => r.source_id)
+    expect(linkSources).toEqual([doc2.id])
+  })
 })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import type { Components } from 'react-markdown'
 import {
   ChevronRight,
@@ -249,6 +249,10 @@ interface ChatMessageProps {
   resolveDocName?: (id: string) => string
 }
 
+// Module-level so the array identity is stable across renders — an inline
+// [remarkGfm] would defeat memoization and re-parse markdown every render.
+const remarkPlugins = [remarkGfm]
+
 // Custom renderers: mention links render as styled chips; wide tables scroll
 // horizontally inside their own container so they never overflow the bubble.
 const markdownComponents: Components = {
@@ -275,7 +279,10 @@ const markdownComponents: Components = {
   )
 }
 
-export function ChatMessage({
+// Memoized so streaming token updates (which rebuild the messages array) don't
+// re-parse every settled message's markdown. Props are primitives or
+// referentially stable message fields, so shallow comparison is sufficient.
+export const ChatMessage = memo(function ChatMessage({
   role,
   content,
   thinking,
@@ -331,7 +338,7 @@ export function ChatMessage({
             {isUser && content.length > 500 ? (
               expanded ? (
                 <>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
                     {content}
                   </ReactMarkdown>
                   <button
@@ -357,7 +364,7 @@ export function ChatMessage({
                 </>
               )
             ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
                 {content}
               </ReactMarkdown>
             )}
@@ -391,4 +398,4 @@ export function ChatMessage({
       </div>
     </div>
   )
-}
+})

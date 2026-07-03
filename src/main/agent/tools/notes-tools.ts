@@ -42,7 +42,10 @@ export function createNotesTools(
   db: Database.Database,
   window: BrowserWindow,
   workspaceId?: string,
-  autoApprove?: boolean
+  autoApprove?: boolean,
+  // Chat conversation that owns this session — lets the subagent tool tag its
+  // forwarded events so the renderer routes them across concurrent conversations
+  conversationId?: string
 ): ToolDefinition[] {
   const notesListTool: ToolDefinition = {
     name: 'notes_list',
@@ -488,7 +491,7 @@ export function createNotesTools(
 
   const webSearchTool = createWebSearchTool()
   const webFetchTool = createWebFetchTool()
-  const subagentTool = createSubagentTool(db, window, workspaceId)
+  const subagentTool = createSubagentTool(db, window, workspaceId, conversationId)
 
   const tools: ToolDefinition[] = [
     notesListTool,

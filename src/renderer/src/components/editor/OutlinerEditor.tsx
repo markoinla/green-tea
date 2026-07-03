@@ -107,7 +107,7 @@ export function OutlinerEditor({
       OutlinerKeymap,
       Collapsible,
       Placeholder.configure({
-        placeholder: 'Type something...'
+        placeholder: 'Type to write, or / for commands'
       }),
       TaskList,
       TaskItem.configure({

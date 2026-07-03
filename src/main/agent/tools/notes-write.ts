@@ -208,12 +208,14 @@ export async function notesProposeEdit(
   const newMarkdown = current.markdown.replace(params.old_text, params.new_text)
   const diff = createMarkdownDiff(current.markdown, newMarkdown)
 
+  // input_markdown (the full new document body) is deliberately NOT stored:
+  // applyEdit uses old_text/new_text when present, so the whole-document
+  // snapshot is only needed by the legacy apply path for pre-existing rows.
   const log = createAgentLog(db, {
     document_id: params.document_id,
     block_id: undefined,
     agent_name: 'notes-assistant',
     action_type: 'propose_patch',
-    input_markdown: newMarkdown,
     output_patch: diff,
     old_text: params.old_text,
     new_text: params.new_text

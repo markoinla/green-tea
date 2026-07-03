@@ -103,6 +103,29 @@ describe('conversation messages', () => {
     expect(msgs[1].role).toBe('assistant')
   })
 
+  it('preserves insertion order for messages sharing the same created_at second', () => {
+    const ws = makeWorkspace()
+    const conv = createConversation(db, { workspace_id: ws.id })
+
+    const ids = Array.from(
+      { length: 10 },
+      (_, i) =>
+        addConversationMessage(db, {
+          conversation_id: conv.id,
+          role: i % 2 === 0 ? 'user' : 'assistant',
+          content: `msg ${i}`
+        }).id
+    )
+    // Force identical second-precision timestamps to exercise the rowid tiebreak.
+    db.prepare('UPDATE conversation_messages SET created_at = ? WHERE conversation_id = ?').run(
+      '2026-01-01 00:00:00',
+      conv.id
+    )
+
+    const msgs = listConversationMessages(db, conv.id)
+    expect(msgs.map((m) => m.id)).toEqual(ids)
+  })
+
   it('stores tool fields', () => {
     const ws = makeWorkspace()
     const conv = createConversation(db, { workspace_id: ws.id })

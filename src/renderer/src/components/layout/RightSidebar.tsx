@@ -117,6 +117,10 @@ export function RightSidebar({
     window.api.conversations.listMessages(activeConversationId).then((dbMessages) => {
       const msgs = dbMessages.map(dbMessageToChatMessage)
       setChatStates((prev) => {
+        // Re-check at resolution time: agent events may have created a live
+        // entry (streamed messages / isStreaming) while the DB read was in
+        // flight — never clobber it with the persisted snapshot.
+        if (prev.has(activeConversationId)) return prev
         const newMap = new Map(prev)
         newMap.set(activeConversationId, { messages: msgs, isStreaming: false })
         return newMap
@@ -198,24 +202,54 @@ export function RightSidebar({
     [activeConversationId, documentId, workspaceId, dispatchTo, conversations, createConversation]
   )
 
+  // Per-conversation safety-net timers armed by handleStop; disarmed when the
+  // conversation stops streaming (normally or forced) and on unmount, so a late
+  // fire can't setState after unmount or resetSession a cleanly finished turn.
+  const stopTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
   const handleStop = useCallback(() => {
     if (!activeConversationId) return
     window.api.agent.abort(activeConversationId)
     // Safety net: if still streaming after 3s, force-reset
     const convId = activeConversationId
-    setTimeout(() => {
-      setChatStates((prev) => {
-        const current = prev.get(convId)
-        if (current?.isStreaming) {
-          window.api.agent.resetSession(convId)
-          const newMap = new Map(prev)
-          newMap.set(convId, { ...current, isStreaming: false })
-          return newMap
-        }
-        return prev
-      })
-    }, 3000)
+    const existing = stopTimersRef.current.get(convId)
+    if (existing) clearTimeout(existing)
+    stopTimersRef.current.set(
+      convId,
+      setTimeout(() => {
+        stopTimersRef.current.delete(convId)
+        setChatStates((prev) => {
+          const current = prev.get(convId)
+          if (current?.isStreaming) {
+            window.api.agent.resetSession(convId)
+            const newMap = new Map(prev)
+            newMap.set(convId, { ...current, isStreaming: false })
+            return newMap
+          }
+          return prev
+        })
+      }, 3000)
+    )
   }, [activeConversationId, setChatStates])
+
+  // Disarm safety-net timers for conversations that have stopped streaming.
+  useEffect(() => {
+    for (const [convId, timer] of stopTimersRef.current) {
+      if (!chatStates.get(convId)?.isStreaming) {
+        clearTimeout(timer)
+        stopTimersRef.current.delete(convId)
+      }
+    }
+  }, [chatStates])
+
+  // Disarm all safety-net timers on unmount.
+  useEffect(() => {
+    const timers = stopTimersRef.current
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
 
   const handleClear = useCallback(() => {
     if (!activeConversationId) return
@@ -422,6 +456,7 @@ export function RightSidebar({
                 onRejectPatch={handleRejectEdit}
                 onApproveMetadata={handleApproveMetadata}
                 onRejectMetadata={handleRejectMetadata}
+                onExampleClick={(prompt) => chatInputRef.current?.setText(prompt)}
                 messagesEndRef={messagesEndRef}
               />
             </div>

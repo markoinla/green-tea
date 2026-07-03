@@ -15,41 +15,12 @@ interface ActiveTool {
   toolArgs?: Record<string, unknown>
 }
 
-const EMPTY_STATE_FLAVOR = [
-  'Edit your notes with AI assistance',
-  'Search across your entire workspace',
-  'Ask questions about your documents',
-  'Brainstorm ideas and organize thoughts',
-  'Summarize long notes in seconds',
-  'Connect ideas across documents',
-  'Draft outlines from scratch',
-  'Refine your writing with feedback'
+const EMPTY_STATE_PROMPTS = [
+  'Summarize the note I have open',
+  'Help me brainstorm and organize ideas',
+  'Draft an outline from scratch',
+  'Find connections across my notes'
 ]
-
-function RotatingFlavorText(): React.ReactElement {
-  const [index, setIndex] = useState(0)
-  const [visible, setVisible] = useState(true)
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setVisible(false)
-      setTimeout(() => {
-        setIndex((i) => (i + 1) % EMPTY_STATE_FLAVOR.length)
-        setVisible(true)
-      }, 300)
-    }, 5000)
-    return () => clearInterval(interval)
-  }, [])
-
-  return (
-    <p
-      className="text-xs text-muted-foreground text-center max-w-[260px] leading-relaxed transition-opacity duration-300"
-      style={{ opacity: visible ? 1 : 0 }}
-    >
-      {EMPTY_STATE_FLAVOR[index]}
-    </p>
-  )
-}
 
 const AGENT_FLAVOR_TEXT = [
   'Thinking deeply',
@@ -181,6 +152,7 @@ interface ChatMessageListProps {
   onRejectPatch: (logId: string) => void
   onApproveMetadata: (logId: string) => void
   onRejectMetadata: (logId: string) => void
+  onExampleClick: (prompt: string) => void
   messagesEndRef: RefObject<HTMLDivElement | null>
 }
 
@@ -199,6 +171,7 @@ export function ChatMessageList({
   onRejectPatch,
   onApproveMetadata,
   onRejectMetadata,
+  onExampleClick,
   messagesEndRef
 }: ChatMessageListProps) {
   // The current in-flight tool — the last pending tool of the trailing activity
@@ -222,8 +195,19 @@ export function ChatMessageList({
         <div className="w-12 h-12 rounded-2xl bg-primary/5 flex items-center justify-center mb-5 ring-1 ring-inset ring-primary/10">
           <MessageSquare className="h-6 w-6 text-primary/60" />
         </div>
-        <h3 className="text-sm font-medium text-foreground mb-1.5">How can I help?</h3>
-        <RotatingFlavorText />
+        <h3 className="text-sm font-medium text-foreground mb-4">How can I help?</h3>
+        <div className="flex flex-col gap-2 w-full max-w-[280px]">
+          {EMPTY_STATE_PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => onExampleClick(prompt)}
+              className="text-left text-xs text-muted-foreground rounded-xl border border-border/60 bg-secondary/30 px-3 py-2 hover:bg-secondary/60 hover:text-foreground transition-colors"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
       </div>
     )
   }

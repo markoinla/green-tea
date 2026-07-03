@@ -150,9 +150,20 @@ function blockToTipTap(node: MdNode): TTNode | TTNode[] | null {
     case 'image':
       return imageToTipTap(node)
 
-    case 'html':
-      // Block-level raw HTML — keep the text so nothing is silently dropped.
-      return { type: 'paragraph', content: [{ type: 'text', text: node.value ?? '' }] }
+    case 'html': {
+      // Block-level raw HTML — kept verbatim as paragraph text. The rawHtml
+      // attr tells the serializer to emit an mdast `html` node again, so the
+      // markdown is not backslash-escaped on the way out. It is an attr on the
+      // regular paragraph type (not a dedicated node type) so the editor's
+      // schema still loads the doc; if the attr is lost there, serialization
+      // falls back to the inline-HTML splitter below.
+      const text = node.value ?? ''
+      return {
+        type: 'paragraph',
+        attrs: { rawHtml: true },
+        content: text.length > 0 ? [{ type: 'text', text }] : []
+      }
+    }
 
     default:
       if (node.children) {
@@ -166,10 +177,15 @@ function blockToTipTap(node: MdNode): TTNode | TTNode[] | null {
 function listToTipTap(node: MdNode): TTNode {
   const ordered = node.ordered === true
   const items = (node.children ?? []).map((item) => listItemToTipTap(item))
-  return {
+  const list: TTNode = {
     type: ordered ? 'outlinerOrderedList' : 'outlinerList',
     content: items
   }
+  // Keep a non-default start index (`5. item`) so it survives the round trip.
+  if (ordered && typeof node.start === 'number' && node.start !== 1) {
+    list.attrs = { start: node.start }
+  }
+  return list
 }
 
 function listItemToTipTap(item: MdNode): TTNode {
@@ -387,6 +403,12 @@ function tiptapBlockToMd(node: TTNode): MdNode | MdNode[] | null {
       }
 
     case 'paragraph':
+      // A paragraph flagged rawHtml holds a verbatim block-level HTML fragment
+      // (see blockToTipTap) — emit it as an mdast `html` node so nothing is
+      // escaped, exactly like the wiki-link passthrough.
+      if (node.attrs?.rawHtml === true) {
+        return { type: 'html', value: textOf(node.content ?? []) }
+      }
       return { type: 'paragraph', children: inlineToMd(node.content ?? []) }
 
     case 'blockquote':
@@ -410,8 +432,10 @@ function tiptapBlockToMd(node: TTNode): MdNode | MdNode[] | null {
       return { type: 'list', ordered: false, spread: false, children: listItemsToMd(node) }
 
     case 'outlinerOrderedList':
-    case 'orderedList':
-      return { type: 'list', ordered: true, start: 1, spread: false, children: listItemsToMd(node) }
+    case 'orderedList': {
+      const start = typeof node.attrs?.start === 'number' ? (node.attrs.start as number) : 1
+      return { type: 'list', ordered: true, start, spread: false, children: listItemsToMd(node) }
+    }
 
     case 'taskList':
       return { type: 'list', ordered: false, spread: false, children: listItemsToMd(node) }
@@ -557,7 +581,7 @@ function buildInline(runs: InlineRun[]): MdNode[] {
       continue
     }
     if (run.marks.length === 0) {
-      out.push({ type: 'text', value: run.text })
+      out.push(...splitInlineHtml(run.text))
       i++
       continue
     }
@@ -601,6 +625,49 @@ function wrapMark(mark: TTMark, children: MdNode[]): MdNode[] {
     default:
       return children
   }
+}
+
+// CommonMark inline-HTML grammar, mirroring micromark's `html-text` construct
+// (the parser used on the way in). Inline raw HTML (`<br>`, `<div …>`,
+// comments, PIs, declarations, CDATA) arrives from mdast as `html` nodes but
+// is stored as plain text in TipTap (text nodes cannot carry a "raw" flag the
+// editor schema would accept). On serialize, any text span this grammar
+// matches is re-emitted as an mdast `html` node — the same passthrough trick
+// as wiki-links — so raw HTML round-trips byte-identically instead of getting
+// backslash-escaped. False positives are safe: whatever this matches is
+// exactly what micromark re-parses as inline HTML (and hands back to us as
+// text), so the output is a stable fixed point either way.
+const HTML_TAG_NAME = '[A-Za-z][A-Za-z0-9-]*'
+const HTML_ATTRIBUTE =
+  '\\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\\s*=\\s*(?:[^\\x00-\\x20"\'=<>`/]+|\'[^\']*\'|"[^"]*"))?'
+const INLINE_HTML_RE = new RegExp(
+  `<${HTML_TAG_NAME}(?:${HTML_ATTRIBUTE})*\\s*/?>` + // open tag
+    `|</${HTML_TAG_NAME}\\s*>` + // closing tag
+    '|<!-->|<!--->|<!--[\\s\\S]*?-->' + // comment
+    '|<\\?[\\s\\S]*?\\?>' + // processing instruction
+    '|<![A-Za-z][^>]*>' + // declaration
+    '|<!\\[CDATA\\[[\\s\\S]*?\\]\\]>', // CDATA section
+  'g'
+)
+
+// `<u>`/`<mark>` (and closers) parse back into underline/highlight MARKS, not
+// literal text, so a literal mention of them must stay escaped text — emitting
+// them raw would turn prose into formatting on the next load.
+const MARK_TAG_RE = /^<\/?(?:u|mark)>$/i
+
+function splitInlineHtml(text: string): MdNode[] {
+  const out: MdNode[] = []
+  let last = 0
+  let match: RegExpExecArray | null
+  INLINE_HTML_RE.lastIndex = 0
+  while ((match = INLINE_HTML_RE.exec(text)) !== null) {
+    if (MARK_TAG_RE.test(match[0])) continue
+    if (match.index > last) out.push({ type: 'text', value: text.slice(last, match.index) })
+    out.push({ type: 'html', value: match[0] })
+    last = match.index + match[0].length
+  }
+  if (last < text.length) out.push({ type: 'text', value: text.slice(last) })
+  return out
 }
 
 function collectText(nodes: MdNode[]): string {

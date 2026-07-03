@@ -23,11 +23,20 @@ export interface SubagentResult {
   isError: boolean
 }
 
+// Identifies which chat conversation (and which subagent tool call within it)
+// spawned this subagent, so forwarded events can be routed to the right
+// conversation in the renderer instead of relying on a global "active" pointer.
+export interface SubagentEventContext {
+  conversationId?: string
+  parentToolCallId?: string
+}
+
 export async function createSubagentSession(
   db: Database.Database,
   window: BrowserWindow,
   agentConfig: AgentConfig,
-  workspaceId?: string
+  workspaceId?: string,
+  conversationId?: string
 ): Promise<AgentSession> {
   const authStorage = AuthStorage.create()
   const aiProvider = getSetting(db, 'aiProvider') || 'default'
@@ -247,7 +256,7 @@ export async function createSubagentSession(
 
   // Build tool set based on agent's allowed tools
   const agentWorkDir = getAgentWorkDir(db, workspaceId)
-  const allNotesTools = createNotesTools(db, window, workspaceId)
+  const allNotesTools = createNotesTools(db, window, workspaceId, undefined, conversationId)
 
   // Sandboxed bash shares the built-in tool name 'bash', so the session registry uses
   // it in place of the built-in bash (custom tools override built-ins by name).
@@ -304,9 +313,16 @@ export async function runSubagent(
   agentConfig: AgentConfig,
   task: string,
   workspaceId?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  context?: SubagentEventContext
 ): Promise<SubagentResult> {
-  const session = await createSubagentSession(db, window, agentConfig, workspaceId)
+  const session = await createSubagentSession(
+    db,
+    window,
+    agentConfig,
+    workspaceId,
+    context?.conversationId
+  )
 
   try {
     if (signal?.aborted) {
@@ -346,11 +362,15 @@ export async function runSubagent(
         }
       }
 
-      // Only forward tool events — skip message events to avoid cluttering the main chat
+      // Only forward tool events — skip message events to avoid cluttering the main chat.
+      // Tag with the spawning conversation + parent subagent toolCallId so the renderer
+      // can route concurrent conversations' subagent activity to the right bucket.
       if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
         safeSend(window, 'agent:subagent-event', {
           ...event,
-          agentName: agentConfig.name
+          agentName: agentConfig.name,
+          conversationId: context?.conversationId,
+          parentToolCallId: context?.parentToolCallId
         })
       }
     }

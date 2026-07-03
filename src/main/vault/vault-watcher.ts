@@ -8,6 +8,8 @@ import {
   reindexFile,
   deleteIndexRowByPath,
   pruneMissingFolders,
+  reindexWorkspace,
+  indexHasEntriesUnder,
   getVaultDirsByWorkspace,
   type ReindexResult
 } from './documents-service'
@@ -36,12 +38,18 @@ import { recordDirtyPath } from '../git/auto-commit'
 
 const DEBOUNCE_MS = 200
 const DELETE_SETTLE_MS = 120 // re-verify a deletion before pruning (handles delete+recreate flaps)
+// Reindex delay after an indexed directory vanishes: past the per-file debounce
+// (200ms) + delete settle (120ms), so any child-file events that DO arrive win
+// the race and the reindex observes the settled final state.
+const DIR_GONE_REINDEX_MS = 500
 const IGNORED_DIRS = new Set(['.git', '.obsidian', 'node_modules', 'attachments', '.trash'])
 
 const watchers = new Map<string, FSWatcher>()
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 // Per-workspace-root debounce for folder-structure (directory removal) reconciles.
 const folderTimers = new Map<string, ReturnType<typeof setTimeout>>()
+// Per-workspace-root debounce for the post-directory-removal workspace reindex.
+const reindexTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const settleTimers = new Set<ReturnType<typeof setTimeout>>()
 let stopped = true
 let storedDb: Database.Database | null = null
@@ -100,18 +108,22 @@ function broadcast(result: ReindexResult): void {
   }
 }
 
+function owningWorkspace(forPath: string): { workspaceId: string; dir: string } | undefined {
+  return getVaultDirsByWorkspace(storedDb!).find(
+    (e) => forPath === e.dir || forPath.startsWith(e.dir + sep)
+  )
+}
+
 /**
  * Reconcile folder rows for the workspace owning `forPath` after a deletion:
  * prune any whose directory is now gone. Debounced per workspace root and run on
- * a settle delay so a delete+recreate flap (or a rename) doesn't churn rows.
- * Covers both signals — a directory-removal event and the last child-file delete
- * — so a folder is pruned regardless of which the OS reports.
+ * a settle delay so a delete+recreate flap doesn't churn rows. pruneMissingFolders
+ * only drops doc rows whose file is genuinely absent, so a rename/move that a
+ * per-file reindex already re-pointed is never clobbered here.
  */
 function scheduleFolderReconcile(forPath: string): void {
   if (!alive()) return
-  const entry = getVaultDirsByWorkspace(storedDb!).find(
-    (e) => forPath === e.dir || forPath.startsWith(e.dir + sep)
-  )
+  const entry = owningWorkspace(forPath)
   if (!entry) return
   const prev = folderTimers.get(entry.dir)
   if (prev) clearTimeout(prev)
@@ -122,6 +134,45 @@ function scheduleFolderReconcile(forPath: string): void {
       if (!alive()) return
       if (pruneMissingFolders(storedDb!, entry.workspaceId)) send('documents:changed')
     }, DELETE_SETTLE_MS)
+  )
+}
+
+/**
+ * A directory the index knows about vanished. That is EITHER a genuine folder
+ * delete OR a Finder rename/move — and macOS FSEvents does not reliably emit
+ * per-child create events for the new location, so eagerly pruning by the old
+ * path would drop the (still existing) notes until the next launch reindex.
+ * Instead, rebuild the whole workspace index (debounced per root, delayed past
+ * the per-file debounce+settle): a renamed folder's notes are re-homed in place
+ * (upsert by stable frontmatter id — agent logs survive), a genuinely deleted
+ * folder's rows are pruned. Paths the index knows nothing about (a stray
+ * non-indexed file) fall back to the cheap folder-row prune, so this never
+ * degenerates into a full reindex on every event.
+ */
+function scheduleDirGoneReconcile(forPath: string): void {
+  if (!alive()) return
+  const entry = owningWorkspace(forPath)
+  if (!entry) return
+  if (!indexHasEntriesUnder(storedDb!, entry.workspaceId, forPath)) {
+    scheduleFolderReconcile(forPath)
+    return
+  }
+  const prev = reindexTimers.get(entry.dir)
+  if (prev) clearTimeout(prev)
+  reindexTimers.set(
+    entry.dir,
+    setTimeout(() => {
+      reindexTimers.delete(entry.dir)
+      if (!alive()) return
+      // A missing root is an "unavailable" workspace — never mkdir it back.
+      if (!existsSync(entry.dir)) return
+      try {
+        reindexWorkspace(storedDb!, entry.workspaceId)
+        send('documents:changed')
+      } catch (err) {
+        console.error('[vault-watcher] reindex after directory removal failed', err)
+      }
+    }, DIR_GONE_REINDEX_MS)
   )
 }
 
@@ -139,7 +190,15 @@ function handlePath(root: string, abs: string): void {
   if (existsSync(abs) && hasSelfWrite(abs)) {
     try {
       const raw = readFileSync(abs, 'utf-8')
-      if (consumeSelfWrite(abs, raw)) return
+      if (consumeSelfWrite(abs, raw)) {
+        // Our own in-app save. We skip the reindex (the app already updated the
+        // index directly), but STILL feed the path to the debounced auto-committer
+        // so in-app edits land in version history — not just external/agent ones.
+        // Loop-safe: the eventual commit writes only under .git/ (watcher-ignored)
+        // and re-hashes this file without rewriting it.
+        recordDirtyPath(root, abs)
+        return
+      }
     } catch {
       // fall through to a normal reindex
     }
@@ -174,9 +233,10 @@ function handlePath(root: string, abs: string): void {
     settleTimers.add(t)
     return
   }
-  // A real (external / agent) content change — feed the dirty path to the debounced
-  // auto-commit safety net (§4.5). Self-writes already returned above, so this only
-  // ever sees edits the app didn't make itself; 'unchanged'/'ignored' are skipped.
+  // A real content change — feed the dirty path to the debounced auto-commit safety
+  // net (§4.5). Confirmed self-writes recorded + returned above; this covers external
+  // /agent edits and any self-write whose bytes changed again before we read them.
+  // 'unchanged'/'ignored' are skipped.
   if (result.kind === 'created' || result.kind === 'updated') recordDirtyPath(root, abs)
   broadcast(result)
 }
@@ -190,10 +250,12 @@ function onEvent(root: string, _eventType: string, filename: string | Buffer | n
   if (!isIndexedFile(rel)) {
     // Not a note/artifact path — usually a directory. The one structural change
     // that per-file events don't cover is a *removed* directory (deleting or
-    // renaming a folder), which leaves stale folder rows. Reconcile when the
-    // path is gone; ignore directory creations/renames-in (their child files
-    // reindex themselves and lazily recreate the folder row).
-    if (!existsSync(abs)) scheduleFolderReconcile(abs)
+    // renaming a folder). Reconcile when the path is gone — via a debounced
+    // workspace reindex when the index has entries under it (a rename's notes
+    // are re-homed, a delete's rows pruned); ignore directory creations/
+    // renames-in (their child files reindex themselves and lazily recreate the
+    // folder row).
+    if (!existsSync(abs)) scheduleDirGoneReconcile(abs)
     return
   }
 
@@ -271,6 +333,8 @@ export function stopVaultWatcher(): void {
   timers.clear()
   for (const t of folderTimers.values()) clearTimeout(t)
   folderTimers.clear()
+  for (const t of reindexTimers.values()) clearTimeout(t)
+  reindexTimers.clear()
   for (const t of settleTimers) clearTimeout(t)
   settleTimers.clear()
   for (const w of watchers.values()) w.close()

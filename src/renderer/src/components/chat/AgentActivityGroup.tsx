@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { ChevronRight, AlertCircle, Loader2 } from 'lucide-react'
 import { getToolDescription, getToolIcon, summarizeTools } from './ChatMessage'
 
@@ -17,7 +17,39 @@ interface AgentActivityGroupProps {
   showToolResults?: boolean
 }
 
-export function AgentActivityGroup({
+// ChatMessageList rebuilds the `tools` array (and its element objects) on every
+// render, so shallow memo would never hit — compare the fields we render by
+// content instead. `toolArgs` is compared by reference: the reducer creates a
+// fresh args object whenever args actually change, so identity tracks content.
+function toolsEqual(a: ToolMessage[], b: ToolMessage[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (
+      x.id !== y.id ||
+      x.toolName !== y.toolName ||
+      x.toolArgs !== y.toolArgs ||
+      x.toolResult !== y.toolResult ||
+      x.toolIsError !== y.toolIsError
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function propsAreEqual(prev: AgentActivityGroupProps, next: AgentActivityGroupProps): boolean {
+  return (
+    prev.thinking === next.thinking &&
+    prev.resolveDocName === next.resolveDocName &&
+    prev.showToolResults === next.showToolResults &&
+    toolsEqual(prev.tools, next.tools)
+  )
+}
+
+export const AgentActivityGroup = memo(function AgentActivityGroup({
   tools,
   thinking,
   resolveDocName,
@@ -123,4 +155,4 @@ export function AgentActivityGroup({
       )}
     </div>
   )
-}
+}, propsAreEqual)

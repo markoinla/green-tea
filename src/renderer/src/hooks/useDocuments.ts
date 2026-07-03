@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import type { Document, DocumentKind } from '../../../main/database/types'
 
 interface UseDocumentsResult {
@@ -32,39 +32,179 @@ interface UseDocumentsResult {
   refresh: () => Promise<void>
 }
 
-export function useDocuments(workspaceId?: string | null): UseDocumentsResult {
-  const [documents, setDocuments] = useState<Document[]>([])
-  const [loading, setLoading] = useState(true)
-  // Tracks the latest requested workspace so an in-flight list() resolving after
-  // a workspace switch can't clobber the new workspace's data (mirrors App.tsx).
-  const workspaceIdRef = useRef(workspaceId)
-  workspaceIdRef.current = workspaceId
-  // Only the very first load (and a workspace switch) shows the loading state.
-  // Event/mutation-driven refreshes revalidate in the background while the
-  // existing list stays on screen — otherwise a refetch blanks the note tree to
-  // a "Loading…" placeholder and flashes on every change (e.g. folder toggle).
-  const loadedWsRef = useRef<string | null | undefined>(undefined)
+// The hook is mounted by several components at once (sidebars, tab strip,
+// editor host). Without sharing, every documents:changed event triggered one
+// full documents.list() per instance — an agent turn writing N notes meant 5N+
+// IPC round trips. This module-level store keeps one cached list per workspace,
+// one IPC subscription (refcounted across all instances) and one deduped
+// refetch, with per-instance useSyncExternalStore fan-out for re-renders.
 
-  const refresh = useCallback(async () => {
-    const reqWs = workspaceId
-    if (loadedWsRef.current !== reqWs) setLoading(true)
-    try {
-      const docs = await window.api.documents.list(reqWs ?? undefined)
-      if (workspaceIdRef.current !== reqWs) return
-      setDocuments(docs)
-      loadedWsRef.current = reqWs
-    } finally {
-      if (workspaceIdRef.current === reqWs) setLoading(false)
+interface DocumentsSnapshot {
+  documents: Document[]
+  loading: boolean
+}
+
+interface WorkspaceStore {
+  wsId: string | undefined
+  documents: Document[]
+  loading: boolean
+  loaded: boolean
+  inFlight: Promise<void> | null
+  queued: Promise<void> | null
+  snapshot: DocumentsSnapshot | null
+  listeners: Set<() => void>
+}
+
+interface DocumentsStoreApi {
+  list: (workspaceId?: string) => Promise<Document[]>
+  onChanged: (callback: () => void) => () => void
+}
+
+// Exported for tests; the app uses the lazy singleton below.
+export function createDocumentsStore(api: DocumentsStoreApi): {
+  getStore: (workspaceId?: string | null) => WorkspaceStore
+  subscribe: (store: WorkspaceStore, listener: () => void) => () => void
+  refresh: (store: WorkspaceStore) => Promise<void>
+  getSnapshot: (store: WorkspaceStore) => DocumentsSnapshot
+} {
+  // Keyed by workspace so a fetch for one workspace can never clobber
+  // another's cache, and a workspace switch gets its own loading state.
+  const stores = new Map<string | null, WorkspaceStore>()
+  let totalSubscribers = 0
+  let unsubscribeIpc: (() => void) | null = null
+  let refetchScheduled = false
+
+  function getStore(workspaceId?: string | null): WorkspaceStore {
+    const key = workspaceId ?? null
+    let store = stores.get(key)
+    if (!store) {
+      store = {
+        wsId: workspaceId ?? undefined,
+        documents: [],
+        loading: true,
+        loaded: false,
+        inFlight: null,
+        queued: null,
+        snapshot: null,
+        listeners: new Set()
+      }
+      stores.set(key, store)
     }
-  }, [workspaceId])
+    return store
+  }
 
-  useEffect(() => {
-    refresh()
-    const unsub = window.api.onDocumentsChanged(() => {
-      refresh()
+  function emit(store: WorkspaceStore): void {
+    store.snapshot = null
+    for (const listener of store.listeners) listener()
+  }
+
+  function refresh(store: WorkspaceStore): Promise<void> {
+    // Dedupe: while a fetch is in flight, all callers share one queued
+    // follow-up fetch — mutations awaiting refresh() still observe data read
+    // at-or-after their write, without a fetch per caller.
+    if (store.inFlight) {
+      if (!store.queued) {
+        store.queued = store.inFlight
+          .catch(() => {})
+          .then(() => {
+            store.queued = null
+            return refresh(store)
+          })
+      }
+      return store.queued
+    }
+    // Only the very first load of a workspace shows the loading state.
+    // Event/mutation-driven refreshes revalidate in the background while the
+    // existing list stays on screen — otherwise a refetch blanks the note
+    // tree to a "Loading…" placeholder and flashes on every change.
+    if (!store.loaded && !store.loading) {
+      store.loading = true
+      emit(store)
+    }
+    store.inFlight = (async () => {
+      try {
+        const docs = await api.list(store.wsId)
+        store.documents = docs
+        store.loaded = true
+      } finally {
+        store.inFlight = null
+        store.loading = false
+        emit(store)
+      }
+    })()
+    return store.inFlight
+  }
+
+  function scheduleRefetchAll(): void {
+    // Microtask-coalesce bursts of same-tick change events into one pass.
+    if (refetchScheduled) return
+    refetchScheduled = true
+    queueMicrotask(() => {
+      refetchScheduled = false
+      for (const store of stores.values()) {
+        if (store.listeners.size > 0) void refresh(store).catch(() => {})
+      }
     })
-    return unsub
-  }, [refresh])
+  }
+
+  function subscribe(store: WorkspaceStore, listener: () => void): () => void {
+    if (totalSubscribers === 0) {
+      unsubscribeIpc = api.onChanged(scheduleRefetchAll)
+    }
+    totalSubscribers++
+    const firstForStore = store.listeners.size === 0
+    store.listeners.add(listener)
+    if (firstForStore) {
+      // Fresh mount, or remount after a gap with no listeners (change events
+      // are skipped for unwatched workspaces) — revalidate the cache.
+      void refresh(store).catch(() => {})
+    }
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      store.listeners.delete(listener)
+      totalSubscribers--
+      if (totalSubscribers === 0 && unsubscribeIpc) {
+        unsubscribeIpc()
+        unsubscribeIpc = null
+      }
+    }
+  }
+
+  function getSnapshot(store: WorkspaceStore): DocumentsSnapshot {
+    if (!store.snapshot) {
+      store.snapshot = { documents: store.documents, loading: store.loading }
+    }
+    return store.snapshot
+  }
+
+  return { getStore, subscribe, refresh, getSnapshot }
+}
+
+let sharedStore: ReturnType<typeof createDocumentsStore> | null = null
+
+function getSharedStore(): ReturnType<typeof createDocumentsStore> {
+  if (!sharedStore) {
+    sharedStore = createDocumentsStore({
+      list: (workspaceId) => window.api.documents.list(workspaceId),
+      onChanged: (callback) => window.api.onDocumentsChanged(callback)
+    })
+  }
+  return sharedStore
+}
+
+export function useDocuments(workspaceId?: string | null): UseDocumentsResult {
+  const shared = getSharedStore()
+  const store = shared.getStore(workspaceId)
+
+  const subscribe = useCallback(
+    (listener: () => void) => shared.subscribe(store, listener),
+    [shared, store]
+  )
+  const { documents, loading } = useSyncExternalStore(subscribe, () => shared.getSnapshot(store))
+
+  const refresh = useCallback(() => shared.refresh(store), [shared, store])
 
   const createDocument = useCallback(
     async (data: { title: string; workspace_id?: string; folder_id?: string | null }) => {

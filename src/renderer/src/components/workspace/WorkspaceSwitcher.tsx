@@ -13,6 +13,7 @@ import {
   Table2,
   FolderPlus,
   Folder,
+  FolderOpen,
   Leaf
 } from 'lucide-react'
 import { useWorkspaces } from '@renderer/hooks/useWorkspaces'
@@ -195,6 +196,12 @@ export function WorkspaceSwitcher({
                 <Pencil className="h-4 w-4" />
                 Edit Description
               </DropdownMenuItem>
+              {workspace && (
+                <DropdownMenuItem onSelect={() => window.api.shell.openPath(workspace.path)}>
+                  <FolderOpen className="h-4 w-4" />
+                  Open Workspace Folder
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"

@@ -49,7 +49,9 @@ export function assertNoOverlap(db: Database.Database, path: string): void {
   for (const name of RESERVED_WORKSPACE_NAMES) {
     const reserved = normalizePath(join(base, name)).toLowerCase()
     if (targetCI === reserved || targetCI.startsWith(reserved + sep)) {
-      throw new Error(`"${name}" is reserved for Green Tea and can't be used as a workspace folder.`)
+      throw new Error(
+        `"${name}" is reserved for Green Tea and can't be used as a workspace folder.`
+      )
     }
   }
 
@@ -119,11 +121,20 @@ export function deleteWorkspace(db: Database.Database, id: string): void {
   const count = (db.prepare('SELECT COUNT(*) as cnt FROM workspaces').get() as { cnt: number }).cnt
   if (count <= 1) throw new Error('Cannot delete the last workspace')
 
-  // Delete all agent_logs, documents, and folders in this workspace (cascade)
-  db.prepare(
-    'DELETE FROM agent_logs WHERE document_id IN (SELECT id FROM documents WHERE workspace_id = ?)'
-  ).run(id)
-  db.prepare('DELETE FROM documents WHERE workspace_id = ?').run(id)
-  db.prepare('DELETE FROM folders WHERE workspace_id = ?').run(id)
-  db.prepare('DELETE FROM workspaces WHERE id = ?').run(id)
+  // Cascade in one transaction so a crash can't leave partial state. notes_fts
+  // (FTS5 virtual table, no FK possible) and note_links (deliberately no FK)
+  // must be cleaned explicitly — mirrors deleteIndexRow in
+  // src/main/vault/documents-service.ts.
+  db.transaction(() => {
+    db.prepare(
+      'DELETE FROM notes_fts WHERE id IN (SELECT id FROM documents WHERE workspace_id = ?)'
+    ).run(id)
+    db.prepare('DELETE FROM note_links WHERE workspace_id = ?').run(id)
+    db.prepare(
+      'DELETE FROM agent_logs WHERE document_id IN (SELECT id FROM documents WHERE workspace_id = ?)'
+    ).run(id)
+    db.prepare('DELETE FROM documents WHERE workspace_id = ?').run(id)
+    db.prepare('DELETE FROM folders WHERE workspace_id = ?').run(id)
+    db.prepare('DELETE FROM workspaces WHERE id = ?').run(id)
+  })()
 }

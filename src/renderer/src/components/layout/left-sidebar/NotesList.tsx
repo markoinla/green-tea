@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { FilePlus, FolderPlus, RefreshCw, Shapes, Table2 } from 'lucide-react'
+import { ArrowUpDown, FilePlus, FolderPlus, RefreshCw, Shapes, Table2 } from 'lucide-react'
 import {
   dropTargetForElements,
   monitorForElements
@@ -16,12 +16,18 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger
 } from '@renderer/components/ui/context-menu'
 import { FolderMenuItem } from './FolderMenuItem'
 import { DocumentMenuItem } from './DocumentMenuItem'
-import { buildFolderTree } from './folderTree'
+import { buildFolderTree, sortDocuments, type SidebarDocSort } from './folderTree'
+import { useSettings } from '@renderer/hooks/useSettings'
 import {
   DROP_TYPE_ROOT,
   isDocumentDragData,
@@ -150,9 +156,20 @@ export function NotesList({
   // appear once plugins load (their contributions arrive asynchronously).
   useSyncExternalStore(subscribePluginViewers, getPluginViewersVersion)
   const pluginKinds = creatablePluginKinds()
+  // User-selected document sort (global setting, persisted in the settings table).
+  // One sorted pass covers the whole tree: buildFolderTree's per-folder lists and
+  // the root list below both preserve input order.
+  const { settings, updateSetting } = useSettings()
+  const sortedDocuments = useMemo(
+    () => sortDocuments(documents, settings.sidebarSort),
+    [documents, settings.sidebarSort]
+  )
   // The folder rows are flat but their names are slash-paths; build the nested
   // tree the sidebar renders from them (synthesizing row-less intermediates).
-  const folderTree = useMemo(() => buildFolderTree(folders, documents), [folders, documents])
+  const folderTree = useMemo(
+    () => buildFolderTree(folders, sortedDocuments),
+    [folders, sortedDocuments]
+  )
 
   // Collapse state for synthetic intermediate nodes (which have no row to persist
   // it on). Kept in memory only — resets on reload, which is fine for grouping.
@@ -172,8 +189,8 @@ export function NotesList({
   // document silently vanish — it falls back to root instead.
   const rootDocs = useMemo(() => {
     const folderIds = new Set(folders.map((f) => f.id))
-    return documents.filter((doc) => !doc.folder_id || !folderIds.has(doc.folder_id))
-  }, [documents, folders])
+    return sortedDocuments.filter((doc) => !doc.folder_id || !folderIds.has(doc.folder_id))
+  }, [sortedDocuments, folders])
 
   // A single global monitor performs the move on drop, reading the innermost
   // drop target. Centralizing it (rather than per-target onDrop) avoids
@@ -265,6 +282,7 @@ export function NotesList({
         </SidebarContent>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        {/* Default artifacts */}
         <ContextMenuItem onClick={onNewDocument}>
           <FilePlus className="h-3.5 w-3.5 mr-2" />
           New Note
@@ -277,17 +295,41 @@ export function NotesList({
           <Table2 className="h-3.5 w-3.5 mr-2" />
           New Table
         </ContextMenuItem>
-        {pluginKinds.map((entry) => (
-          <ContextMenuItem key={entry.kind} onClick={() => onNewArtifactKind(entry.kind)}>
-            <entry.icon className="h-3.5 w-3.5 mr-2" />
-            {entry.label}
-          </ContextMenuItem>
-        ))}
         <ContextMenuItem onClick={onNewFolder}>
           <FolderPlus className="h-3.5 w-3.5 mr-2" />
           New Folder
         </ContextMenuItem>
+        {/* Plugin-contributed artifacts */}
+        {pluginKinds.length > 0 && (
+          <>
+            <ContextMenuSeparator />
+            {pluginKinds.map((entry) => (
+              <ContextMenuItem key={entry.kind} onClick={() => onNewArtifactKind(entry.kind)}>
+                <entry.icon className="h-3.5 w-3.5 mr-2" />
+                {entry.label}
+              </ContextMenuItem>
+            ))}
+          </>
+        )}
+        {/* System */}
         <ContextMenuSeparator />
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>
+            <ArrowUpDown className="h-3.5 w-3.5 mr-2" />
+            Sort By
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            <ContextMenuRadioGroup
+              value={settings.sidebarSort}
+              onValueChange={(value) => updateSetting('sidebarSort', value as SidebarDocSort)}
+            >
+              <ContextMenuRadioItem value="name-asc">Name (A to Z)</ContextMenuRadioItem>
+              <ContextMenuRadioItem value="name-desc">Name (Z to A)</ContextMenuRadioItem>
+              <ContextMenuRadioItem value="modified-desc">Last Modified</ContextMenuRadioItem>
+              <ContextMenuRadioItem value="created-desc">Date Created</ContextMenuRadioItem>
+            </ContextMenuRadioGroup>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
         <ContextMenuItem onClick={onRefresh}>
           <RefreshCw className="h-3.5 w-3.5 mr-2" />
           Refresh

@@ -60,6 +60,21 @@ export function createAgentLog(
   return db.prepare('SELECT * FROM agent_logs WHERE id = ?').get(id) as AgentLog
 }
 
+/**
+ * Delete resolved agent logs (applied/rejected/stale) older than `maxAgeDays`.
+ * Pending rows are kept forever — they may still be awaiting user approval.
+ * Returns the number of rows deleted. `created_at` is a UTC datetime('now')
+ * TEXT column, so lexicographic comparison against datetime() is correct.
+ */
+export function pruneAgentLogs(db: Database.Database, maxAgeDays = 30): number {
+  const result = db
+    .prepare(
+      "DELETE FROM agent_logs WHERE status IN ('applied', 'rejected', 'stale') AND created_at < datetime('now', ?)"
+    )
+    .run(`-${maxAgeDays} days`)
+  return result.changes
+}
+
 export function updateAgentLogStatus(db: Database.Database, id: string, status: string): AgentLog {
   const log = db.prepare('SELECT * FROM agent_logs WHERE id = ?').get(id) as AgentLog | undefined
   if (!log) throw new Error(`Agent log not found: ${id}`)

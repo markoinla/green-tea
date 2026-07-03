@@ -29,6 +29,30 @@ export interface FolderNode {
 const byName = (a: FolderNode, b: FolderNode) =>
   a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
 
+/**
+ * User-selectable document sort for the sidebar. Applies to documents only —
+ * folders always sort alphabetically (see `sortTree`) so the tree structure
+ * stays predictable regardless of the chosen order.
+ */
+export type SidebarDocSort = 'name-asc' | 'name-desc' | 'modified-desc' | 'created-desc'
+
+// Timestamps are ISO-8601 strings, so lexicographic compare orders chronologically.
+const DOC_COMPARATORS: Record<SidebarDocSort, (a: Document, b: Document) => number> = {
+  'name-asc': (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }),
+  'name-desc': (a, b) => b.title.localeCompare(a.title, undefined, { sensitivity: 'base' }),
+  'modified-desc': (a, b) => b.updated_at.localeCompare(a.updated_at),
+  'created-desc': (a, b) => b.created_at.localeCompare(a.created_at)
+}
+
+/**
+ * Sort documents by the user's chosen sidebar order. Callers sort the full
+ * document list once — both the root list and `buildFolderTree`'s per-folder
+ * lists preserve input order, so one pass covers the whole tree.
+ */
+export function sortDocuments(documents: Document[], sort: SidebarDocSort): Document[] {
+  return [...documents].sort(DOC_COMPARATORS[sort])
+}
+
 function sortTree(nodes: FolderNode[]): void {
   nodes.sort(byName)
   for (const node of nodes) sortTree(node.children)

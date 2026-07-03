@@ -9,13 +9,14 @@ import { commitPaths, APP_IDENTITY } from './git-service'
  * Why it can't loop with the watcher: every commit writes only under `.git/` (which the
  * watcher ignores) — `commitPaths` re-hashes the dirty files but never rewrites them.
  * The one tracked file a fresh `ensureRepo` writes (`.gitignore`) is self-write-marked,
- * so even that doesn't echo back. And self-writes (our own atomic saves / restores) are
- * consumed by the watcher BEFORE it ever calls `recordDirtyPath`, so app writes don't
- * feed this loop either — only external edits and agent patches do, which is the point.
+ * so even that doesn't echo back. In-app saves (our own atomic writes) ARE fed here too:
+ * the watcher records their path when it consumes the self-write (see vault-watcher), so
+ * ordinary in-app edits land in version history alongside external edits and agent
+ * patches. This is loop-safe for the same reason (commits touch only `.git/`).
  *
- * This is a deliberately LOSSY safety net (the watcher is debounced, extension-filtered,
- * and disabled on Linux): correctness-critical commits go through the before-agent-patch
- * boundary and the agent turn-end whole-tree reconcile instead (workspace-git.ts).
+ * This is still a debounced, best-effort net (and disabled on Linux, where the watcher
+ * is off): correctness-critical commits also go through the before-agent-patch boundary
+ * and the agent turn-end whole-tree reconcile (workspace-git.ts).
  */
 
 /** Idle window after the last dirty path before the batch is committed. */

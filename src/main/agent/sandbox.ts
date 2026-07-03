@@ -44,7 +44,7 @@ function resolveRgPath(): string {
   return bundledRgPath
 }
 
-interface SandboxConfig extends SandboxRuntimeConfig {
+export interface SandboxConfig extends SandboxRuntimeConfig {
   enabled?: boolean
   // Set when the global sandbox.json requests allow-all network via
   // allowedDomains: ["*"]. The runtime can't express a broad wildcard in its
@@ -164,14 +164,25 @@ export function loadSandboxConfig(
   return merged
 }
 
-export function createSandboxedBashOps(): BashOperations {
+export function createSandboxedBashOps(scopeKey?: string): BashOperations {
   return {
     async exec(command, cwd, { onData, signal, timeout }) {
       if (!existsSync(cwd)) {
         throw new Error(`Working directory does not exist: ${cwd}`)
       }
 
-      const wrappedCommand = await SandboxManager.wrapWithSandbox(command)
+      // Scope the filesystem profile to this session's registered config at
+      // wrap time — wrapWithSandbox's per-command customConfig replaces the
+      // global filesystem section wholesale, so each session writes only
+      // inside its own workspace even when sessions for other workspaces are
+      // live. Scope-less callers (e.g. subagent bash ops) fall back to the
+      // global union config, which covers every active workspace.
+      const scoped = scopeKey !== undefined ? scopeConfigs.get(scopeKey) : undefined
+      const wrappedCommand = await SandboxManager.wrapWithSandbox(
+        command,
+        undefined,
+        scoped?.filesystem ? { filesystem: scoped.filesystem } : undefined
+      )
 
       return new Promise((resolve, reject) => {
         const child = spawn('bash', ['-c', wrappedCommand], {
@@ -233,9 +244,84 @@ export function createSandboxedBashOps(): BashOperations {
   }
 }
 
-let sandboxInitialized = false
+// ---- Sandbox lifecycle ------------------------------------------------------
+//
+// SandboxManager is process-global and its initialize() is first-caller-wins:
+// once the network proxy is up, later initialize() calls await the existing
+// promise and return WITHOUT applying their config. Foreground chat sessions,
+// new conversations and background scheduled tasks — possibly for different
+// workspaces — all initialize the sandbox concurrently, so with naive global
+// init the second workspace's vault dir never lands in allowWrite (its bash
+// writes get denied) and a blanket reset tears the proxy down under another
+// session's in-flight commands.
+//
+// Fix — a hybrid of options (a) and (b), both of which the runtime supports:
+// - Per-scope filesystem isolation (a): wrapWithSandbox() accepts a
+//   per-command customConfig whose filesystem section replaces the global one
+//   at profile-generation time. Each session registers its workspace-scoped
+//   config under a scope key ("chat:<conversationId>" / "task:<runId>") and
+//   its bash ops pass that config on every command, so a session can only
+//   write inside its own workspace regardless of what else is running.
+// - Reference-counted shared manager (b): the global manager (network proxy +
+//   fallback filesystem config for scope-less callers such as subagent bash
+//   ops) is initialized once and kept in sync with the UNION of all
+//   registered scopes' allowWrite via updateConfig(). resetSandbox(scopeKey)
+//   releases one scope; the proxy is only torn down when no scope remains, so
+//   a chat reset can no longer kill the sandbox under a running scheduled task.
+//
+// All lifecycle transitions are serialized through a promise queue so
+// concurrent session creation/teardown cannot interleave manager calls.
 
-export async function initializeSandbox(config: SandboxConfig): Promise<boolean> {
+let sandboxInitialized = false
+const scopeConfigs = new Map<string, SandboxConfig>()
+let lifecycleQueue: Promise<unknown> = Promise.resolve()
+
+// Scope used by legacy callers that don't pass a scope key.
+const DEFAULT_SCOPE = '__default__'
+
+function runSerialized<T>(op: () => Promise<T>): Promise<T> {
+  const next = lifecycleQueue.then(op, op)
+  lifecycleQueue = next.then(
+    () => undefined,
+    () => undefined
+  )
+  return next
+}
+
+function toRuntimeConfig(config: SandboxConfig): SandboxRuntimeConfig {
+  const configExt = config as unknown as {
+    ignoreViolations?: Record<string, string[]>
+    enableWeakerNestedSandbox?: boolean
+  }
+  return {
+    network: config.network,
+    filesystem: config.filesystem,
+    ripgrep: { command: resolveRgPath() },
+    ignoreViolations: configExt.ignoreViolations,
+    enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox
+  }
+}
+
+// Union of all registered scopes. Only allowWrite varies between scopes (it
+// carries the per-workspace vault dir); network and deny lists come from the
+// same defaults + global sandbox.json, so the most recent registration serves
+// as the base.
+function buildUnionConfig(): SandboxConfig {
+  const configs = [...scopeConfigs.values()]
+  const base = configs[configs.length - 1]
+  const allowWrite: string[] = []
+  for (const config of configs) {
+    for (const path of config.filesystem?.allowWrite ?? []) {
+      if (!allowWrite.includes(path)) allowWrite.push(path)
+    }
+  }
+  return { ...base, filesystem: { ...base.filesystem, allowWrite } }
+}
+
+export async function initializeSandbox(
+  config: SandboxConfig,
+  scopeKey: string = DEFAULT_SCOPE
+): Promise<boolean> {
   const platform = process.platform
   if (platform !== 'darwin' && platform !== 'linux') {
     console.log(`Sandbox not supported on ${platform}`)
@@ -247,49 +333,71 @@ export async function initializeSandbox(config: SandboxConfig): Promise<boolean>
     return false
   }
 
-  try {
-    const configExt = config as unknown as {
-      ignoreViolations?: Record<string, string[]>
-      enableWeakerNestedSandbox?: boolean
+  return runSerialized(async () => {
+    scopeConfigs.set(scopeKey, config)
+    try {
+      const union = buildUnionConfig()
+      if (!sandboxInitialized) {
+        // In allow-all mode, approve any host the allowlist didn't already match.
+        // deniedDomains is still checked first by the runtime, so explicit blocks win.
+        const askCallback = union.allowAllNetwork ? async () => true : undefined
+
+        await SandboxManager.initialize(toRuntimeConfig(union), askCallback)
+
+        sandboxInitialized = true
+        const networkDesc = union.allowAllNetwork
+          ? 'all domains (allow-all)'
+          : `${union.network?.allowedDomains?.length ?? 0} allowed domains`
+        const writeCount = union.filesystem?.allowWrite?.length ?? 0
+        console.log(`Sandbox initialized: ${networkDesc}, ${writeCount} write paths`)
+      } else {
+        // Manager already live: initialize() would silently no-op, so push the
+        // widened union through updateConfig instead. No-op when unchanged so
+        // repeated init for the same workspace set costs nothing.
+        const next = toRuntimeConfig(union)
+        if (JSON.stringify(SandboxManager.getConfig()) !== JSON.stringify(next)) {
+          SandboxManager.updateConfig(next)
+          const writeCount = union.filesystem?.allowWrite?.length ?? 0
+          console.log(`Sandbox config updated: ${writeCount} write paths`)
+        }
+      }
+      return true
+    } catch (err) {
+      scopeConfigs.delete(scopeKey)
+      console.error(`Sandbox initialization failed: ${err instanceof Error ? err.message : err}`)
+      return false
     }
-
-    // In allow-all mode, approve any host the allowlist didn't already match.
-    // deniedDomains is still checked first by the runtime, so explicit blocks win.
-    const askCallback = config.allowAllNetwork ? async () => true : undefined
-
-    await SandboxManager.initialize(
-      {
-        network: config.network,
-        filesystem: config.filesystem,
-        ripgrep: { command: resolveRgPath() },
-        ignoreViolations: configExt.ignoreViolations,
-        enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox
-      },
-      askCallback
-    )
-
-    sandboxInitialized = true
-    const networkDesc = config.allowAllNetwork
-      ? 'all domains (allow-all)'
-      : `${config.network?.allowedDomains?.length ?? 0} allowed domains`
-    const writeCount = config.filesystem?.allowWrite?.length ?? 0
-    console.log(`Sandbox initialized: ${networkDesc}, ${writeCount} write paths`)
-    return true
-  } catch (err) {
-    console.error(`Sandbox initialization failed: ${err instanceof Error ? err.message : err}`)
-    return false
-  }
+  })
 }
 
-export async function resetSandbox(): Promise<void> {
-  if (sandboxInitialized) {
+export async function resetSandbox(scopeKey?: string): Promise<void> {
+  return runSerialized(async () => {
+    if (scopeKey !== undefined) {
+      if (!scopeConfigs.delete(scopeKey)) return
+    } else {
+      // Legacy full-reset: only the default scope is ours to release. Refuse
+      // to tear down while named scopes (other sessions / scheduled tasks)
+      // are still active — their in-flight commands depend on the proxy.
+      scopeConfigs.delete(DEFAULT_SCOPE)
+      if (scopeConfigs.size > 0) {
+        console.log(`Sandbox reset deferred: ${scopeConfigs.size} active scope(s)`)
+        return
+      }
+    }
+
+    if (!sandboxInitialized) return
     try {
-      await SandboxManager.reset()
-      sandboxInitialized = false
+      if (scopeConfigs.size === 0) {
+        await SandboxManager.reset()
+        sandboxInitialized = false
+      } else {
+        // Narrow the shared union config back down for scope-less callers.
+        SandboxManager.updateConfig(toRuntimeConfig(buildUnionConfig()))
+      }
     } catch {
       // Ignore cleanup errors
     }
-  }
+  })
 }
 
 export function isSandboxInitialized(): boolean {

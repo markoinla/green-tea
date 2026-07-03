@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildFolderTree, uniqueFolderName } from './folderTree'
+import { buildFolderTree, sortDocuments, uniqueFolderName } from './folderTree'
 import type { Document, Folder } from '../../../../../main/database/types'
 
 const folder = (id: string, name: string): Folder =>
@@ -77,5 +77,35 @@ describe('uniqueFolderName', () => {
   it('dedupes within the parent only, ignoring same-named folders elsewhere', () => {
     const folders = [folder('a', 'Untitled Folder'), folder('b', 'Projects/Untitled Folder')]
     expect(uniqueFolderName(folders, 'Projects')).toBe('Projects/Untitled Folder 2')
+  })
+})
+
+describe('sortDocuments', () => {
+  const sortDoc = (id: string, title: string, created_at: string, updated_at: string): Document =>
+    ({ id, folder_id: null, title, created_at, updated_at }) as Document
+
+  const docs = [
+    sortDoc('d1', 'beta', '2026-01-02T00:00:00Z', '2026-01-05T00:00:00Z'),
+    sortDoc('d2', 'Alpha', '2026-01-03T00:00:00Z', '2026-01-04T00:00:00Z'),
+    sortDoc('d3', 'gamma', '2026-01-01T00:00:00Z', '2026-01-06T00:00:00Z')
+  ]
+
+  it('sorts by name case-insensitively in both directions', () => {
+    expect(sortDocuments(docs, 'name-asc').map((d) => d.title)).toEqual(['Alpha', 'beta', 'gamma'])
+    expect(sortDocuments(docs, 'name-desc').map((d) => d.title)).toEqual(['gamma', 'beta', 'Alpha'])
+  })
+
+  it('sorts by last modified, newest first', () => {
+    expect(sortDocuments(docs, 'modified-desc').map((d) => d.id)).toEqual(['d3', 'd1', 'd2'])
+  })
+
+  it('sorts by created, newest first', () => {
+    expect(sortDocuments(docs, 'created-desc').map((d) => d.id)).toEqual(['d2', 'd1', 'd3'])
+  })
+
+  it('does not mutate the input array', () => {
+    const input = [...docs]
+    sortDocuments(input, 'name-asc')
+    expect(input.map((d) => d.id)).toEqual(docs.map((d) => d.id))
   })
 })

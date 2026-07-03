@@ -34,8 +34,9 @@ export interface SearchStorage {
 
 const searchPluginKey = new PluginKey('searchAndReplace')
 
+// Exported for tests
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function findMatches(doc: any, searchTerm: string, caseSensitive: boolean): SearchResult[] {
+export function findMatches(doc: any, searchTerm: string, caseSensitive: boolean): SearchResult[] {
   const results: SearchResult[] = []
   if (!searchTerm) return results
 
@@ -63,6 +64,8 @@ function createDecorations(
   const decorations: Decoration[] = []
 
   results.forEach((result, i) => {
+    // Mapped results can collapse to empty ranges until the debounced re-scan runs
+    if (result.from >= result.to) return
     const className = i === currentIndex ? 'search-match search-match-current' : 'search-match'
     decorations.push(Decoration.inline(result.from, result.to, { class: className }))
   })
@@ -272,9 +275,36 @@ export const SearchAndReplace = Extension.create<object, SearchStorage>({
   addProseMirrorPlugins() {
     const extensionThis = this // eslint-disable-line @typescript-eslint/no-this-alias
 
+    // Full re-scans (doc.descendants walk) are too expensive to run on every
+    // docChanged transaction in large notes, so they are debounced: apply()
+    // cheaply maps existing decorations in the meantime, then this dispatches
+    // a meta-only transaction that triggers the real recompute in apply().
+    let recomputeTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRecompute = (): void => {
+      if (recomputeTimer !== null) clearTimeout(recomputeTimer)
+      recomputeTimer = setTimeout(() => {
+        recomputeTimer = null
+        const view = extensionThis.editor?.view
+        if (!view || view.isDestroyed) return
+        if (!extensionThis.storage.isOpen || !extensionThis.storage.searchTerm) return
+        view.dispatch(view.state.tr.setMeta(searchPluginKey, { recompute: true }))
+      }, 200)
+    }
+
     return [
       new Plugin({
         key: searchPluginKey,
+
+        view() {
+          return {
+            destroy() {
+              if (recomputeTimer !== null) {
+                clearTimeout(recomputeTimer)
+                recomputeTimer = null
+              }
+            }
+          }
+        },
 
         state: {
           init() {
@@ -285,10 +315,9 @@ export const SearchAndReplace = Extension.create<object, SearchStorage>({
             const meta = tr.getMeta(searchPluginKey)
             const storage = extensionThis.storage
 
-            if (meta?.update || tr.docChanged) {
+            if (meta?.update || meta?.recompute) {
               if (storage.isOpen && storage.searchTerm) {
-                // Re-scan on doc changes
-                if (tr.docChanged) {
+                if (meta?.recompute) {
                   const results = findMatches(tr.doc, storage.searchTerm, storage.caseSensitive)
                   storage.results = results
                   if (storage.currentIndex >= results.length) {
@@ -301,6 +330,15 @@ export const SearchAndReplace = Extension.create<object, SearchStorage>({
             }
 
             if (tr.docChanged) {
+              if (storage.isOpen && storage.searchTerm) {
+                // Keep highlights (and stored match positions) roughly in place
+                // via cheap position mapping; the accurate re-scan is debounced
+                storage.results = storage.results.map((r) => ({
+                  from: tr.mapping.map(r.from),
+                  to: tr.mapping.map(r.to, -1)
+                }))
+                scheduleRecompute()
+              }
               return oldDecorations.map(tr.mapping, tr.doc)
             }
 

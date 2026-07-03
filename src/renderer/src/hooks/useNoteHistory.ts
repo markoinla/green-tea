@@ -57,8 +57,20 @@ export function useNoteHistory(documentId: string | null): UseNoteHistoryResult 
     const unsubContent = window.api.onDocumentContentChanged((data) => {
       if (!documentId || data.id === documentId) refresh()
     })
-    const unsubDocs = window.api.onDocumentsChanged(() => refresh())
+    // documents:changed carries no payload (bare send, see preload), so we can't
+    // filter it to this note. Debounce instead: each refresh spawns a git
+    // subprocess, and structural bursts elsewhere in the workspace would
+    // otherwise fan out into one subprocess per event.
+    let docsDebounce: ReturnType<typeof setTimeout> | null = null
+    const unsubDocs = window.api.onDocumentsChanged(() => {
+      if (docsDebounce) clearTimeout(docsDebounce)
+      docsDebounce = setTimeout(() => {
+        docsDebounce = null
+        refresh()
+      }, 500)
+    })
     return () => {
+      if (docsDebounce) clearTimeout(docsDebounce)
       unsubContent()
       unsubDocs()
     }

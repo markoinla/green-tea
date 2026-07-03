@@ -1254,6 +1254,13 @@ export function reindexWorkspace(db: Database.Database, workspaceId: string): vo
  * This is the folder-level counterpart to deleteIndexRowByPath: the recursive
  * watcher reports a directory removal as a single event (with no per-file deletes
  * to rely on), so without this the folder lingers in the tree as a stale row.
+ *
+ * A missing directory is NOT proof its notes are gone — a Finder rename/move
+ * surfaces as the old path vanishing while the files live on under the new name.
+ * So a doc row is dropped only when its own file_path is genuinely absent from
+ * disk; a row already re-pointed at a surviving file (by a per-file reindex that
+ * won the race) is kept, and its stale folder row is left for reindexWorkspace
+ * to reconcile rather than dangling the doc's folder_id.
  */
 export function pruneMissingFolders(db: Database.Database, workspaceId: string): boolean {
   const vaultDir = getWorkspaceVaultDir(db, workspaceId).normalize('NFC')
@@ -1268,15 +1275,55 @@ export function pruneMissingFolders(db: Database.Database, workspaceId: string):
   let changed = false
   for (const folder of folderRows) {
     if (existsSync(join(vaultDir, folderSubdir(folder.name)))) continue
-    // The directory (and everything in it) is gone — drop its indexed docs too.
-    const docs = db.prepare('SELECT id FROM documents WHERE folder_id = ?').all(folder.id) as {
-      id: string
-    }[]
-    for (const doc of docs) deleteIndexRow(db, doc.id)
-    db.prepare('DELETE FROM folders WHERE id = ?').run(folder.id)
-    changed = true
+    // The directory is gone — drop the indexed docs whose files are truly gone.
+    const docs = db
+      .prepare('SELECT id, file_path FROM documents WHERE folder_id = ?')
+      .all(folder.id) as { id: string; file_path: string | null }[]
+    let survivors = 0
+    for (const doc of docs) {
+      if (doc.file_path && existsSync(doc.file_path)) {
+        survivors++
+        continue
+      }
+      deleteIndexRow(db, doc.id)
+      changed = true
+    }
+    if (survivors === 0) {
+      db.prepare('DELETE FROM folders WHERE id = ?').run(folder.id)
+      changed = true
+    }
   }
   return changed
+}
+
+/**
+ * True when the index has anything — a document or a folder row — at or under
+ * `absPathRaw` (an NFC-normalized absolute path). Lets the vault watcher tell
+ * "a directory we index vanished" (a folder delete OR rename/move, worth a
+ * workspace reindex) apart from a stray non-indexed file's deletion, which must
+ * not trigger one.
+ */
+export function indexHasEntriesUnder(
+  db: Database.Database,
+  workspaceId: string,
+  absPathRaw: string
+): boolean {
+  const abs = absPathRaw.normalize('NFC')
+  const prefix = abs + sep
+  const doc = db
+    .prepare(
+      'SELECT 1 FROM documents WHERE workspace_id = ? AND (file_path = ? OR substr(file_path, 1, ?) = ?) LIMIT 1'
+    )
+    .get(workspaceId, abs, prefix.length, prefix)
+  if (doc) return true
+  const vaultDir = getWorkspaceVaultDir(db, workspaceId).normalize('NFC')
+  const folders = db
+    .prepare('SELECT name FROM folders WHERE workspace_id = ?')
+    .all(workspaceId) as { name: string }[]
+  return folders.some((f) => {
+    const dir = join(vaultDir, folderSubdir(f.name)).normalize('NFC')
+    return dir === abs || dir.startsWith(prefix)
+  })
 }
 
 /**

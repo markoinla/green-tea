@@ -43,6 +43,10 @@ export function useDocument(id: string | null, isActive = true): UseDocumentResu
   const deferredConflictRef = useRef<Conflict | null>(null)
   const isActiveRef = useRef(isActive)
   isActiveRef.current = isActive
+  // Monotonic request id for resolveConflict's get() — it fires from an event
+  // handler (not an effect), so it can't share the effect-scoped guards. Bumped
+  // on issue and on effect cleanup (unmount / id change) to drop stale results.
+  const reloadReqRef = useRef(0)
 
   useEffect(() => {
     if (!id) {
@@ -50,8 +54,17 @@ export function useDocument(id: string | null, isActive = true): UseDocumentResu
       return
     }
 
+    // Currency guards: `cancelled` drops resolutions after unmount / id change;
+    // the per-handler request ids drop out-of-order resolutions (two rapid
+    // external changes must never leave the OLDER disk content in
+    // externalContentRef after the version bump).
+    let cancelled = false
+    let contentReq = 0
+    let structuralReq = 0
+
     setLoading(true)
     window.api.documents.get(id).then((doc) => {
+      if (cancelled) return
       setDocument(doc ?? null)
       setLoading(false)
     })
@@ -72,7 +85,11 @@ export function useDocument(id: string | null, isActive = true): UseDocumentResu
         setConflictOpen(id, true)
       }
 
+      const req = ++contentReq
       window.api.documents.get(id).then((doc) => {
+        // Only the latest external change may land: a slower, earlier get()
+        // resolving after a newer one would put stale content in the ref.
+        if (cancelled || req !== contentReq) return
         const parsed = parseContent(doc)
         if (dirty) {
           // Keep the user's live buffer; offer the disk version via the dialog.
@@ -94,12 +111,17 @@ export function useDocument(id: string | null, isActive = true): UseDocumentResu
     // Structural changes (title, folder, workspace) — refresh metadata
     // but don't bump version (no editor remount needed).
     const unsubStructural = window.api.onDocumentsChanged(() => {
+      const req = ++structuralReq
       window.api.documents.get(id).then((doc) => {
+        if (cancelled || req !== structuralReq) return
         setDocument(doc ?? null)
       })
     })
 
     return () => {
+      cancelled = true
+      // Invalidate any in-flight resolveConflict reload for this id.
+      reloadReqRef.current++
       unsubContent()
       unsubStructural()
       // Leaving this note: clear any open-conflict bookkeeping for it.
@@ -128,7 +150,11 @@ export function useDocument(id: string | null, isActive = true): UseDocumentResu
         cancelPending(id) // belt-and-suspenders; conflict-open already cancelled it
         externalContentRef.current = c?.externalContent ?? null
         setExternalContentVersion((v) => v + 1) // OutlinerEditor applies in place
-        window.api.documents.get(id).then((doc) => setDocument(doc ?? null))
+        const req = ++reloadReqRef.current
+        window.api.documents.get(id).then((doc) => {
+          if (req !== reloadReqRef.current) return
+          setDocument(doc ?? null)
+        })
       }
       // 'keepMine': dismiss. The next keystroke re-arms autosave, which on flush
       // overwrites disk with the user's version (intended — never auto-merge).

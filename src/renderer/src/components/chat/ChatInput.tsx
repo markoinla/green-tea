@@ -32,6 +32,7 @@ interface ChatInputProps {
 
 export interface ChatInputHandle {
   focus: () => void
+  setText: (text: string) => void
 }
 
 export type { ImageAttachment, FileAttachment } from './chat-input-types'
@@ -90,7 +91,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   useImperativeHandle(
     ref,
     () => ({
-      focus: () => editor?.commands.focus()
+      focus: () => editor?.commands.focus(),
+      setText: (text: string) => {
+        editor?.chain().focus().clearContent().insertContent(text).run()
+      }
     }),
     [editor]
   )
@@ -117,7 +121,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       finalMessage = pastedText + (text ? '\n\n' + text : '')
     }
     if (selectionContext) {
-      finalMessage = `> [Selected text]\n> "${selectionContext}"\n\n${text}`
+      finalMessage = `> [Selected text]\n> "${selectionContext}"\n\n${finalMessage}`
       onClearSelection?.()
     }
 

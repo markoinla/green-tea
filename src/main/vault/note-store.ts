@@ -6,6 +6,7 @@ import {
   readFileSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync
 } from 'fs'
 import { basename, dirname, join, relative, sep } from 'path'
@@ -210,8 +211,19 @@ export function atomicWriteFile(filePath: string, contents: string): void {
   const dir = dirname(filePath)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const tmp = join(dir, `.${basename(filePath)}.tmp-${randomUUID()}`)
-  writeFileSync(tmp, contents, 'utf-8')
-  renameSync(tmp, filePath)
+  try {
+    writeFileSync(tmp, contents, 'utf-8')
+    renameSync(tmp, filePath)
+  } catch (err) {
+    // A failed write (ENOSPC) or rename must not orphan the temp dotfile — the
+    // watcher and listVaultNotes ignore dotfiles, so it would linger forever.
+    try {
+      unlinkSync(tmp)
+    } catch {
+      // best-effort cleanup; the original error is what matters
+    }
+    throw err
+  }
 }
 
 /**

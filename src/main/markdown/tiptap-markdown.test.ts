@@ -213,6 +213,96 @@ describe('feature fidelity', () => {
   })
 })
 
+describe('raw HTML round-trip', () => {
+  it('round-trips a block-level HTML div byte-identically', () => {
+    const md = '<div class="callout">hi & bye</div>\n'
+    expect(norm(md)).toBe(md)
+    expect(norm(norm(md))).toBe(md)
+  })
+
+  it('round-trips inline <br> inside a sentence byte-identically', () => {
+    const md = 'first line<br>second line stays raw\n'
+    expect(norm(md)).toBe(md)
+    expect(norm(norm(md))).toBe(md)
+  })
+
+  it('round-trips an HTML comment byte-identically', () => {
+    const block = '<!-- hidden reviewer note -->\n'
+    expect(norm(block)).toBe(block)
+    const inline = 'before <!-- aside --> after\n'
+    expect(norm(inline)).toBe(inline)
+  })
+
+  it('round-trips multi-line block HTML like <details>', () => {
+    const md = '<details>\n<summary>More</summary>\n\ntext\n\n</details>\n'
+    const once = norm(md)
+    expect(once).toBe(md)
+    expect(norm(once)).toBe(once)
+  })
+
+  it('flags block HTML paragraphs with the rawHtml attr', () => {
+    const doc = markdownToTiptap('<div class="callout">hi & bye</div>')
+    expect(doc.content[0].type).toBe('paragraph')
+    expect(doc.content[0].attrs?.rawHtml).toBe(true)
+    expect(doc.content[0].content?.[0].text).toBe('<div class="callout">hi & bye</div>')
+  })
+
+  it('keeps literal escaped \\<mark> and \\<u> as escaped text (not raw HTML)', () => {
+    // These re-parse into marks if emitted raw, so they must stay escaped —
+    // otherwise a second cycle would turn prose into formatting.
+    const md = 'type \\<mark> and \\<u> to format\n'
+    const once = norm(md)
+    expect(once).toBe(md)
+    expect(norm(once)).toBe(once)
+  })
+
+  it('still escapes non-HTML angle brackets', () => {
+    const once = norm('5 < 6 and a<b compares\n')
+    expect(once).toBe('5 < 6 and a\\<b compares\n')
+    expect(norm(once)).toBe(once)
+  })
+})
+
+describe('ordered list start index', () => {
+  it('round-trips a list starting at 5 byte-identically', () => {
+    const md = '5. five\n6. six\n'
+    expect(norm(md)).toBe(md)
+    expect(norm(norm(md))).toBe(md)
+  })
+
+  it('parses the start index into orderedList attrs', () => {
+    const doc = markdownToTiptap('5. five\n6. six')
+    expect(doc.content[0].type).toBe('outlinerOrderedList')
+    expect(doc.content[0].attrs?.start).toBe(5)
+  })
+
+  it('omits the attr for the default start of 1', () => {
+    const doc = markdownToTiptap('1. a\n2. b')
+    expect(doc.content[0].attrs).toBeUndefined()
+    expect(norm('1. a\n2. b')).toBe('1. a\n2. b\n')
+  })
+
+  it('serializes editor-shaped orderedList with a start attr', () => {
+    const doc: TTDoc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'outlinerOrderedList',
+          attrs: { start: 3 },
+          content: [
+            {
+              type: 'outlinerItem',
+              attrs: { blockType: 'paragraph' },
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'third' }] }]
+            }
+          ]
+        }
+      ]
+    }
+    expect(tiptapToMarkdown(doc)).toBe('3. third\n')
+  })
+})
+
 describe('tiptap doc round-trip (editor-shaped input)', () => {
   it('round-trips a doc through md and back to an equal doc', () => {
     const doc: TTDoc = markdownToTiptap(CORPUS.mixed)
