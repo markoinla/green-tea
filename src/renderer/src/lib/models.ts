@@ -63,10 +63,9 @@ export const PROVIDERS: ProviderDef[] = [
     name: 'ChatGPT (Codex)',
     description: 'Use your ChatGPT Plus/Pro subscription. Connect in Settings → Accounts.',
     models: [
-      { id: 'gpt-5.5', name: 'GPT-5.5' },
-      { id: 'gpt-5.4', name: 'GPT-5.4' },
-      { id: 'gpt-5.4-mini', name: 'GPT-5.4 mini' },
-      { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' }
+      { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+      { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+      { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' }
     ],
     keyField: null,
     modelField: 'codexModel',

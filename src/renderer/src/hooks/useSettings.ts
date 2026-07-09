@@ -36,7 +36,7 @@ const DEFAULTS: Settings = {
   anthropicModel: 'claude-sonnet-5',
   anthropicApiKey: '',
   anthropicOAuthModel: 'claude-sonnet-5',
-  codexModel: 'gpt-5.5',
+  codexModel: 'gpt-5.6-sol',
   togetherModel: 'moonshotai/Kimi-K2.5',
   togetherApiKey: '',
   openrouterModel: 'minimax/minimax-m2.1',

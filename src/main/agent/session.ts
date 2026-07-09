@@ -193,7 +193,7 @@ export function getModelConfig(
         'No ChatGPT account connected. Open Settings → Accounts to connect ChatGPT (Codex).'
       )
     }
-    const modelId = overrideModel || getSetting(db, 'codexModel') || 'gpt-5.5'
+    const modelId = overrideModel || getSetting(db, 'codexModel') || 'gpt-5.6-sol'
     model = getModel('openai-codex', modelId as Parameters<typeof getModel>[1])
   } else {
     if (!anthropicApiKey) {
