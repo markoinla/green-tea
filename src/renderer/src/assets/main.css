@@ -238,25 +238,12 @@
   pointer-events: none;
 }
 
-/* Table cell dropdown menu trigger */
+/* Table cell dropdown menu trigger.
+   Rendered into <body> and positioned over the cell that holds the selection —
+   ProseMirror strips foreign DOM appended inside a <td>/<th> on redraw. */
 .table-cell-menu-trigger {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  z-index: 10;
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
-
-.table-cell-menu-trigger:has([data-state='open']) {
-  opacity: 1;
-}
-
-.ProseMirror th:hover > .table-cell-menu-trigger,
-.ProseMirror td:hover > .table-cell-menu-trigger,
-.ProseMirror th:focus-within > .table-cell-menu-trigger,
-.ProseMirror td:focus-within > .table-cell-menu-trigger {
-  opacity: 1;
+  position: fixed;
+  z-index: 20;
 }
 
 .table-cell-menu-button {
@@ -267,8 +254,8 @@
   height: 20px;
   border-radius: 4px;
   color: var(--muted-foreground);
-  background: transparent;
-  border: none;
+  background: var(--background);
+  border: 1px solid var(--border);
   cursor: pointer;
   transition:
     color 150ms ease,
