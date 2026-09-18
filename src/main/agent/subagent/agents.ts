@@ -30,9 +30,9 @@ function getAgentsDir(db: Database.Database): string {
 
 // NOTE: seedDefaultAgents only writes these when the agents dir is EMPTY, so
 // existing users' on-disk agent .md files are NOT re-seeded when this list
-// changes. Stale tool names there are harmless — the allowlist is an
-// intersection filter (session-factory.ts), so names with no matching tool are
-// simply dropped. This only affects fresh installs.
+// changes. Existing defaults already include generic file tools; stale note
+// tool names are ignored by the allowlist. The session prompt also explains
+// the filesystem workflow for agents with older instructions.
 const DEFAULT_AGENTS: Record<string, string> = {
   'explorer.md': `---
 name: explorer
@@ -45,8 +45,6 @@ tools:
   - grep
   - find
   - ls
-  - notes_list
-  - notes_get_markdown
   - web_search
   - web_fetch
 ---
@@ -70,8 +68,6 @@ tools:
   - grep
   - find
   - ls
-  - notes_list
-  - notes_get_markdown
 ---
 
 You are a planning agent. Given context (often from a scout), create a detailed implementation plan.
@@ -96,13 +92,6 @@ tools:
   - grep
   - find
   - ls
-  - notes_list
-  - notes_get_markdown
-  - notes_create
-  - notes_propose_edit
-  - notes_update_workspace_description
-  - notes_create_folder
-  - notes_move_to_folder
   - web_search
   - web_fetch
 ---
@@ -111,7 +100,7 @@ You are a worker agent. Execute the given task using all available tools.
 
 Rules:
 - Follow instructions precisely.
-- Propose changes via notes_propose_edit when modifying existing notes.
+- Read existing files first, then use edit for targeted changes.
 - Create new notes when appropriate.
 - Report what you did when finished.`
 }

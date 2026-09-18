@@ -22,7 +22,7 @@ All data stays on your computer. Full data ownership.
 - **Skills and automation** — Extensible skill marketplace, custom skills, and scheduled tasks
 - **MCP support** — Connect to external data sources without technical setup
 - **Model-agnostic** — Use open-source models or add API keys from Anthropic, OpenAI, or OpenRouter
-- **Privacy-first** — Local SQLite database, no cloud dependency
+- **Privacy-first** — Local files with a SQLite index, no cloud dependency
 
 ## Prerequisites
 
@@ -59,7 +59,22 @@ Green Tea uses a three-process Electron architecture:
 - **Preload** (`src/preload/`) — Context bridge exposing typed IPC methods
 - **Renderer** (`src/renderer/src/`) — React 19 + Tailwind CSS 4 UI with TipTap editor
 
-Data flows through custom hooks that call `window.api.*` IPC methods. The main process handles database operations and broadcasts change events back for reactive updates.
+Workspace documents are ordinary files: Markdown notes with YAML frontmatter, alongside
+artifacts and attachments. Files are the source of truth; SQLite provides the document,
+metadata, and search indexes. The vault watcher picks up changes from the agent or other
+editors and broadcasts them to the UI.
+
+The agent uses read/edit/write and filesystem search tools for local note work, with bash
+for scripts and bulk operations. Notes referenced in chat are supplied as file paths.
+`README.md` holds workspace context and `MEMORY.md` holds persistent agent memory.
+Keep each note's frontmatter `id` unchanged when moving or renaming it; new notes should
+have a fresh UUID. File edits apply directly, and the former Auto/Review toggle is removed.
+Workspace checkpoints capture the on-disk state before agent turns; existing history and
+editor conflict handling remain available.
+
+App controls still use typed `window.api.*` IPC methods. Scheduling, sharing, version-history
+queries, and external integrations retain their dedicated agent tools. Installing a skill
+preserves its filesystem instructions without an LLM rewrite.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for more details on the codebase.
 

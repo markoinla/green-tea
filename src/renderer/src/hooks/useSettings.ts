@@ -24,7 +24,6 @@ export interface Settings {
   showToolResults: boolean
   agentBaseDir: string
   reasoningMode: boolean
-  autoApproveEdits: boolean
   enabledModels: Record<string, boolean>
   /** Document sort order in the sidebar file tree (folders always sort A→Z). */
   sidebarSort: SidebarDocSort
@@ -46,7 +45,6 @@ const DEFAULTS: Settings = {
   showToolResults: false,
   agentBaseDir: '~/Documents/Green Tea',
   reasoningMode: false,
-  autoApproveEdits: true,
   enabledModels: {},
   // Matches the pre-setting behavior (documents arrive updated_at DESC from the DB).
   sidebarSort: 'modified-desc'
@@ -74,7 +72,6 @@ export function useSettings() {
       showToolResults: all.showToolResults === 'true',
       agentBaseDir: all.agentBaseDir || DEFAULTS.agentBaseDir,
       reasoningMode: all.reasoningMode === 'true',
-      autoApproveEdits: all.autoApproveEdits !== 'false',
       enabledModels: all.enabledModels ? JSON.parse(all.enabledModels) : DEFAULTS.enabledModels,
       sidebarSort: (all.sidebarSort as SidebarDocSort) || DEFAULTS.sidebarSort
     })

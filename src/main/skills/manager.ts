@@ -1,19 +1,9 @@
 import type Database from 'better-sqlite3'
 import { app } from 'electron'
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync
-} from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { loadSkillsFromDir, type Skill } from '@earendil-works/pi-coding-agent'
 import { downloadSkillFromGitHub } from './github'
-import { adaptSkillForGreenTea } from './adapt'
 import { getSettingsDir } from '../agent/paths'
 import {
   parseRegistryItemId,
@@ -21,26 +11,6 @@ import {
   writeRegistryFile,
   writeRegistryProvenance
 } from '../registry/install-files'
-
-/**
- * Restore .original backup files created during adaptation.
- * If adaptation corrupted a file, this reverts it to the pre-adaptation state.
- */
-function restoreOriginals(skillDir: string): void {
-  if (!existsSync(skillDir)) return
-  const restore = (dir: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const fullPath = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        restore(fullPath)
-      } else if (entry.name.endsWith('.original')) {
-        const target = fullPath.slice(0, -'.original'.length)
-        renameSync(fullPath, target)
-      }
-    }
-  }
-  restore(skillDir)
-}
 
 export function getSkillsDir(db: Database.Database): string {
   const dir = join(getSettingsDir(db), 'skills')
@@ -110,27 +80,9 @@ export async function installSkillFromUrl(db: Database.Database, url: string): P
 
   const skillName = await downloadSkillFromGitHub(url, dir)
 
-  // Skip adaptation for marketplace skills — they're already built for Green Tea
-  const isMarketplace = url.includes('markoinla/green-tea')
-  if (!isMarketplace) {
-    try {
-      await adaptSkillForGreenTea(db, join(dir, skillName))
-    } catch {
-      // Adaptation failed — restore .original files if they exist so the skill can still load
-      restoreOriginals(join(dir, skillName))
-    }
-  }
-
-  // Validate by loading
-  let { skills } = loadSkillsFromDir({ dir, source: 'user' })
-  let installed = skills.find((s) => s.name === skillName || s.baseDir.endsWith(skillName))
-
-  // If adaptation broke the skill, restore originals and retry
-  if (!installed && !isMarketplace) {
-    restoreOriginals(join(dir, skillName))
-    ;({ skills } = loadSkillsFromDir({ dir, source: 'user' }))
-    installed = skills.find((s) => s.name === skillName || s.baseDir.endsWith(skillName))
-  }
+  // Preserve skill instructions: documents are ordinary workspace files.
+  const { skills } = loadSkillsFromDir({ dir, source: 'user' })
+  const installed = skills.find((s) => s.name === skillName || s.baseDir.endsWith(skillName))
 
   if (!installed) {
     // Clean up on failure
@@ -147,11 +99,9 @@ export async function installSkillFromUrl(db: Database.Database, url: string): P
 }
 
 /**
- * Install a skill from already-downloaded community-registry files. Unlike
- * `installSkillFromUrl` this NEVER runs the LLM adaptation step — community
- * skills are authored in/for Green Tea (mirroring the marketplace bypass) —
- * and it validates by loading with `loadSkillsFromDir`, cleaning up the dir on
- * failure, the same shape as the URL installer.
+ * Install a skill from already-downloaded community-registry files. Like the
+ * URL installer, preserve the files and validate with `loadSkillsFromDir`,
+ * cleaning up the directory on failure.
  *
  * The install dir is namespaced `<handle>--<slug>`; the skill's IDENTITY stays
  * its frontmatter `name` (publish-time validation pins slug === name), which is

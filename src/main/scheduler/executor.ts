@@ -32,6 +32,7 @@ import {
   isSandboxInitialized
 } from '../agent/sandbox'
 import { buildSystemPrompt } from '../agent/system-prompt'
+import { commitWorkspaceAll, commitAgentTurn } from '../git/workspace-git'
 
 function notifyBackground(
   window: BrowserWindow,
@@ -81,7 +82,7 @@ export async function executeScheduledTask(
     })
     const reasoningMode = getSetting(db, 'reasoningMode') === 'true'
 
-    const customTools = createNotesTools(db, window, task.workspace_id, true)
+    const customTools = createNotesTools(db, window, task.workspace_id)
 
     const agentWorkDir = getAgentWorkDir(db, task.workspace_id)
     mkdirSync(agentWorkDir, { recursive: true })
@@ -158,7 +159,14 @@ export async function executeScheduledTask(
       }
     }
 
-    await session.prompt(fullPrompt)
+    await commitWorkspaceAll(db, task.workspace_id, 'checkpoint: before scheduled task')
+    try {
+      await session.prompt(fullPrompt)
+    } finally {
+      await commitAgentTurn(db, task.workspace_id).catch((err) =>
+        console.error('[git] scheduled task commit failed', task.id, err)
+      )
+    }
 
     const finishedAt = new Date().toISOString()
 

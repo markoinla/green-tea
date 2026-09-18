@@ -10,7 +10,8 @@ import type { BrowserWindow } from 'electron'
 import { createTestDb } from '../database/__test__/setup'
 
 const h = vi.hoisted(() => ({
-  createAgentSession: vi.fn()
+  createAgentSession: vi.fn(),
+  commitWorkspaceAll: vi.fn(async () => null)
 }))
 
 vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
@@ -71,10 +72,13 @@ vi.mock('../plugins/skills', () => ({
 }))
 vi.mock('../git/workspace-git', () => ({
   commitDocumentPreImage: async (): Promise<void> => {},
+  commitWorkspaceAll: h.commitWorkspaceAll,
   commitAgentTurn: async (): Promise<void> => {}
 }))
 
 import { promptAgent, abortAgent, resetSession } from './session'
+import { createDocument } from '../vault/documents-service'
+import { createWorkspace } from '../database/repositories/workspaces'
 
 type SentEvent = { type: string; conversationId: string }
 
@@ -100,7 +104,7 @@ function makeFakeSession(): {
 } {
   return {
     subscribe: vi.fn(),
-    prompt: vi.fn(async () => {}),
+    prompt: vi.fn<(message: string) => Promise<void>>(async () => {}),
     dispose: vi.fn(),
     abort: vi.fn(),
     getSessionStats: () => ({ tokens: { input: 0, output: 0, total: 0 } })
@@ -112,6 +116,7 @@ let db: Database.Database
 beforeEach(() => {
   db = createTestDb()
   h.createAgentSession.mockReset()
+  h.commitWorkspaceAll.mockClear()
 })
 
 afterEach(async () => {
@@ -203,5 +208,31 @@ describe('abortAgent delayed agent_end safety net', () => {
     await vi.advanceTimersByTimeAsync(600)
 
     expect(sent.filter((e) => e.type === 'agent_end')).toHaveLength(1)
+  })
+})
+
+describe('filesystem document context', () => {
+  it('supplies file paths for the viewed note and mentioned notes', async () => {
+    const workspace = createWorkspace(db, { name: 'Context' })
+    const viewed = createDocument(db, { title: 'Viewed', workspace_id: workspace.id })
+    const mentioned = createDocument(db, { title: 'Mentioned', workspace_id: workspace.id })
+    const fake = makeFakeSession()
+    h.createAgentSession.mockResolvedValue({ session: fake })
+    const { window } = makeWindow()
+    await promptAgent(db, window, 'Compare these', 'conv-files', viewed.id, workspace.id, [
+      { id: mentioned.id, title: mentioned.title }
+    ])
+    const prompt = fake.prompt.mock.calls[0][0] as string
+    expect(prompt).toContain(viewed.file_path)
+    expect(prompt).toContain(mentioned.file_path)
+    expect(prompt).not.toContain('notes_get_markdown')
+    expect(h.commitWorkspaceAll).toHaveBeenCalledWith(
+      db,
+      workspace.id,
+      'checkpoint: before agent turn'
+    )
+    expect(h.commitWorkspaceAll.mock.invocationCallOrder[0]).toBeLessThan(
+      fake.prompt.mock.invocationCallOrder[0]
+    )
   })
 })

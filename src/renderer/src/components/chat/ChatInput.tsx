@@ -26,8 +26,6 @@ interface ChatInputProps {
   onClearSelection?: () => void
   reasoningMode?: boolean
   onToggleReasoning?: () => void
-  autoApproveEdits?: boolean
-  onToggleAutoApprove?: () => void
 }
 
 export interface ChatInputHandle {
@@ -47,9 +45,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     selectionContext,
     onClearSelection,
     reasoningMode = false,
-    onToggleReasoning,
-    autoApproveEdits = true,
-    onToggleAutoApprove
+    onToggleReasoning
   },
   ref
 ) {
@@ -235,7 +231,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         disabled={disabled}
         showSlashCommands={showSlashCommands}
         reasoningMode={reasoningMode}
-        autoApproveEdits={autoApproveEdits}
         totalAttachments={totalAttachments}
         canSend={canSend}
         speechError={speechError}
@@ -246,7 +241,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           void handleFilePick()
         }}
         onToggleReasoning={onToggleReasoning}
-        onToggleAutoApprove={onToggleAutoApprove}
         onMicToggle={handleMicToggle}
         onSend={handleSend}
       />
