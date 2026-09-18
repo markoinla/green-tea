@@ -484,10 +484,6 @@ export function RightSidebar({
                   window.api.agent.resetSession(activeConversationId)
                 }
               }}
-              autoApproveEdits={settings.autoApproveEdits}
-              onToggleAutoApprove={() => {
-                updateSetting('autoApproveEdits', !settings.autoApproveEdits)
-              }}
             />
           </div>
         </SidebarFooter>

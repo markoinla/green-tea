@@ -14,7 +14,7 @@ import { getBuiltinModel as getModel } from '@earendil-works/pi-ai/providers/all
 import type { AgentConfig } from './agents'
 import { createNotesTools } from '../tools/notes-tools'
 import { getSetting } from '../../database/repositories/settings'
-import { getAgentBaseDir, getAgentWorkDir } from '../paths'
+import { getAgentBaseDir, getAgentWorkDir, getWorkspaceDir } from '../paths'
 import { createSandboxedBashOps, isSandboxInitialized } from '../sandbox'
 import { safeSend } from '../../util/safe-send'
 
@@ -256,7 +256,7 @@ export async function createSubagentSession(
 
   // Build tool set based on agent's allowed tools
   const agentWorkDir = getAgentWorkDir(db, workspaceId)
-  const allNotesTools = createNotesTools(db, window, workspaceId, undefined, conversationId)
+  const allNotesTools = createNotesTools(db, window, workspaceId, conversationId)
 
   // Sandboxed bash shares the built-in tool name 'bash', so the session registry uses
   // it in place of the built-in bash (custom tools override built-ins by name).
@@ -279,7 +279,7 @@ export async function createSubagentSession(
   const systemPromptParts = [
     `You are a specialized sub-agent called "${agentConfig.name}".`,
     agentConfig.systemPrompt,
-    `Your working directory is ${agentWorkDir}. All file operations must happen inside this directory.`
+    `Your scratch working directory is ${agentWorkDir}. The user's workspace is ${getWorkspaceDir(db, workspaceId)}. Read, search, and edit notes as files in the workspace using absolute paths. Deliverables belong in the workspace, not scratch. Preserve frontmatter ids and metadata; give new notes a fresh UUID id. Local file edits apply directly. Legacy notes_* content tools are unavailable; use read, grep, find, ls, edit, write, and bash as allowed by your tool list.`
   ]
 
   const resourceLoader = new DefaultResourceLoader({

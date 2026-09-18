@@ -1,15 +1,4 @@
-import {
-  ArrowUp,
-  AtSign,
-  Paperclip,
-  Sparkles,
-  Brain,
-  Zap,
-  Check,
-  Eye,
-  Mic,
-  Loader2
-} from 'lucide-react'
+import { ArrowUp, AtSign, Paperclip, Sparkles, Brain, Zap, Mic, Loader2 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { MAX_ATTACHMENTS } from './chat-input-constants'
 
@@ -17,7 +6,6 @@ interface ChatInputToolbarProps {
   disabled: boolean
   showSlashCommands: boolean
   reasoningMode: boolean
-  autoApproveEdits: boolean
   totalAttachments: number
   canSend: boolean
   speechError: string | null
@@ -26,7 +14,6 @@ interface ChatInputToolbarProps {
   onSkillTrigger: () => void
   onFilePick: () => void
   onToggleReasoning?: () => void
-  onToggleAutoApprove?: () => void
   onMicToggle: () => void
   onSend: () => void
 }
@@ -35,7 +22,6 @@ export function ChatInputToolbar({
   disabled,
   showSlashCommands,
   reasoningMode,
-  autoApproveEdits,
   totalAttachments,
   canSend,
   speechError,
@@ -44,7 +30,6 @@ export function ChatInputToolbar({
   onSkillTrigger,
   onFilePick,
   onToggleReasoning,
-  onToggleAutoApprove,
   onMicToggle,
   onSend
 }: ChatInputToolbarProps) {
@@ -98,25 +83,6 @@ export function ChatInputToolbar({
         >
           {reasoningMode ? <Brain className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
           <span className="text-[10px] font-medium">{reasoningMode ? 'Think' : 'Fast'}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onToggleAutoApprove}
-          disabled={disabled}
-          className={cn(
-            'h-7 rounded-lg flex items-center justify-center gap-1 px-1.5 transition-colors disabled:opacity-50 disabled:pointer-events-none',
-            autoApproveEdits
-              ? 'text-primary bg-primary/10 hover:bg-primary/15'
-              : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-background/50'
-          )}
-          title={
-            autoApproveEdits
-              ? 'Auto-approve edits (click for manual review)'
-              : 'Manual review (click for auto-approve)'
-          }
-        >
-          {autoApproveEdits ? <Check className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          <span className="text-[10px] font-medium">{autoApproveEdits ? 'Auto' : 'Review'}</span>
         </button>
       </div>
       <div className="flex items-center gap-1.5 ml-auto">

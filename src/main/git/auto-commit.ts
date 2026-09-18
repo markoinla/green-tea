@@ -14,8 +14,8 @@ import { commitPaths, APP_IDENTITY } from './git-service'
  * ordinary in-app edits land in version history alongside external edits and agent
  * patches. This is loop-safe for the same reason (commits touch only `.git/`).
  *
- * This is still a debounced, best-effort net (and disabled on Linux, where the watcher
- * is off): correctness-critical commits also go through the before-agent-patch boundary
+ * This is still a debounced, best-effort net: correctness-critical commits also
+ * go through the before-agent-patch boundary
  * and the agent turn-end whole-tree reconcile (workspace-git.ts).
  */
 

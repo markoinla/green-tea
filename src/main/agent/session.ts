@@ -32,7 +32,7 @@ import { getSetting } from '../database/repositories/settings'
 import { getSkillsDir } from '../skills/manager'
 import { loadPluginSkills, pluginSkillId } from '../plugins/skills'
 import { getAgentBaseDir, getAgentWorkDir, getWorkspaceDir } from './paths'
-import { commitDocumentPreImage, commitAgentTurn } from '../git/workspace-git'
+import { commitDocumentPreImage, commitAgentTurn, commitWorkspaceAll } from '../git/workspace-git'
 import { buildSystemPrompt } from './system-prompt'
 import { getMcpManager } from '../mcp'
 import { getEnabledServices } from '../google'
@@ -380,7 +380,7 @@ export async function createNotesAgentSession(
     .getServerStatuses()
     .filter((s) => s.status === 'connected')
     .map((s) => s.name)
-  const customTools = createNotesTools(db, window, workspaceId, undefined, conversationId)
+  const customTools = createNotesTools(db, window, workspaceId, conversationId)
 
   // Scope agent working directory per workspace
   const agentWorkDir = getAgentWorkDir(db, workspaceId)
@@ -533,11 +533,8 @@ export async function createNotesAgentSession(
           // stats may not be available yet
         }
         window.webContents.send('agent:event', { type: 'agent_end', conversationId, tokens })
-        // Turn-end safety net (§4.5 / MUST-FIX): the agent's built-in write/edit
-        // tools stay active inside the workspace vault dir, so a note can be
-        // rewritten with no propose_edit (and thus no before-patch commit). Commit
-        // any such residual changes at turn end so they remain revertible. Whole-
-        // tree reconcile (not the lossy watcher dirty set); a no-op when clean.
+        // Capture generic file-tool changes at turn end. Reconcile the whole
+        // workspace rather than relying on the watcher's debounced dirty set.
         if (workspaceId) {
           commitAgentTurn(db, workspaceId).catch((err) =>
             console.error('[git] agent turn-end commit failed for workspace', workspaceId, err)
@@ -661,16 +658,12 @@ async function promptAgentInner(
     }
   }
 
-  // Add currently viewed document context. Notes are addressed by id (the agent
-  // reads/edits them via the notes_* tools); artifacts (html/csv/pdf/image) are
-  // real files the agent acts on with read/edit/bash, so hand it the on-disk path
-  // and kind — otherwise it can't map "the file I'm looking at" to anything.
+  // Give the agent disk paths for notes and artifacts alike.
   if (documentId) {
     const doc = getDocument(db, documentId)
     if (doc) {
-      const isNote = !doc.kind || doc.kind === 'note'
-      if (!isNote && doc.file_path) {
-        fullPrompt = `[Context: Currently viewing the ${doc.kind} file "${doc.title}" at path: ${doc.file_path} — use the read/edit/bash tools on this path to inspect or modify it.]\n\n${fullPrompt}`
+      if (doc.file_path) {
+        fullPrompt = `[Context: Currently viewing the ${doc.kind || 'note'} file "${doc.title}" at path: ${doc.file_path} — use the read/edit/bash tools on this path to inspect or modify it.]\n\n${fullPrompt}`
       } else {
         fullPrompt = `[Context: Currently viewing document "${doc.title}" (id: ${documentId})]\n\n${fullPrompt}`
       }
@@ -683,8 +676,15 @@ async function promptAgentInner(
     const fileRefs = references.filter((r) => r.id.startsWith('file:'))
 
     if (docRefs.length > 0) {
-      const refList = docRefs.map((r) => `"${r.title}" (id: ${r.id})`).join(', ')
-      fullPrompt = `[The user referenced these notes: ${refList}. Use notes_get_markdown to read them if needed.]\n\n${fullPrompt}`
+      const refList = docRefs
+        .map((r) => {
+          const doc = getDocument(db, r.id)
+          return doc?.file_path
+            ? `"${doc.title}" at path: ${doc.file_path}`
+            : `"${r.title}" (file unavailable)`
+        })
+        .join(', ')
+      fullPrompt = `[The user referenced these notes: ${refList}. Use the read tool on these paths if needed.]\n\n${fullPrompt}`
     }
 
     if (fileRefs.length > 0) {
@@ -710,6 +710,8 @@ async function promptAgentInner(
       data: img.data,
       mimeType: img.mimeType
     }))
+    // Preserve the disk state before generic edit/write/bash tools can replace it.
+    if (workspaceId) await commitWorkspaceAll(db, workspaceId, 'checkpoint: before agent turn')
     await session.prompt(fullPrompt, {
       ...(promptImages?.length ? { images: promptImages } : {}),
       streamingBehavior: 'followUp'

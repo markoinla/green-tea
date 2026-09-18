@@ -280,12 +280,6 @@ function onEvent(root: string, _eventType: string, filename: string | Buffer | n
  * — safe to call on create/relocate/delete or whenever the workspace set changes.
  */
 function syncWatchers(db: Database.Database): void {
-  if (process.platform !== 'darwin' && process.platform !== 'win32') {
-    // Recursive fs.watch is only reliable on macOS/Windows. The primary build
-    // target is macOS; elsewhere the watcher is simply disabled.
-    console.info('[vault-watcher] recursive fs.watch unsupported on this platform; disabled')
-    return
-  }
   const desired = new Set(currentRoots(db))
 
   // Drop watchers whose folder is no longer a (present) workspace root.
